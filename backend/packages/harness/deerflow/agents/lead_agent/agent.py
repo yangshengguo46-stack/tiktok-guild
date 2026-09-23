@@ -497,6 +497,7 @@ def build_middlewares(
     authorization_provider=None,
     extensions=None,
     subagent_execution_capacity: int | None = None,
+    creator_agent_runtime=None,
 ):
     """Build the lead-agent middleware chain based on runtime configuration.
 
@@ -610,6 +611,11 @@ def build_middlewares(
             task_continuity_enabled=getattr(getattr(resolved_app_config, "task_continuity", None), "enabled", False) is True,
         )
     )
+
+    if creator_agent_runtime is not None:
+        from deerflow.creator_agent.runtime import middlewares_for_lead
+
+        middlewares.extend(middlewares_for_lead(resolved_app_config, model_name, creator_runtime=creator_agent_runtime))
 
     # Add summarization middleware if enabled
     summarization_middleware = _create_summarization_middleware(
@@ -1183,6 +1189,21 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         app_config=resolved_app_config,
     )
     configured_tools = raw_tools + extra_tools
+    creator_agent_runtime = None
+    if agent_name is None:
+        from deerflow.creator_agent.middleware import is_operator_surface
+
+        if is_operator_surface(cfg):
+            from deerflow.creator_agent.runtime import runtime_for_lead
+            from deerflow.creator_agent.tools import make_creator_agent_tools
+
+            creator_agent_runtime = runtime_for_lead(resolved_app_config, model_name)
+            if creator_agent_runtime is not None:
+                _append_named_tools_without_conflicts(
+                    configured_tools,
+                    make_creator_agent_tools(creator_agent_runtime.repository, creator_agent_runtime),
+                    kind="CreatorAgent",
+                )
     if non_interactive:
         configured_tools = [tool for tool in configured_tools if tool.name not in _NON_INTERACTIVE_DISABLED_TOOL_NAMES]
     authorization_candidates = [*configured_tools]
@@ -1220,6 +1241,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         user_id=resolved_user_id,
         authorization_provider=_authz_provider,
         subagent_execution_capacity=subagent_execution_capacity,
+        creator_agent_runtime=creator_agent_runtime,
     )
     system_prompt = apply_prompt_template(
         subagent_enabled=subagent_enabled,

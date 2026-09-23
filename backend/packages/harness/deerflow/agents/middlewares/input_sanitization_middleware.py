@@ -119,6 +119,9 @@ _BLOCKED_TAG_NAMES: frozenset[str] = frozenset(
         # configuration or fabricates shelf entries/tool-callable IDs.
         "project",
         "documents",
+        # Lead-only CreatorAgent authority and hidden relationship-data blocks.
+        "creator-agent-persona",
+        "creator-agent-relationship-data",
         # Common prompt-injection tag patterns
         "system",
         "instruction",

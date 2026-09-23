@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquarePlus } from "lucide-react";
+import { LayoutDashboard, MessageSquarePlus } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -58,6 +58,14 @@ export function WorkspaceHeader({ className }: { className?: string }) {
             <Link className="text-muted-foreground" href="/workspace/chats/new">
               <MessageSquarePlus size={16} />
               <span>{t.sidebar.newChat}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton isActive={pathname === "/workspace/guild"} asChild>
+            <Link className="text-muted-foreground" href="/workspace/guild">
+              <LayoutDashboard size={16} />
+              <span>{t.sidebar.guildWorkbench}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

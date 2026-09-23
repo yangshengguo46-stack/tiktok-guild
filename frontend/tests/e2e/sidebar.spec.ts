@@ -16,6 +16,35 @@ test.describe("Sidebar navigation", () => {
     await expect(sidebar.locator("a[href='/workspace/agents']")).toBeVisible();
   });
 
+  test("guild workbench follows New chat and opens an honest unavailable state", async ({
+    page,
+  }) => {
+    mockLangGraphAPI(page);
+
+    await page.goto("/workspace/chats/new");
+
+    const sidebar = page.locator("[data-sidebar='sidebar']");
+    const primaryLinks = sidebar.locator(
+      "a[href='/workspace/chats/new'], a[href='/workspace/guild']",
+    );
+    await expect(primaryLinks).toHaveCount(2, { timeout: 15_000 });
+    expect(
+      await primaryLinks.evaluateAll((links) =>
+        links.map((link) => link.getAttribute("href")),
+      ),
+    ).toEqual(["/workspace/chats/new", "/workspace/guild"]);
+
+    await sidebar.locator("a[href='/workspace/guild']").click();
+
+    await page.waitForURL("**/workspace/guild");
+    await expect(
+      page.getByRole("heading", { name: "Guild workbench" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Guild overview data is not connected yet."),
+    ).toBeVisible();
+  });
+
   test("Agents link navigates to agents page", async ({ page }) => {
     mockLangGraphAPI(page);
 

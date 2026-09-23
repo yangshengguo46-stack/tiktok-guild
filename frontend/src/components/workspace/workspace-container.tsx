@@ -23,6 +23,7 @@ import { Tooltip } from "./tooltip";
 const LINKABLE_SECTIONS: Record<string, true> = {
   agents: true,
   chats: true,
+  guild: true,
   "scheduled-tasks": true,
 };
 
@@ -140,5 +141,6 @@ function nameOfSegment(
   if (!segment) return t.common.home;
   if (segment === "workspace") return t.breadcrumb.workspace;
   if (segment === "chats") return t.breadcrumb.chats;
+  if (segment === "guild") return t.sidebar.guildWorkbench;
   return segment[0]?.toUpperCase() + segment.slice(1);
 }

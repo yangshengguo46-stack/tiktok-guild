@@ -395,6 +395,7 @@ export const enUS: Translations = {
   // Sidebar
   sidebar: {
     newChat: "New chat",
+    guildWorkbench: "Workbench",
     chats: "Chats",
     channels: "Channels",
     recentChats: "Recent chats",
@@ -402,6 +403,10 @@ export const enUS: Translations = {
     agents: "Agents",
     scheduledTasks: "Scheduled tasks",
     agentsDisabledTooltip: "Feature not enabled",
+  },
+  guildWorkbench: {
+    title: "Guild workbench",
+    overviewUnavailable: "Guild overview data is not connected yet.",
   },
   // Sidebar projects section
   projects: {

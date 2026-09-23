@@ -369,6 +369,7 @@ export const zhCN: Translations = {
   // Sidebar
   sidebar: {
     newChat: "新对话",
+    guildWorkbench: "工作台",
     chats: "对话",
     channels: "渠道",
     recentChats: "最近的对话",
@@ -376,6 +377,10 @@ export const zhCN: Translations = {
     agents: "智能体",
     scheduledTasks: "定时任务",
     agentsDisabledTooltip: "功能未启用",
+  },
+  guildWorkbench: {
+    title: "公会工作台",
+    overviewUnavailable: "公会概览数据尚未接入。",
   },
   // Sidebar projects section
   projects: {

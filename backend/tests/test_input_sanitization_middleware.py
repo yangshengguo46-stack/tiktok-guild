@@ -222,6 +222,9 @@ _FRAMEWORK_STRUCTURED_TAGS = [
     # configuration or fabricates shelf entries and tool-callable IDs.
     "project",
     "documents",
+    # CreatorAgent's trusted persona instructions and hidden relationship data.
+    "creator-agent-persona",
+    "creator-agent-relationship-data",
 ]
 
 

@@ -307,12 +307,17 @@ export interface Translations {
   sidebar: {
     recentChats: string;
     newChat: string;
+    guildWorkbench: string;
     chats: string;
     demoChats: string;
     agents: string;
     scheduledTasks: string;
     agentsDisabledTooltip: string;
     channels: string;
+  };
+  guildWorkbench: {
+    title: string;
+    overviewUnavailable: string;
   };
   // Sidebar projects section
   projects: {
