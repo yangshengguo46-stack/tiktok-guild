@@ -36,7 +36,7 @@ _FINGERPRINT_FIELDS = (
     "evidence_version",
     "decision_policy_version",
 )
-_DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[7] / "config" / "personas.json"
+_DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[5] / "ops" / "guild-runtime" / "config" / "personas.json"
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,19 @@
+{
+  "name": "deerflow-native-guild",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.16"
+  },
+  "scripts": {
+    "test": "node --test",
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "start": "node scripts/start.mjs",
+    "acceptance": "node scripts/acceptance.mjs"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
+}

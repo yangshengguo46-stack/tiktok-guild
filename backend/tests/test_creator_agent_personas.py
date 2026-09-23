@@ -14,7 +14,7 @@ from deerflow.creator_agent.personas import (
     resolve_persona,
 )
 
-CATALOG_PATH = Path(__file__).resolve().parents[4] / "config" / "personas.json"
+CATALOG_PATH = Path(__file__).resolve().parents[2] / "ops" / "guild-runtime" / "config" / "personas.json"
 IDS = {
     "relaxed_wit",
     "clear_direct",

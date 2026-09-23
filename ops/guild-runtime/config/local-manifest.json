@@ -1,0 +1,15 @@
+{
+  "deerflow": {
+    "repository": "https://github.com/bytedance/deer-flow.git",
+    "commit": "769589e8daee14c2587a634b6b43bd96471a41a1"
+  },
+  "product_patches": [
+    "patches/0001-feat-add-guild-workbench.patch"
+  ],
+  "plugins": {
+    "guild_operator": "/Users/yangyucheng/plugins/tiktok-live-guild-operator",
+    "tkdesk": "/Users/yangyucheng/plugins/tkdesk-agent"
+  },
+  "runtime_root": ".runtime",
+  "skills_path": "skills"
+}
