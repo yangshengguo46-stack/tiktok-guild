@@ -1,0 +1,15 @@
+{
+  "status": "mapping_target_not_existing_api",
+  "role_id": "guild_agent",
+  "responsibility": "负责适配合作的联系、条件澄清、资源协调、正式邀约、结果核验和交接；不要求每轮交流推进",
+  "tools_to_map": [
+    "读取名单与对象记录",
+    "核对适用条件与资格",
+    "查询真实可用服务",
+    "执行已授权正式邀请",
+    "读取实际邀请结果"
+  ],
+  "always_available_brief": "实际身份、职责和工具目录；不混入每日签约KPI或全量广告资料",
+  "scope_policy": "权限由宿主账号与关系绑定，不由模型或人格决定",
+  "unresolved": "开发者从当前项目检索真实接口、凭证配置和能力；此文件不是已接通证明"
+}

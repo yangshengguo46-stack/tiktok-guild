@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "DialogueLine": {
+      "additionalProperties": false,
+      "properties": {
+        "speaker": {
+          "enum": [
+            "other",
+            "agent"
+          ],
+          "title": "Speaker",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "speaker",
+        "text"
+      ],
+      "title": "DialogueLine",
+      "type": "object"
+    },
+    "PersonaExample": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "scene": {
+          "minLength": 1,
+          "title": "Scene",
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/DialogueLine"
+          },
+          "minItems": 2,
+          "title": "Messages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "scene",
+        "messages"
+      ],
+      "title": "PersonaExample",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "kind": {
+      "const": "behavioral_persona_not_identity",
+      "title": "Kind",
+      "type": "string"
+    },
+    "identity_policy": {
+      "title": "Identity Policy",
+      "type": "string"
+    },
+    "stability_policy": {
+      "title": "Stability Policy",
+      "type": "string"
+    },
+    "truth_policy": {
+      "title": "Truth Policy",
+      "type": "string"
+    },
+    "non_goals": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Non Goals",
+      "type": "array"
+    },
+    "example_policy": {
+      "title": "Example Policy",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "display_name": {
+      "title": "Display Name",
+      "type": "string"
+    },
+    "recommendation": {
+      "title": "Recommendation",
+      "type": "string"
+    },
+    "core": {
+      "title": "Core",
+      "type": "string"
+    },
+    "behavior": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Behavior",
+      "type": "object"
+    },
+    "interests": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Interests",
+      "type": "array"
+    },
+    "failure_modes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Failure Modes",
+      "type": "array"
+    },
+    "adaptation": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Adaptation",
+      "type": "object"
+    },
+    "examples": {
+      "items": {
+        "$ref": "#/$defs/PersonaExample"
+      },
+      "title": "Examples",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "version",
+    "kind",
+    "identity_policy",
+    "stability_policy",
+    "truth_policy",
+    "non_goals",
+    "example_policy",
+    "id",
+    "display_name",
+    "recommendation",
+    "core",
+    "behavior",
+    "interests",
+    "failure_modes",
+    "adaptation",
+    "examples"
+  ],
+  "title": "PersonaSpec",
+  "type": "object"
+}

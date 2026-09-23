@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "account_relaxed",
+  "version": "1.0.0",
+  "base_template": {
+    "id": "relaxed_wit",
+    "version": "1.0.1"
+  },
+  "overrides": {
+    "core": null,
+    "attention": null,
+    "voice": null,
+    "humor": null,
+    "disagreement": null,
+    "care": null,
+    "initiative": null,
+    "interests": null,
+    "length": null,
+    "questions": null,
+    "language": null
+  },
+  "examples": null,
+  "created_by": "operator",
+  "basis_refs": [],
+  "note": "起始默认配置"
+}

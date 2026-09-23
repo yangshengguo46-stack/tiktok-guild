@@ -1,0 +1,12 @@
+{"id": "PROFILE-01", "case_input": {"synthetic_fixture": true, "relevant_context": "已有子Agent被固定绑定worker_quiet。账号默认仍是松弛有趣。", "history": [{"speaker": "other", "text": "继续聊刚才那部电影吧。"}]}}
+{"id": "PROFILE-02", "case_input": {"synthetic_fixture": true, "relevant_context": "操作者明确把账号默认换为清醒直爽，关系没有覆盖，新revision已生效。", "history": [{"speaker": "other", "text": "我刚才想了一下，你说得也不一定对。"}]}}
+{"id": "PROFILE-03", "case_input": {"synthetic_fixture": true, "relevant_context": "关系甲有已启用的温和简洁profile，关系乙继承账号默认。", "history": [{"speaker": "other", "text": "别绕太多，我想听具体一点。"}]}}
+{"id": "PROFILE-04", "case_input": {"synthetic_fixture": true, "relevant_context": "操作者要求按本关系明确的少追问偏好生成并启用变体。材料包含原话及事件ID。", "history": [{"speaker": "other", "text": "你也说说你的看法，不要总问我。"}]}}
+{"id": "PROFILE-05", "case_input": {"synthetic_fixture": true, "relevant_context": "账号松弛有趣。对方的要求明确限定今天，没有永久配置变更。", "history": [{"speaker": "other", "text": "今天先认真点，别开玩笑。"}]}}
+{"id": "PROFILE-06", "case_input": {"synthetic_fixture": true, "relevant_context": "操作者撤销关系覆盖。子Agent仍绑定沉静有料。", "history": [{"speaker": "other", "text": "接着刚才的话说。"}]}}
+{"id": "PROFILE-07", "case_input": {"synthetic_fixture": true, "relevant_context": "账号默认变更；此关系有独立完整profile，未要求清除覆盖。", "history": [{"speaker": "other", "text": "那篇文章我还没看完。"}]}}
+{"id": "PROFILE-08", "case_input": {"synthetic_fixture": true, "relevant_context": "操作者将binding重新指向旧profile，但revision从4增加到5。", "history": [{"speaker": "other", "text": "我们刚才聊到哪里了？"}]}}
+{"id": "PROFILE-09", "case_input": {"synthetic_fixture": true, "relevant_context": "两个联系人并行；甲换风格，乙没有变。", "history": [{"speaker": "other", "text": "我刚才那件事还有后续。"}]}}
+{"id": "PROFILE-10", "case_input": {"synthetic_fixture": true, "relevant_context": "草稿依据revision2生成，发送前该关系persona改为revision3。", "history": [{"speaker": "other", "text": "现在我想认真说这件事。"}]}}
+{"id": "PROFILE-11", "case_input": {"synthetic_fixture": true, "relevant_context": "已换成好奇共想。旧记忆有真实机构身份、之前承诺和观点。", "history": [{"speaker": "other", "text": "你之前说帮我查的东西呢？"}]}}
+{"id": "PROFILE-12", "case_input": {"synthetic_fixture": true, "relevant_context": "新联系人尚无表达偏好。仅知道其职业为主播。", "history": [{"speaker": "other", "text": "刚才看到个特别奇怪的杯子。"}]}}

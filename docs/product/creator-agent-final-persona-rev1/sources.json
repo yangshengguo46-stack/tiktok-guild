@@ -1,0 +1,180 @@
+{
+  "checked_on": "2026-09-24",
+  "scope": "Original specification and templates; selected public docs/code inspection; no production integrations or model inference.",
+  "deerflow_research_commit": "fc26204debe2808fa1b4064f8fddfea6db2c71f8",
+  "production_dependency_lock": false,
+  "sources": [
+    {
+      "id": "S1",
+      "title": "OpenAI Memory",
+      "url": "https://help.openai.com/en/articles/8590148-memory-faq",
+      "claim_boundary": "Chat记忆能力，不证明其他产品内部机制",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S2",
+      "title": "OpenAI Custom Instructions",
+      "url": "https://help.openai.com/en/articles/8096356-chatgpt-custom-instructions",
+      "claim_boundary": "API需自行提供对应指令",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S3",
+      "title": "DeerFlow agents source snapshot",
+      "url": "https://github.com/bytedance/deer-flow/blob/fc26204debe2808fa1b4064f8fddfea6db2c71f8/backend/packages/harness/deerflow/agents/AGENTS.md",
+      "claim_boundary": "研究快照，不是用户已检出版本",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S4",
+      "title": "LangChain Structured output",
+      "url": "https://docs.langchain.com/oss/python/langchain/structured-output",
+      "claim_boundary": "Provider/Tool策略及同时使用业务工具的模型能力要求",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S4b",
+      "title": "LangChain Custom middleware",
+      "url": "https://docs.langchain.com/oss/python/langchain/middleware/custom",
+      "claim_boundary": "原生回调位置，不包含本项目实现",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S5",
+      "title": "TypeSafe models",
+      "url": "https://docs.typesafe.ai/models",
+      "claim_boundary": "官方Jev适配方式与功能限制",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S6",
+      "title": "TypeSafe state",
+      "url": "https://docs.typesafe.ai/concepts/state",
+      "claim_boundary": "共享材料、问题独立性和语言能力边界",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S7",
+      "title": "Kev finetuning recipe",
+      "url": "https://github.com/jaredpalmer/kev/blob/main/skills/kev-finetune/README.md",
+      "claim_boundary": "独立开源训练方案，不是Jev官方权重；main未锁定，生产使用另行固定",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S8",
+      "title": "PPDPP paper",
+      "url": "https://arxiv.org/abs/2311.00262",
+      "claim_boundary": "策略规划训练研究，不证明主播招募效果",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "S9",
+      "title": "GEPA paper",
+      "url": "https://arxiv.org/abs/2507.19457",
+      "claim_boundary": "离线提示优化参考，不是首发依赖",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J1",
+      "title": "JevChat facade",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/app/src/main/java/com/jev/probe/jev/JevClient.kt",
+      "claim_boundary": "judge与draftAndRank的真实调用与参数，不证明效果",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J2",
+      "title": "JevChat reply generation",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/app/src/main/java/com/jev/probe/jev/ReplyClient.kt",
+      "claim_boundary": "固定三候选提示与解析回退；本方案不照搬",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J3",
+      "title": "JevChat questions",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/app/src/main/java/com/jev/probe/jev/JevQuestions.kt",
+      "claim_boundary": "原七题、固定候选排序与语义；不证明识别了内心",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J4",
+      "title": "JevChat judge client",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/app/src/main/java/com/jev/probe/jev/JudgeClient.kt",
+      "claim_boundary": "调用、概率解析和丢上下文重试路径",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J5",
+      "title": "JevChat development harness",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/tools/jev/calibrate.py",
+      "claim_boundary": "本轮读取前110行，证明有fixture加载与输出解析，不推断未读部分的校准效果",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J6",
+      "title": "JevChat README",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/README.md",
+      "claim_boundary": "产品定位与声明，未真机测试；README可能滞后实际实现",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J7",
+      "title": "JevChat license",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/LICENSE",
+      "claim_boundary": "MIT许可文本；NOTICE另行记录",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "J7b",
+      "title": "JevChat NOTICE",
+      "url": "https://github.com/jev-chat/jev-chat-jarvis/blob/01f65908536d5b1ac76e3ce6cec4bbb5fe667791/NOTICE",
+      "claim_boundary": "上游来源与名称说明；正式复用时核对实际采用版本",
+      "review_note": "来源继承自前轮已核查资料；本版仅按下列采用范围使用，不将main视为生产版本锁。"
+    },
+    {
+      "id": "M1",
+      "title": "MaiBot expression selector",
+      "url": "https://github.com/Mai-with-u/MaiBot/blob/7ca4f06031328bd4cb5ade261e51362e9247c2d6/src/chat/replyer/maisaka_expression_selector.py",
+      "claim_boundary": "本轮重读：表达记录/选择与情境输入，不证明真实聊天优势"
+    },
+    {
+      "id": "M2",
+      "title": "MaiBot replyer prompt",
+      "url": "https://github.com/Mai-with-u/MaiBot/blob/7ca4f06031328bd4cb5ade261e51362e9247c2d6/prompts/zh-CN/maisaka_replyer.prompt",
+      "claim_boundary": "前轮源码已读：当前话题、自然回应、参考而非固定流程"
+    },
+    {
+      "id": "M3",
+      "title": "MaiBot README research snapshot",
+      "url": "https://github.com/Mai-with-u/MaiBot/blob/7ca4f06031328bd4cb5ade261e51362e9247c2d6/README.md",
+      "claim_boundary": "前轮已读：设计目标和GPL标记，不判断复制代码的完整法律适用性"
+    },
+    {
+      "id": "N1",
+      "title": "N.E.K.O. proactive prompts",
+      "url": "https://github.com/Project-N-E-K-O/N.E.K.O/blob/babfd763f7cc2b9512295ff8406895b9d832c9d9/config/prompts/prompts_proactive.py",
+      "claim_boundary": "本轮重读：新材料/历史/兴趣/PASS，不证明主动触达效果"
+    },
+    {
+      "id": "N2",
+      "title": "N.E.K.O. character prompts",
+      "url": "https://github.com/Project-N-E-K-O/N.E.K.O/blob/babfd763f7cc2b9512295ff8406895b9d832c9d9/config/prompts/prompts_chara.py",
+      "claim_boundary": "前轮已读：反服务腔与记忆、默认亲密/虚构设定不采用"
+    },
+    {
+      "id": "T1",
+      "title": "SillyTavern character design official docs",
+      "url": "https://docs.sillytavern.app/usage/core-concepts/characterdesign/",
+      "claim_boundary": "本轮核对：人格描述/示例/上下文，不复制角色卡，不声称为专业人格模型"
+    },
+    {
+      "id": "T2",
+      "title": "SillyTavern world info official docs",
+      "url": "https://docs.sillytavern.app/usage/core-concepts/worldinfo/",
+      "claim_boundary": "本轮核对：相关背景动态装载；并不保证生成质量"
+    }
+  ],
+  "version": "1.1",
+  "jevchat_research_commit": "01f65908536d5b1ac76e3ce6cec4bbb5fe667791",
+  "verification_note": "S系列沿用v1来源，本轮未重新验证全部；J系列为本轮源码研究。不是用户仓库审计或生产依赖锁。",
+  "final_version": "FINAL_20260924"
+}

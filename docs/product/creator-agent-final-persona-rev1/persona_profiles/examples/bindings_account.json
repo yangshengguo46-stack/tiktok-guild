@@ -1,0 +1,16 @@
+{
+  "scope": {
+    "tenant_id": "demo_tenant",
+    "account_id": "demo_account",
+    "agent_instance_id": "worker_1",
+    "relation_id": "contact_1"
+  },
+  "revision": 1,
+  "effective_at": "2026-09-24T23:00:00+09:00",
+  "account_default": {
+    "id": "account_relaxed",
+    "version": "1.0.0"
+  },
+  "agent_override": null,
+  "relation_override": null
+}

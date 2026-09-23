@@ -1,3 +1,11 @@
+## Approved CreatorAgent Asset Verification
+
+Run `python3 scripts/verify_creator_agent_assets.py` before packaging the
+`FINAL-PERSONA-REV1` product assets. It compares the complete file set under
+`docs/product/creator-agent-final-persona-rev1/` with `MANIFEST.json`, checks
+declared byte counts and every SHA-256, and rejects symlinks. The manifest does
+not hash itself; the approved source archive hash is pinned in the product spec.
+
 ## Service Startup Contracts
 
 Optional browser dependency detection reads the top-level `tools:` sequence

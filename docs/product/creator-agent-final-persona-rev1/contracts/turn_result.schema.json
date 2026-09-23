@@ -1,0 +1,162 @@
+{
+  "$defs": {
+    "ClaimPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "assert",
+            "retract"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "claim_id": {
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "reported",
+                "observed",
+                "hypothesis"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "facet": {
+          "anyOf": [
+            {
+              "enum": [
+                "person",
+                "tradeoff",
+                "relationship",
+                "conversation",
+                "shared_topic",
+                "next_step"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facet"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "claim_id",
+        "evidence_ids"
+      ],
+      "title": "ClaimPatch",
+      "type": "object"
+    },
+    "FollowUp": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "minLength": 1,
+          "title": "Check",
+          "type": "string"
+        },
+        "not_before": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Not Before"
+        },
+        "cancel_when": {
+          "minLength": 1,
+          "title": "Cancel When",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check",
+        "cancel_when"
+      ],
+      "title": "FollowUp",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "reply": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reply"
+    },
+    "state_delta": {
+      "items": {
+        "$ref": "#/$defs/ClaimPatch"
+      },
+      "title": "State Delta",
+      "type": "array"
+    },
+    "decision_note": {
+      "default": "",
+      "maxLength": 240,
+      "title": "Decision Note",
+      "type": "string"
+    },
+    "followup": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FollowUp"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "reply"
+  ],
+  "title": "TurnResult",
+  "type": "object"
+}

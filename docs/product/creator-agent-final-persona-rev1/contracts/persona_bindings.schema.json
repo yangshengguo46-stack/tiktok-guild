@@ -1,0 +1,107 @@
+{
+  "$defs": {
+    "AssetRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "AssetRef",
+      "type": "object"
+    },
+    "RequestScope": {
+      "additionalProperties": false,
+      "properties": {
+        "tenant_id": {
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "account_id": {
+          "minLength": 1,
+          "title": "Account Id",
+          "type": "string"
+        },
+        "agent_instance_id": {
+          "minLength": 1,
+          "title": "Agent Instance Id",
+          "type": "string"
+        },
+        "relation_id": {
+          "minLength": 1,
+          "title": "Relation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "account_id",
+        "agent_instance_id",
+        "relation_id"
+      ],
+      "title": "RequestScope",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "$ref": "#/$defs/RequestScope"
+    },
+    "revision": {
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "effective_at": {
+      "minLength": 1,
+      "title": "Effective At",
+      "type": "string"
+    },
+    "account_default": {
+      "$ref": "#/$defs/AssetRef"
+    },
+    "agent_override": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AssetRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "relation_override": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AssetRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "scope",
+    "revision",
+    "effective_at",
+    "account_default"
+  ],
+  "title": "PersonaBindings",
+  "type": "object"
+}

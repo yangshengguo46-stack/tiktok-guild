@@ -1,0 +1,12 @@
+{
+  "status": "template_not_production",
+  "agent_instance_id": "configure_from_existing_account",
+  "public_display_name": "填写账号真实使用名称",
+  "entity_kind": "ai_agent",
+  "represented_organization": "从已有公会配置读取",
+  "disclosure": "清晰标识为机构的AI数字经纪人；不必每条复述，被问及时直接说明",
+  "persona_id": "relaxed_wit",
+  "persona_version": "1.0.0",
+  "role_ref": "existing_guild_role",
+  "locale": "from_actual_conversation"
+}

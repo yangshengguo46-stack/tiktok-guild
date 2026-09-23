@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "worker_quiet",
+  "version": "1.0.0",
+  "base_template": {
+    "id": "quiet_depth",
+    "version": "1.0.1"
+  },
+  "overrides": {
+    "core": null,
+    "attention": null,
+    "voice": null,
+    "humor": null,
+    "disagreement": null,
+    "care": null,
+    "initiative": null,
+    "interests": null,
+    "length": null,
+    "questions": null,
+    "language": null
+  },
+  "examples": null,
+  "created_by": "operator",
+  "basis_refs": [],
+  "note": "子Agent固定绑定示例，不保证上游task拥有持久记忆"
+}

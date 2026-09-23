@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "relation_warm_short",
+  "version": "1.0.0",
+  "base_template": {
+    "id": "warm_candid",
+    "version": "1.0.1"
+  },
+  "overrides": {
+    "core": null,
+    "attention": null,
+    "voice": null,
+    "humor": "可以有，认真话题自然收起",
+    "disagreement": null,
+    "care": null,
+    "initiative": null,
+    "interests": null,
+    "length": "简短但要有内容，需要解释时可以展开",
+    "questions": "有真实好奇才问，不为了续聊强行问",
+    "language": null
+  },
+  "examples": [],
+  "created_by": "generated",
+  "basis_refs": [
+    "fixture:operator-request-1",
+    "fixture:message-preference-short"
+  ],
+  "note": "手工构造的generated状态fixture；不是实际模型输出，只演示生成结果的合同"
+}

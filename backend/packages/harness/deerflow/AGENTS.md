@@ -1,3 +1,15 @@
+### Native Social Contract Boundary (`social/`)
+
+`deerflow.social` defines immutable, bounded social scopes, identity and role
+snapshots, claim patches, follow-ups, turn results, and persona profile/binding
+values. These are value contracts only: constructing one does not authenticate
+an owner, verify an evidence reference, authorize a send, or execute a TikTok
+action. `load_social_assets()` reads only expression fields from the six
+approved `FINAL-PERSONA-REV1` assets under `docs/product/`; package integrity
+is checked by `scripts/verify_creator_agent_assets.py` before packaging.
+External text remains data and cannot supply scope, identity, permissions, or
+persona bindings. Resolution, persistence, and Lead integration are separate.
+
 ### Request Trace Context (`packages/harness/deerflow/trace_context.py`)
 
 DeerFlow's request-level correlation id — the `X-Trace-Id` header and the `deerflow_trace_id` key. Not Langfuse's trace id, not `run_id`, not the short subagent `trace_id` log label.

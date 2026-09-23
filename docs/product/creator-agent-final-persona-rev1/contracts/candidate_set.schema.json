@@ -1,0 +1,278 @@
+{
+  "$defs": {
+    "Candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^c[1-9][0-9]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "move": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Move",
+          "type": "string"
+        },
+        "turn": {
+          "$ref": "#/$defs/TurnResult"
+        }
+      },
+      "required": [
+        "id",
+        "move",
+        "turn"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "ClaimPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "assert",
+            "retract"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "claim_id": {
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "reported",
+                "observed",
+                "hypothesis"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "facet": {
+          "anyOf": [
+            {
+              "enum": [
+                "person",
+                "tradeoff",
+                "relationship",
+                "conversation",
+                "shared_topic",
+                "next_step"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facet"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "claim_id",
+        "evidence_ids"
+      ],
+      "title": "ClaimPatch",
+      "type": "object"
+    },
+    "ConversationBrief": {
+      "additionalProperties": false,
+      "properties": {
+        "topic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Topic"
+        },
+        "current_exchange": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Exchange"
+        },
+        "open_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Open Question"
+        },
+        "relevant_evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Relevant Evidence Ids",
+          "type": "array"
+        },
+        "business_relevance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Relevance"
+        }
+      },
+      "title": "ConversationBrief",
+      "type": "object"
+    },
+    "FollowUp": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "minLength": 1,
+          "title": "Check",
+          "type": "string"
+        },
+        "not_before": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Not Before"
+        },
+        "cancel_when": {
+          "minLength": 1,
+          "title": "Cancel When",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check",
+        "cancel_when"
+      ],
+      "title": "FollowUp",
+      "type": "object"
+    },
+    "TurnResult": {
+      "additionalProperties": false,
+      "properties": {
+        "reply": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reply"
+        },
+        "state_delta": {
+          "items": {
+            "$ref": "#/$defs/ClaimPatch"
+          },
+          "title": "State Delta",
+          "type": "array"
+        },
+        "decision_note": {
+          "default": "",
+          "maxLength": 240,
+          "title": "Decision Note",
+          "type": "string"
+        },
+        "followup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FollowUp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "reply"
+      ],
+      "title": "TurnResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "context_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Context Fingerprint",
+      "type": "string"
+    },
+    "brief": {
+      "$ref": "#/$defs/ConversationBrief"
+    },
+    "candidates": {
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "maxItems": 4,
+      "minItems": 1,
+      "title": "Candidates",
+      "type": "array"
+    }
+  },
+  "required": [
+    "context_fingerprint",
+    "candidates"
+  ],
+  "title": "CandidateSet",
+  "type": "object"
+}

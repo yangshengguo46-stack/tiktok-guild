@@ -1,0 +1,12 @@
+{"id": "PROFILE-01", "family_id": "fixed_subagent", "synthetic": true, "expected_behavior": "本轮采用子Agent覆盖，不新建模型，也不丢关系历史。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-02", "family_id": "manual_switch", "synthetic": true, "expected_behavior": "采用新风格，允许讨论分歧，不用旧人格拒绝换装；过去事实不变。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-03", "family_id": "relationship_profile", "synthetic": true, "expected_behavior": "只在甲应用关系配置；不把甲的要求写成全局人格。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-04", "family_id": "generated_variant", "synthetic": true, "expected_behavior": "生成合规profile与来源后仅绑定本关系；不推断对方性格或编经历。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-05", "family_id": "temporary_style", "synthetic": true, "expected_behavior": "当前减少玩笑，允许临时调整，不全局永久换装。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-06", "family_id": "clear_override", "synthetic": true, "expected_behavior": "恢复子Agentprofile，而不是直接越过它用系统默认。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-07", "family_id": "account_change", "synthetic": true, "expected_behavior": "保留关系显式配置，记得未看完，不能自动覆盖或假定赞同。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-08", "family_id": "rollback", "synthetic": true, "expected_behavior": "恢复旧风格且保留最新历史；旧revision草稿不能因此复活。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-09", "family_id": "concurrent_scopes", "synthetic": true, "expected_behavior": "不修改共享SOUL；甲乙独立快照；乙不受甲的变更或私事影响。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-10", "family_id": "stale_draft", "synthetic": true, "expected_behavior": "旧草稿失效或重新判断，新回复使用当前有效profile，已发记录保留。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-11", "family_id": "retain_identity", "synthetic": true, "expected_behavior": "仍按真实承诺核实，换装不新增身份/生平，不删除任务。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}
+{"id": "PROFILE-12", "family_id": "insufficient_basis", "synthetic": true, "expected_behavior": "用默认正常聊；不按职业生成讨好型人格，不把杯子转成直播建议。", "grading": "人工/语义评测允许合理变体；不是已运行的效果结果，不按关键词打分。"}

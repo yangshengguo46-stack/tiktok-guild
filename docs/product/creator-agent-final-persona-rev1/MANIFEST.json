@@ -1,0 +1,398 @@
+{
+  "version": "FINAL-PERSONA-REV1",
+  "date": "2026-09-24",
+  "supersedes": "CreatorAgent_FINAL_20260924",
+  "not_a_production_build": true,
+  "change_scope": "personality configuration and binding correction; north star and runtime retained",
+  "persona_count": 6,
+  "base_persona_version": "1.0.1",
+  "persona_example_dialogues": 36,
+  "new_development_scenarios": 72,
+  "persona_profile_development_scenarios": 12,
+  "legacy_business_scenarios": 60,
+  "contract_tests_passed": 104,
+  "real_model_tests_run": 0,
+  "real_profile_generation_runs": 0,
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 851,
+      "sha256": "15436c4ee4a05cfee266fb649c3a33fb8b17d3a80de1c3c7a0a738e039f92232"
+    },
+    {
+      "path": "CODING_AGENT_PROMPT.md",
+      "bytes": 4334,
+      "sha256": "041e3382102b57d2b8e9da16d468ae5ea3164993e54ba61eda1beee769a91eee"
+    },
+    {
+      "path": "NORTH_STAR.md",
+      "bytes": 1415,
+      "sha256": "c8d8dcae757b4cbe49216c2922ef49865291462711cd994579488ad087864d17"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2066,
+      "sha256": "3c32c54d7f6e3d15c49cc99a6f5c389979ba70fd2536b97d8be3094cb2c53e2c"
+    },
+    {
+      "path": "START_HERE.md",
+      "bytes": 787,
+      "sha256": "62487e2641074df37701548abb3853456e5b00132c9f142d2d51bbed5c0363fd"
+    },
+    {
+      "path": "TEST_REPORT.md",
+      "bytes": 2735,
+      "sha256": "e5a23b764410c1e18061ea1d745b7290bac072edc8ca100a7f466191614d0449"
+    },
+    {
+      "path": "THIRD_PARTY.md",
+      "bytes": 683,
+      "sha256": "a906495cfa624b328a78a14d7212e5fc316149241f3045b77a31e375f6f3a02b"
+    },
+    {
+      "path": "contracts/candidate_set.schema.json",
+      "bytes": 5819,
+      "sha256": "46df94049b46176882dd40cc6a49efa44d50a6575d24634b6f55c1ba7a6f0cd4"
+    },
+    {
+      "path": "contracts/judgment_workloads.json",
+      "bytes": 6260,
+      "sha256": "45371b8fda6846607216f0cafb4bd0be41a59553ac29838933f062e1fae5a48b"
+    },
+    {
+      "path": "contracts/persona.schema.json",
+      "bytes": 3433,
+      "sha256": "67178ce4ea0c0417c1746711cd756b16093f893ac76cd62f40dce58bb0eebdf0"
+    },
+    {
+      "path": "contracts/persona_bindings.schema.json",
+      "bytes": 2119,
+      "sha256": "2db17a6e94994d31949ee0ac08741195ed019f37684620824a52e744c641973e"
+    },
+    {
+      "path": "contracts/persona_profile.schema.json",
+      "bytes": 6050,
+      "sha256": "e7442de1e561267b585e56615829ee91c48021025e76550245da82dfe09d8c34"
+    },
+    {
+      "path": "contracts/turn_result.schema.json",
+      "bytes": 3191,
+      "sha256": "0bda9ca8ca1b18254e28478cc7ddb4f6587c4d045ecc17ba6effe0ff62e933de"
+    },
+    {
+      "path": "docs/FINAL_SPEC.md",
+      "bytes": 29166,
+      "sha256": "45107df33f86d68e511247d7db8cf7990454ac76c3be73f6ebd2bf1b517fa265"
+    },
+    {
+      "path": "docs/IMPLEMENTATION_MAP.md",
+      "bytes": 2064,
+      "sha256": "a64140d0626a6e70fb8af6fc8c1c86119d7c95f5235e526ce284a17e4276f4f9"
+    },
+    {
+      "path": "docs/JEVCHAT_INTEGRATION.md",
+      "bytes": 2015,
+      "sha256": "05fc6ecfece1b0bd33679a6f1674a0205d15a8c07b14f725262d0a200ff1bad4"
+    },
+    {
+      "path": "docs/MIGRATION_FROM_FINAL.md",
+      "bytes": 2256,
+      "sha256": "c9dedb1b13bd548a4c185c5e63a950e4ff7805b3bfec0cf457ed761163f0ba2e"
+    },
+    {
+      "path": "docs/MIGRATION_FROM_V1_1.md",
+      "bytes": 1238,
+      "sha256": "36ce0b7f5da1562eb0ed11de38248e98498d37074e14784a637af5da8de157fe"
+    },
+    {
+      "path": "docs/PERSONALITY_SYSTEM.md",
+      "bytes": 7076,
+      "sha256": "9f7280cbaf12e61d50bd392758eabcc5a0731f0469ab622a663e0ab9cbcaa65f"
+    },
+    {
+      "path": "docs/REVISION_SCOPE.md",
+      "bytes": 632,
+      "sha256": "230d87a2a4b20f99834d24fff903e22aba49bb816861182c133aa76208c4b36c"
+    },
+    {
+      "path": "docs/SOURCE_ADOPTION.md",
+      "bytes": 5532,
+      "sha256": "eb9817971be1286baad2d079f2c2073818493d06967adb941a7f67a164140819"
+    },
+    {
+      "path": "evals/README.md",
+      "bytes": 2475,
+      "sha256": "8ac0921724148fa5efb3a0b8973e061cda6fa0cf7c554d633004ada356ed2c7c"
+    },
+    {
+      "path": "evals/graders.development.jsonl",
+      "bytes": 27789,
+      "sha256": "d568ec0a59460c9c24bef70b6469e25c2692fdfc615fb1b0aad086225085a30d"
+    },
+    {
+      "path": "evals/inputs.development.jsonl",
+      "bytes": 29735,
+      "sha256": "a5c4eaf8434c769afdd834b89606600a59f3c96b44b67093adcf86a72bd6d232"
+    },
+    {
+      "path": "evals/legacy_business/inputs.development.jsonl",
+      "bytes": 13188,
+      "sha256": "ad9307e21eedbc51ecfdba78f7df25b93bfbc1673dc099e4996ae730984cd4f4"
+    },
+    {
+      "path": "evals/legacy_business/jevchat.inputs.development.jsonl",
+      "bytes": 12590,
+      "sha256": "de81e95a183f68e57dc6c9102c0d58c76dae64f4efcf2e0cc32af2adf778eb06"
+    },
+    {
+      "path": "evals/legacy_business/jevchat.scenarios.development.jsonl",
+      "bytes": 18404,
+      "sha256": "a8b712fdd1935f2f9d8d5ce0e550ce02ba55ae8111b9f7dc977105929d81716a"
+    },
+    {
+      "path": "evals/legacy_business/scenarios.development.jsonl",
+      "bytes": 27674,
+      "sha256": "0104df8927f344277f6b59103485eb2ec4aafc0a0e3f7385a402ed2ea4dfe78f"
+    },
+    {
+      "path": "evals/persona_profiles.graders.development.jsonl",
+      "bytes": 3451,
+      "sha256": "d4c192609d9d1cb10fc709f0ea85788d822ca3747858c1d85a4dcba8ccfdcfba"
+    },
+    {
+      "path": "evals/persona_profiles.inputs.development.jsonl",
+      "bytes": 2972,
+      "sha256": "6a7ba943a01e29b7f807cb5e8749ded30a793c5f8b11ca87d5c28fb8be2e6a8b"
+    },
+    {
+      "path": "evals/scenarios.development.jsonl",
+      "bytes": 59828,
+      "sha256": "ca3463f83c630b68b4a89a3d08a1454ad44368ee3dc0883384efe2edc18af5dd"
+    },
+    {
+      "path": "identities/identity.template.json",
+      "bytes": 496,
+      "sha256": "ec1095a08abb9d31edbd45687221f057e81efae1c6e39793d1c43c3ced75272c"
+    },
+    {
+      "path": "knowledge/README.md",
+      "bytes": 927,
+      "sha256": "794b9dc8cf9a4044866c77bef29531c9a11e7428e178c241fb6ac27dd39899d3"
+    },
+    {
+      "path": "persona_profiles/README.md",
+      "bytes": 1081,
+      "sha256": "0f21c20c91f8b16ace8a381f93e86ce4ac0e9b2843c960990669dcd2321aa175"
+    },
+    {
+      "path": "persona_profiles/examples/account_direct.json",
+      "bytes": 547,
+      "sha256": "a584f833bf4482231a6198a9ad06977f491e74d633234db5259401fe9b26598b"
+    },
+    {
+      "path": "persona_profiles/examples/account_relaxed.json",
+      "bytes": 517,
+      "sha256": "636f1c714917565895a930634a949bcff6ec6d000794c4960376b6b9de10ad5f"
+    },
+    {
+      "path": "persona_profiles/examples/bindings_account.json",
+      "bytes": 354,
+      "sha256": "b82f5f8221a5e4ad3b416735329b15b6861f1fc9fd0c2a4aac08afd4cf869e8b"
+    },
+    {
+      "path": "persona_profiles/examples/bindings_relationship.json",
+      "bytes": 461,
+      "sha256": "9e7470855610118f7cdbcbdafd2958fd44a3dad82966acc539d18405562a4e46"
+    },
+    {
+      "path": "persona_profiles/examples/bindings_rollback.json",
+      "bytes": 354,
+      "sha256": "9848b4b5d5c5b32d04da14db7d7f13f8d9aea9bd591ccfe4b50e4b188d423ecf"
+    },
+    {
+      "path": "persona_profiles/examples/bindings_subagent.json",
+      "bytes": 404,
+      "sha256": "740c183ddd9284aaaa8dd2624ed6b9c7640c8ada1b3d1594ab217799c53fe8a6"
+    },
+    {
+      "path": "persona_profiles/examples/bindings_switch.json",
+      "bytes": 353,
+      "sha256": "f94ceaa5dc67fa91590085dd01f7a21ec5fed6a8ecf0b06609abd53c83d73ee7"
+    },
+    {
+      "path": "persona_profiles/examples/relation_warm_short.json",
+      "bytes": 804,
+      "sha256": "2903a28767b4038352616e14139bb80b0f176243ff52b98792732a71b457203b"
+    },
+    {
+      "path": "persona_profiles/examples/worker_quiet.json",
+      "bytes": 562,
+      "sha256": "647ee308b97916c6bc4bf3a46368c2980c4126663f5b98d9098d4e21ea22e5ad"
+    },
+    {
+      "path": "personas/CATALOG.md",
+      "bytes": 16589,
+      "sha256": "11241600f8a66850031c15d6367911170671e0c505a71b1d947421ceb2977510"
+    },
+    {
+      "path": "personas/clear_direct.json",
+      "bytes": 6227,
+      "sha256": "5129c85d746fe4095418c8aad1e284c8db0a2c548cb70a07b9ddc9cb1290b840"
+    },
+    {
+      "path": "personas/curious_explorer.json",
+      "bytes": 6402,
+      "sha256": "d4e90579b10353081432a2458e2fa53e1f8df8cb1d66bd6d680c7bc2bea25b88"
+    },
+    {
+      "path": "personas/observant_warmth.json",
+      "bytes": 6297,
+      "sha256": "771f708be43611bfb234c7597af9725b57d94de81dc639c792d36628f714fbc7"
+    },
+    {
+      "path": "personas/quiet_depth.json",
+      "bytes": 6112,
+      "sha256": "79005c5b6efc95ce9a644dbd3d5528aa8cf56d791b07bb33f8b7217fbe6eb506"
+    },
+    {
+      "path": "personas/relaxed_wit.json",
+      "bytes": 6254,
+      "sha256": "978805355eda10d8c38c07814d11b264def004b267a7640fe6aeb70aa672d3f9"
+    },
+    {
+      "path": "personas/warm_candid.json",
+      "bytes": 6322,
+      "sha256": "ee694a7c146aa01544d2984cb304d3876761ce4ea45d9f8092b6a720eec3bd8c"
+    },
+    {
+      "path": "prompts/CANDIDATE_COMPARISON.md",
+      "bytes": 852,
+      "sha256": "ebe26b73b3e3b673223c0587c8ae6ce6c0f9326e8827fdf0a0ef570f79890c71"
+    },
+    {
+      "path": "prompts/CURRENT_TURN.md",
+      "bytes": 865,
+      "sha256": "60b3e709c061214832d3afdec9a5b61955c28ac69599323d81470cdf4e13714f"
+    },
+    {
+      "path": "prompts/GUILD_PROFILE.template.md",
+      "bytes": 612,
+      "sha256": "027a77f325254166aee3391eedd5de1facfae45e7a03cfcf7df5b684f6aa7a12"
+    },
+    {
+      "path": "prompts/PERSONA_GENERATION.md",
+      "bytes": 1471,
+      "sha256": "de92fb70dbb3ee5ae724772590d33204b5e129b570939edb9ea69f17eb7431a9"
+    },
+    {
+      "path": "prompts/SOCIAL_KERNEL.md",
+      "bytes": 2361,
+      "sha256": "11b45460eaced0a1f3e468624bdfd17d81af793bf59ac7e09a86bec46c8c200c"
+    },
+    {
+      "path": "reference/__init__.py",
+      "bytes": 69,
+      "sha256": "f679811b595e8a458803501d4931a9eed54340fa414e79bbd0d71c25381eaff6"
+    },
+    {
+      "path": "reference/candidates.py",
+      "bytes": 7781,
+      "sha256": "83581cd2cf0adb0a0a1fceff50d70df12a45c4b9923bc96a620269d02057da25"
+    },
+    {
+      "path": "reference/contracts.py",
+      "bytes": 5502,
+      "sha256": "43e425eb425bdfc9bef8406d6bb0f9f6afe236b0fed4eb929cb852a09b1fea36"
+    },
+    {
+      "path": "reference/persona_profiles.py",
+      "bytes": 8839,
+      "sha256": "c95ec1889ef8dcd72f687876b763b273555f1d88e9518cccf246b8e03367dccd"
+    },
+    {
+      "path": "reference/personas.py",
+      "bytes": 5525,
+      "sha256": "1e4e801ace0eb6d6f0f7d49bc342d0e25eaa1df30f3efe746012c33f83673d19"
+    },
+    {
+      "path": "requirements-reference.txt",
+      "bytes": 18,
+      "sha256": "c61947ff81379dd5976d9f38e1ae24dc44554615f9b0e9c2c917563d19773c6e"
+    },
+    {
+      "path": "roles/guild.template.json",
+      "bytes": 744,
+      "sha256": "7be20c0dc5d0741e20c5736bc6337ac1dc6a1e2e323137d0f4127a4dda12a82c"
+    },
+    {
+      "path": "scripts/preview_persona.py",
+      "bytes": 1320,
+      "sha256": "7691c1888e639cc916136ec841717e794a013a5c3a4067c54b45c6e51792029d"
+    },
+    {
+      "path": "scripts/preview_profile.py",
+      "bytes": 1592,
+      "sha256": "9ef4c4da4f6bf58c10df5fed49ad07368dc4898e5cec64eb6719c139a52685c8"
+    },
+    {
+      "path": "sources.json",
+      "bytes": 9799,
+      "sha256": "1dba99a1b4aceaf3a452a7e51726ff0b2ff0631101e85ce40066c587abad9deb"
+    },
+    {
+      "path": "test_logs/preview.json",
+      "bytes": 5506,
+      "sha256": "245e2931d69c96cf7f2ee70cc4ccb08ba02c5544e9a79e52b37e7e5f864a88ae"
+    },
+    {
+      "path": "test_logs/profile_account.json",
+      "bytes": 6050,
+      "sha256": "4230f77d42495223ed3d57783ba0131bb7808690ccb967495cf09b22086703ba"
+    },
+    {
+      "path": "test_logs/profile_relationship.json",
+      "bytes": 6116,
+      "sha256": "0632149a419e9893120e467b79dd15d5ef10d95f88935879431161d84daa9b04"
+    },
+    {
+      "path": "test_logs/profile_rollback.json",
+      "bytes": 6051,
+      "sha256": "66088c18d258d5855e24d2355b70e67e0e08269f21aaa221e2f653e4b119208a"
+    },
+    {
+      "path": "test_logs/profile_subagent.json",
+      "bytes": 5888,
+      "sha256": "a13bfc01f57c9a924e2b0b282568b6fd5a155d7df7ae112f38b47369161044f4"
+    },
+    {
+      "path": "test_logs/profile_switch.json",
+      "bytes": 5956,
+      "sha256": "f672711851d21781d84f9a5ce886e8c72a0b96ec21117825a8d4bd3e9bcfeefb"
+    },
+    {
+      "path": "test_logs/unittest.txt",
+      "bytes": 11400,
+      "sha256": "9677ab42629eaf32b6a2b435cbcdd257173ed54e1c86c5d808f789b89d697263"
+    },
+    {
+      "path": "tests/test_candidates.py",
+      "bytes": 6800,
+      "sha256": "0cf0cc85ab95237b5a1229dc74368539f70662d4f41b01f25c589224a8012bbf"
+    },
+    {
+      "path": "tests/test_contracts.py",
+      "bytes": 5635,
+      "sha256": "7b98ef2b951c34d2e32bcbf1440add31f1fde6a56e7c4bb023729e8b989bc928"
+    },
+    {
+      "path": "tests/test_persona_profiles.py",
+      "bytes": 10466,
+      "sha256": "8028f0da3e6aac3d8c7fdf3922731c2f35673384acf7d7976b82f681c4ed8297"
+    },
+    {
+      "path": "tests/test_personas.py",
+      "bytes": 7739,
+      "sha256": "0b5da7899086afe5a080183adabeddc50f17126b838da5a72322d533d4001ca7"
+    }
+  ]
+}
