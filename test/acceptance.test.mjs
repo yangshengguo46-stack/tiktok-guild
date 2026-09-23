@@ -117,11 +117,12 @@ test('offline acceptance composes config, doctor, and catalog evidence with a cu
   assert.equal(await readFile(path.join(root, '.runtime', 'deerflow-home', 'SOUL.md'), 'utf8'), customMission);
 });
 
-test('standalone project points to the current product design and audit', async () => {
+test('standalone project points to the unique CreatorAgent design and current audit', async () => {
   const readme = await readFile(path.join(PACKAGE_ROOT, 'README.md'), 'utf8');
-  const design = await readFile(path.join(PACKAGE_ROOT, 'docs', 'superpowers', 'specs', '2026-09-23-deerflow-tiktok-guild-end-to-end-design.md'), 'utf8');
+  const design = await readFile(path.join(PACKAGE_ROOT, 'docs', 'superpowers', 'specs', '2026-09-24-deerflow-auto-persona-design.md'), 'utf8');
   const audit = await readFile(path.join(PACKAGE_ROOT, 'docs', 'audits', '2026-09-23-deerflow-guild-migration-audit.md'), 'utf8');
-  assert.match(readme, /总体方案/u);
-  assert.match(design, /默认 Lead/u);
-  assert.match(audit, /尚未实现/u);
+  assert.match(readme, /CreatorAgent_FINAL_PERSONA_REV1_20260924\.zip/u);
+  assert.match(readme, /AI 自动切换/u);
+  assert.match(design, /本轮唯一产品规格/u);
+  assert.match(audit, /唯一生效规格/u);
 });

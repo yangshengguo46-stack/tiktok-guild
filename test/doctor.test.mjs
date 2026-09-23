@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { inspectPinnedPnpm, runDoctor } from '../scripts/doctor.mjs';
+import { inspectPersonaCatalog, inspectPinnedPnpm, runDoctor } from '../scripts/doctor.mjs';
 import { startRuntime } from '../scripts/start.mjs';
 
 const REQUIRED_CHECKS = [
@@ -14,6 +17,7 @@ const REQUIRED_CHECKS = [
   'guild_dependencies',
   'deerflow_head',
   'product_patches',
+  'persona_catalog',
   'deerflow_pnpm',
   'guild_mcp',
   'tkdesk_mcp',
@@ -73,6 +77,7 @@ test('start never invokes DeerFlow when doctor fails', async () => {
   await assert.rejects(
     startRuntime({
       packageRoot: '/tmp/deerflow-native-guild',
+      installSoul: async () => {},
       doctor: async () => ({
         ok: false,
         checks: [{ name: 'guild_mcp', ok: false, detail: 'catalog mismatch' }],
@@ -86,8 +91,10 @@ test('start never invokes DeerFlow when doctor fails', async () => {
 
 test('start exports only the native DeerFlow paths and launches make start', async () => {
   const calls = [];
+  const soulInstalls = [];
   await startRuntime({
     packageRoot: '/tmp/deerflow-native-guild',
+    installSoul: async (options) => { soulInstalls.push(options); },
     doctor: async () => ({ ok: true, checks: [] }),
     start: async (command, args, options) => {
       calls.push({ command, args, options });
@@ -96,6 +103,7 @@ test('start exports only the native DeerFlow paths and launches make start', asy
   });
 
   assert.equal(calls.length, 1);
+  assert.deepEqual(soulInstalls, [{ packageRoot: '/tmp/deerflow-native-guild' }]);
   assert.equal(calls[0].command, 'make');
   assert.deepEqual(calls[0].args, ['start']);
   assert.equal(calls[0].options.cwd, '/tmp/deerflow-native-guild/.runtime/deer-flow');
@@ -103,9 +111,118 @@ test('start exports only the native DeerFlow paths and launches make start', asy
   assert.equal(calls[0].options.env.DEER_FLOW_EXTENSIONS_CONFIG_PATH, '/tmp/deerflow-native-guild/config/extensions_config.json');
   assert.equal(calls[0].options.env.DEER_FLOW_SKILLS_PATH, '/tmp/deerflow-native-guild/skills');
   assert.equal(calls[0].options.env.DEER_FLOW_HOME, '/tmp/deerflow-native-guild/.runtime/deerflow-home');
+  assert.equal(
+    calls[0].options.env.DEER_FLOW_GUILD_PERSONAS_PATH,
+    '/tmp/deerflow-native-guild/config/personas.json',
+  );
   assert.equal(calls[0].options.env.CI, 'true');
   assert.equal(
     calls[0].options.env.PATH.startsWith('/tmp/deerflow-native-guild/.runtime/tools/pnpm/node_modules/.bin:'),
     true,
   );
+});
+
+const PERSONA_IDS = [
+  'relaxed_wit',
+  'clear_direct',
+  'curious_explorer',
+  'observant_warmth',
+  'quiet_depth',
+  'warm_candid',
+];
+
+function persona(id, version = '1.0.1') {
+  return {
+    id,
+    version,
+    core: `${id} core`,
+    behavior: {
+      attention: 'attention',
+      voice: 'voice',
+      humor: 'humor',
+      disagreement: 'disagreement',
+      care: 'care',
+      initiative: 'initiative',
+    },
+    interests: ['interest'],
+  };
+}
+
+async function withCatalog(catalog, callback) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'deerflow-personas-'));
+  const catalogPath = path.join(directory, 'personas.json');
+  await writeFile(catalogPath, JSON.stringify(catalog), 'utf8');
+  try {
+    return await callback(catalogPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test('persona catalog inspection accepts the exact six versioned assets', async () => {
+  await withCatalog({
+    schema_version: '1.0',
+    personas: PERSONA_IDS.map((id) => persona(id)),
+  }, async (catalogPath) => {
+    assert.deepEqual(await inspectPersonaCatalog({ catalogPath }), {
+      detail: '6 CreatorAgent personas at version 1.0.1',
+    });
+  });
+});
+
+test('persona catalog inspection rejects extra, duplicate, and wrong-version assets', async () => {
+  const invalidCatalogs = [
+    [...PERSONA_IDS.map((id) => persona(id)), persona('extra_persona')],
+    [...PERSONA_IDS.slice(0, -1).map((id) => persona(id)), persona('relaxed_wit')],
+    PERSONA_IDS.map((id) => persona(id, id === 'quiet_depth' ? '1.0.0' : '1.0.1')),
+  ];
+
+  for (const personas of invalidCatalogs) {
+    await withCatalog({ schema_version: '1.0', personas }, async (catalogPath) => {
+      await assert.rejects(
+        inspectPersonaCatalog({ catalogPath }),
+        /exactly the six approved CreatorAgent personas at version 1\.0\.1/i,
+      );
+    });
+  }
+});
+
+test('persona catalog inspection rejects malformed and oversized asset bodies', async () => {
+  const valid = PERSONA_IDS.map((id) => persona(id));
+  const invalidCatalogs = [
+    { schema_version: '1.0', personas: valid, extra: true },
+    {
+      schema_version: '1.0',
+      personas: valid.map((asset, index) => (index === 0 ? { ...asset, identity: 'forbidden' } : asset)),
+    },
+    {
+      schema_version: '1.0',
+      personas: valid.map((asset, index) => (index === 0
+        ? { ...asset, behavior: { ...asset.behavior, care: '' } }
+        : asset)),
+    },
+    {
+      schema_version: '1.0',
+      personas: valid.map((asset, index) => (index === 0 ? { ...asset, core: 'x'.repeat(513) } : asset)),
+    },
+    {
+      schema_version: '1.0',
+      personas: valid.map((asset, index) => (index === 0 ? { ...asset, interests: [] } : asset)),
+    },
+  ];
+
+  for (const catalog of invalidCatalogs) {
+    await withCatalog(catalog, async (catalogPath) => {
+      await assert.rejects(inspectPersonaCatalog({ catalogPath }), /invalid persona catalog/i);
+    });
+  }
+
+  await withCatalog({
+    schema_version: '1.0',
+    personas: valid.map((asset, index) => (index === 0
+      ? { ...asset, core: 'x'.repeat(33_000) }
+      : asset)),
+  }, async (catalogPath) => {
+    await assert.rejects(inspectPersonaCatalog({ catalogPath }), /32 KiB/i);
+  });
 });

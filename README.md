@@ -1,12 +1,21 @@
-# TikTok LIVE 公会 DeerFlow Agent
+# TikTok LIVE 公会 DeerFlow CreatorAgent
 
-本目录是公会 Agent 的独立项目。当前可运行的是本机 DeerFlow Lead 基线，完整产品目标见 [总体方案](docs/superpowers/specs/2026-09-23-deerflow-tiktok-guild-end-to-end-design.md)，已核对的能力缺口见 [迁移审计](docs/audits/2026-09-23-deerflow-guild-migration-audit.md)。旧 Wingman 仓库保留原运行目录作为回退资料；此处是后续公会开发的项目入口。
+本目录运行一个本机 DeerFlow 默认 Lead。2026-09-24 起，产品唯一生效规格是用户提供的 `CreatorAgent_FINAL_PERSONA_REV1_20260924.zip` 及 [AI 自动切换人格修订](docs/superpowers/specs/2026-09-24-deerflow-auto-persona-design.md)。较早的招募运行时、关系摘要、方法卡、通道来源和旧计划均已作废；只保留了原有“工作台”的路由、导航、翻译和诚实占位。
 
-This package runs one local DeerFlow Lead on this Mac. It talks directly to the existing read-only Guild Operator and TKDesk MCP servers. There is no recruiter worker, Rust bridge, ledger, or projection database.
+当前包内容：
 
-External-channel runs now carry a server-owned, bounded provenance descriptor into that same default Lead. The descriptor identifies the channel origin without creating a separate creator agent or restricting ordinary Lead planning and tool use. This package still has no TikTok receive transport, send transport, or delivery-receipt support; it does not receive or send real TikTok messages.
+- 六份不可变的 `1.0.1` 表达人格，新关系默认 `relaxed_wit@1.0.1`；
+- 同一 DeerFlow SQLite 中按 `(运营者, 公会账号, TikTok 主播 UID)` 隔离的关系证据与人格决策；
+- 默认 Lead 根据当前主播本人的有来源交流证据自动保持或切换人格，常规流程没有运营者手动换装器；
+- 附件 `SOCIAL_KERNEL.md` 作为默认 Lead 内核；TKDesk 仍拥有候选主播事实，Guild Operator 仍拥有公会后台事实。
 
-## First setup
+人格只改变观察与表达，不改写身份、关系事实、承诺、禁联或权限。不允许用职业、性别、收入、主播规模或推测脆弱性进行配型。
+
+## 当前能力边界
+
+当前尚未验证真实 TikTok 来信、发信、正式邀约或送达回执。现有 CreatorAgent 工具只能记录运营者笔记；未来真实通道必须建立服务端可核验来源后，才能写入“主播原话”。草稿、MCP 连通或离线测试都不代表已收到、已发送或已完成公会运营。
+
+## 安装与启动
 
 ```sh
 cd /Users/yangyucheng/Documents/ChatGPT/Tiktok公会
@@ -16,14 +25,12 @@ npm run doctor
 npm start
 ```
 
-`bootstrap` downloads the approved DeerFlow commit and installs its local dependencies. A later run reuses the same checkout only when its remote and exact commit still match.
+`bootstrap` 校验并使用固定 DeerFlow commit，应用唯一累计补丁，并将社交内核安装到 `.runtime/deerflow-home/SOUL.md`。如果运行目录里恰好是本项目上一版业务优先内核，它会安全迁移；用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再运行 doctor 和 DeerFlow。
 
-`doctor` validates the two plugin catalogs without calling a TikTok business tool. `start` reruns doctor and then starts DeerFlow in the foreground. Press `Ctrl-C` to stop it.
+`doctor` 验证固定源码、累计补丁、本地依赖、两个 MCP 工具目录，以及 `config/personas.json` 中恰好六份 `1.0.1` 人格。它不调用 TikTok 业务写工具。
 
-## First safe prompt
+## 第一个安全提示
 
-> As the guild Lead, use current Guild Operator and TKDesk facts for a read-only diagnosis of recruitment readiness. State each fact's source, time, scope, and any missing data. Do not send, invite, follow, comment, gift, publish, or change anything. Tell me which login or configuration step I must complete next.
+> 作为默认 Lead，请只读使用 Guild Operator 和 TKDesk 的当前事实，说明每项事实的来源、时间、作用域和缺失数据。不要发消息、发邀约、关注、评论、送礼、发布或更改平台状态。
 
-If an existing plugin opens native Chrome, finish the TikTok login there yourself, then rerun `npm run doctor`. Phase one can read evidence and draft the next action; it cannot perform outreach.
-
-本项目的 `.runtime/` 由 `bootstrap` 在当前目录重新生成，不纳入 Git。旧目录的运行缓存和空案件目录仍保留在原位置，供核对；新 Lead 不读取旧案件目录。
+`.runtime/` 是可重建的本机运行目录，不纳入 Git。已核对的当前能力与缺口见 [迁移审计](docs/audits/2026-09-23-deerflow-guild-migration-audit.md)。

@@ -27,8 +27,24 @@ test('real cumulative patch includes all packaged product surfaces', async () =>
   const patch = await readFile(path.join(REAL_PACKAGE_ROOT, manifest.product_patches[0]), 'utf8');
   // This guards packaging completeness. Pinned-source pytest covers runtime behavior.
   assert.match(patch, /frontend\/src\/app\/workspace\/guild\/page\.tsx/u);
-  assert.match(patch, /TRUSTED_CHANNEL_PROVENANCE_CONTEXT_KEY/u);
-  assert.match(patch, /render_trusted_channel_provenance/u);
+  assert.match(patch, /backend\/packages\/harness\/deerflow\/creator_agent\/runtime\.py/u);
+  assert.match(patch, /backend\/packages\/harness\/deerflow\/creator_agent\/persona_selector\.py/u);
+  assert.match(patch, /backend\/packages\/harness\/deerflow\/persistence\/creator_agent_relationship\/sql\.py/u);
+  assert.match(patch, /backend\/packages\/harness\/deerflow\/persistence\/migrations\/versions\/0025_creator_agent_relationship\.py/u);
+  assert.match(patch, /backend\/tests\/test_creator_agent_personas\.py/u);
+  assert.match(patch, /backend\/tests\/test_creator_agent_relationship\.py/u);
+  assert.match(patch, /backend\/tests\/test_creator_agent_runtime\.py/u);
+
+  for (const obsolete of [
+    'TRUSTED_CHANNEL_PROVENANCE_CONTEXT_KEY',
+    'guild_creator_context',
+    '0025_guild_creator_context',
+    'deerflow/recruitment',
+    'deerflow\\.recruitment',
+    'guild_method_lookup',
+  ]) {
+    assert.doesNotMatch(patch, new RegExp(obsolete, 'u'));
+  }
 });
 
 test('applies one declared patch once', async () => {

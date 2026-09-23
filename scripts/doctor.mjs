@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { constants as fsConstants } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { access, stat } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,9 +27,31 @@ export const REQUIRED_DOCTOR_CHECKS = Object.freeze([
   'guild_dependencies',
   'deerflow_head',
   'product_patches',
+  'persona_catalog',
   'deerflow_pnpm',
   'guild_mcp',
   'tkdesk_mcp',
+]);
+
+const CREATOR_AGENT_PERSONA_IDS = Object.freeze([
+  'relaxed_wit',
+  'clear_direct',
+  'curious_explorer',
+  'observant_warmth',
+  'quiet_depth',
+  'warm_candid',
+]);
+const CREATOR_AGENT_PERSONA_VERSION = '1.0.1';
+const PERSONA_CATALOG_MAX_BYTES = 32_768;
+const PERSONA_CATALOG_FIELDS = Object.freeze(['schema_version', 'personas']);
+const PERSONA_ASSET_FIELDS = Object.freeze(['id', 'version', 'core', 'behavior', 'interests']);
+const PERSONA_BEHAVIOR_FIELDS = Object.freeze([
+  'attention',
+  'voice',
+  'humor',
+  'disagreement',
+  'care',
+  'initiative',
 ]);
 
 async function pathExists(candidate) {
@@ -85,6 +107,59 @@ export async function inspectPinnedPnpm({
   return { detail: `pnpm ${version}` };
 }
 
+export async function inspectPersonaCatalog({ catalogPath }) {
+  const raw = await readFile(catalogPath);
+  if (raw.byteLength > PERSONA_CATALOG_MAX_BYTES) {
+    throw new Error('Persona catalog exceeds 32 KiB');
+  }
+  const catalog = JSON.parse(raw.toString('utf8'));
+  const exactKeys = (value, fields) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const keys = Object.keys(value).sort();
+    const expected = [...fields].sort();
+    return keys.length === expected.length
+      && keys.every((key, index) => key === expected[index]);
+  };
+  const boundedText = (value, maxLength) => typeof value === 'string'
+    && value.trim().length > 0
+    && [...value].length <= maxLength;
+
+  if (!exactKeys(catalog, PERSONA_CATALOG_FIELDS) || catalog.schema_version !== '1.0') {
+    throw new Error('Invalid persona catalog fields or schema');
+  }
+  const personas = Array.isArray(catalog.personas) ? catalog.personas : [];
+  const actual = personas
+    .map((persona) => `${persona?.id}@${persona?.version}`)
+    .sort();
+  const expected = CREATOR_AGENT_PERSONA_IDS
+    .map((id) => `${id}@${CREATOR_AGENT_PERSONA_VERSION}`)
+    .sort();
+
+  if (
+    catalog?.schema_version !== '1.0'
+    || actual.length !== expected.length
+    || actual.some((entry, index) => entry !== expected[index])
+  ) {
+    throw new Error('Catalog must contain exactly the six approved CreatorAgent personas at version 1.0.1');
+  }
+
+  for (const persona of personas) {
+    if (
+      !exactKeys(persona, PERSONA_ASSET_FIELDS)
+      || !boundedText(persona.core, 512)
+      || !exactKeys(persona.behavior, PERSONA_BEHAVIOR_FIELDS)
+      || PERSONA_BEHAVIOR_FIELDS.some((field) => !boundedText(persona.behavior[field], 256))
+      || !Array.isArray(persona.interests)
+      || persona.interests.length < 1
+      || persona.interests.length > 8
+      || persona.interests.some((interest) => !boundedText(interest, 128))
+    ) {
+      throw new Error('Invalid persona catalog asset body');
+    }
+  }
+  return { detail: '6 CreatorAgent personas at version 1.0.1' };
+}
+
 function defaultAdapters(packageRoot) {
   let loadedConfig;
   const getConfig = async () => {
@@ -103,6 +178,7 @@ function defaultAdapters(packageRoot) {
   );
   const guildLauncher = path.join(GUILD_OPERATOR_ROOT, 'src', 'server.mjs');
   const tkdeskLauncher = path.join(TKDESK_ROOT, 'scripts', 'launch_mcp');
+  const personaCatalog = path.join(packageRoot, 'config', 'personas.json');
 
   return {
     node: async () => {
@@ -152,6 +228,7 @@ function defaultAdapters(packageRoot) {
       });
       return { detail: `${patches.length} product patch(es) applied` };
     },
+    persona_catalog: async () => inspectPersonaCatalog({ catalogPath: personaCatalog }),
     deerflow_pnpm: async () => {
       await access(pnpmBinary, fsConstants.X_OK);
       return inspectPinnedPnpm({
