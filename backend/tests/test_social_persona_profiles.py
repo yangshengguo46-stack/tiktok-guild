@@ -118,6 +118,29 @@ async def test_selector_ignores_old_creator_quote_when_new_version_is_other_sour
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("agent_id", [None, "agent-a"])
+async def test_selector_rejects_explicit_other_agent_evidence(agent_id):
+    scope = ProfileScope(owner_user_id="owner", account_id="account", agent_instance_id=agent_id, relation_ref="creator")
+    model = FakeModel('{"action":"switch","persona_id":"clear_direct","confidence":0.99,"evidence_refs":["creator:m1"],"reason":"direct"}')
+    selector = AutomaticPersonaSelector(model=model)
+    evidence = [{"source_ref": "creator:m1", "source_kind": "creator_message", "owner_user_id": "owner", "account_id": "account", "agent_instance_id": "agent-b", "relation_ref": "creator", "evidence_version": 2, "text": "Be direct"}]
+    assert await selector.choose(scope=scope, current_profile_ref="relaxed_wit@1.0.1", candidates=load_persona_catalog(), evidence=evidence, evidence_version=2, evaluated_evidence_version=1, binding_revision=3) is None
+    assert not model.calls
+
+
+@pytest.mark.asyncio
+async def test_selector_rejects_noncreator_latest_version_despite_newer_creator_quote():
+    model = FakeModel('{"action":"switch","persona_id":"clear_direct","confidence":0.99,"evidence_refs":["creator:m2"],"reason":"direct"}')
+    selector = AutomaticPersonaSelector(model=model)
+    evidence = [
+        {"source_ref": "creator:m2", "source_kind": "creator_message", "owner_user_id": "owner", "account_id": "account", "relation_ref": "creator", "evidence_version": 2, "text": "Be direct"},
+        {"source_ref": "operator:n3", "source_kind": "operator_note", "owner_user_id": "owner", "account_id": "account", "relation_ref": "creator", "evidence_version": 3, "text": "Use a different style"},
+    ]
+    assert await selector.choose(scope=SCOPE, current_profile_ref="relaxed_wit@1.0.1", candidates=load_persona_catalog(), evidence=evidence, evidence_version=3, evaluated_evidence_version=1, binding_revision=3) is None
+    assert not model.calls
+
+
+@pytest.mark.asyncio
 async def test_selector_rejects_unapproved_candidate_content():
     model = FakeModel('{"action":"switch","persona_id":"clear_direct","confidence":0.99,"evidence_refs":["creator:m1"],"reason":"direct"}')
     selector = AutomaticPersonaSelector(model=model)
@@ -188,6 +211,40 @@ async def test_generator_rejects_unsourced_or_cross_scope_creator_preference():
                 valid_basis_refs=("creator:m1",),
             )
     assert not model.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_id", [None, "agent-a"])
+async def test_generator_rejects_explicit_other_agent_preference(agent_id):
+    scope = ProfileScope(owner_user_id="owner", account_id="account", agent_instance_id=agent_id, relation_ref="creator")
+    model = FakeModel('{"overrides":{"voice":"brief"},"diff_summary":"brief","examples":["Synthetic: one","Synthetic: two"]}')
+    generator = PersonaProfileGenerator(model=model)
+    base = PersonaProfile(profile_id="base", version="1", base_template_ref="relaxed_wit@1.0.1", overrides={}, created_by="operator", basis_refs=())
+    with pytest.raises(ValueError):
+        await generator.generate(
+            base_profile=base,
+            profile_id="brief",
+            version="1",
+            requirement=None,
+            creator_preferences=({"source_ref": "creator:m1", "source_kind": "creator_message", "owner_user_id": "owner", "account_id": "account", "agent_instance_id": "agent-b", "relation_ref": "creator", "text": "Please be brief"},),
+            scope=scope,
+            immutable_identity_facts={"name": "Guild AI"},
+            basis_refs=("creator:m1",),
+            valid_basis_refs=("creator:m1",),
+        )
+    assert not model.calls
+
+
+@pytest.mark.asyncio
+async def test_generator_patches_custom_base_preserving_unspecified_fields():
+    model = FakeModel('{"overrides":{"voice":"direct"},"diff_summary":"More direct","examples":["Synthetic: one","Synthetic: two"]}')
+    generator = PersonaProfileGenerator(model=model)
+    base = PersonaProfile(profile_id="custom", version="1", base_template_ref="relaxed_wit@1.0.1", overrides={"voice": "soft", "care": "patient"}, created_by="operator", basis_refs=())
+    result = await generator.generate(
+        base_profile=base, profile_id="updated", version="2", requirement="Speak directly", creator_preferences=(), immutable_identity_facts={"name": "Guild AI"}, basis_refs=("operator:req-1",), valid_basis_refs=("operator:req-1",)
+    )
+    assert dict(result.candidate.overrides) == {"voice": "direct", "care": "patient"}
+    assert dict(base.overrides) == {"voice": "soft", "care": "patient"}
 
 
 @pytest.mark.asyncio

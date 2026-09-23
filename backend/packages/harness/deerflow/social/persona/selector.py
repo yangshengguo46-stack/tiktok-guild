@@ -95,10 +95,10 @@ class AutomaticPersonaSelector:
         for row in evidence[:32]:
             if not isinstance(row, Mapping) or row.get("source_kind") != "creator_message":
                 continue
-            if any(row.get(key) != getattr(scope, key) for key in ("owner_user_id", "account_id", "relation_ref")):
+            if any(row.get(key) != getattr(scope, key) for key in ("owner_user_id", "account_id", "agent_instance_id", "relation_ref")):
                 continue
             row_version = row.get("evidence_version")
-            if type(row_version) is not int or not evaluated_evidence_version < row_version <= evidence_version:
+            if type(row_version) is not int or row_version != evidence_version:
                 continue
             ref, content = row.get("source_ref"), row.get("text")
             if isinstance(ref, str) and 0 < len(ref) <= 256 and isinstance(content, str) and 0 < len(content) <= 4000:

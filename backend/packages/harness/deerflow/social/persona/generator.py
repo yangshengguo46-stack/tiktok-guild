@@ -88,7 +88,7 @@ class PersonaProfileGenerator:
         for item in creator_preferences:
             if not isinstance(item, Mapping) or not isinstance(scope, ProfileScope) or item.get("source_kind") != "creator_message":
                 raise ValueError("invalid creator preference source")
-            if any(item.get(key) != getattr(scope, key) for key in ("owner_user_id", "account_id", "relation_ref")):
+            if any(item.get(key) != getattr(scope, key) for key in ("owner_user_id", "account_id", "agent_instance_id", "relation_ref")):
                 raise ValueError("cross-scope creator preference")
             ref, preference = item.get("source_ref"), item.get("text")
             if not isinstance(ref, str) or ref not in basis_refs or not isinstance(preference, str) or not 0 < len(preference) <= 512:
@@ -120,5 +120,13 @@ class PersonaProfileGenerator:
         summary, examples = raw["diff_summary"], raw["examples"]
         if not isinstance(summary, str) or not 0 < len(summary) <= 512 or not isinstance(examples, list) or not 2 <= len(examples) <= 3 or any(not isinstance(item, str) or not 0 < len(item) <= 512 for item in examples):
             raise ValueError("invalid generator explanation")
-        candidate = PersonaProfile(profile_id=profile_id, version=version, base_template_ref=base_profile.base_template_ref, overrides=raw["overrides"], created_by="generated", basis_refs=basis_refs)
+        patch = PersonaProfile(profile_id=profile_id, version=version, base_template_ref=base_profile.base_template_ref, overrides=raw["overrides"], created_by="generated", basis_refs=basis_refs)
+        candidate = PersonaProfile(
+            profile_id=profile_id,
+            version=version,
+            base_template_ref=base_profile.base_template_ref,
+            overrides={**base_profile.overrides, **patch.overrides},
+            created_by="generated",
+            basis_refs=basis_refs,
+        )
         return GeneratedPersonaCandidate(candidate=candidate, diff_summary=summary, synthetic_examples=tuple(examples))
