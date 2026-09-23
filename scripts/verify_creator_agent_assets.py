@@ -11,6 +11,8 @@ DEFAULT_ASSET_ROOT = Path(__file__).resolve().parents[1] / "docs" / "product" / 
 
 
 def verify_assets(root: Path) -> tuple[int, int]:
+    if root.is_symlink():
+        raise ValueError(f"asset root symlink is not allowed: {root}")
     root = root.resolve()
     manifest_path = root / "MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

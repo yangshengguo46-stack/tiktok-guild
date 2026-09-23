@@ -27,6 +27,15 @@ def test_imported_package_matches_every_manifest_hash():
     assert "Verified 76 manifest files (473848 bytes)" in result.stdout
 
 
+def test_verifier_rejects_symlinked_package_root(tmp_path):
+    linked_root = tmp_path / "package-link"
+    linked_root.symlink_to(ASSETS, target_is_directory=True)
+
+    result = _verify(linked_root)
+    assert result.returncode != 0
+    assert "asset root symlink is not allowed" in result.stderr
+
+
 @pytest.mark.parametrize("change", ["missing", "extra", "modified"])
 def test_verifier_rejects_file_set_or_hash_drift(tmp_path, change):
     candidate = tmp_path / "package"
