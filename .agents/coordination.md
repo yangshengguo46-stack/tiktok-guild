@@ -1,6 +1,6 @@
 # TikTok 公会 DeerFlow 协作入口
 
-最后更新：2026-09-24 04:34 CST
+最后更新：2026-09-24 04:36 CST
 台账写入者：根 Agent（`/root`）
 
 ## 当前主线
@@ -20,6 +20,6 @@
 ## 恢复规则
 
 1. 先读本文和当前台账，再核对 `git status` / `git log` / DeerFlow worktree 状态。
-2. 架构设计获得用户确认前，只允许只读调研与更新本台账，不写实现代码。用户已确认当前根仓迁移为完整 DeerFlow fork，当前只等待第一个 Social Runtime 闭环范围确认。
+2. 架构设计获得用户确认前，只允许只读调研与更新本台账，不写实现代码。用户已确认完整 DeerFlow fork 事实源和第一个 Social Runtime 纵向闭环范围，当前进入内部架构方案选择。
 3. 每个派工使用唯一 task/dispatch ID；不覆盖历史、不重复派工。
 4. 外层累计 patch 到真实 fork 的迁移路线尚在设计；未迁移前不删 patch，不破坏当前可重现基线。

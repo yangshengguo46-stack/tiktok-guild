@@ -18,10 +18,12 @@
 8. 保持 PERSONA-REV1 原设计：PersonaProfile 是可换装但不止于浅层语气的独立表达资产；Agent/子 Agent 覆盖只是可选解析层，`agent_override = null` 时直接继承账号/关系配置。不为人格创建或强制绑定子 Agent。
 9. “具体人设”不由子 Agent 绑定产生；它由真实 Identity、持续的 Self Memory/观点与承诺、Role 共同组成，再穿上当前有效 Persona，同时保留 Relationship 和 TurnContext。
 
+10. `DSR-DEC-002` 已由用户确认：第一个可验收闭环是 `external event → restore Identity + Self + Role + Relationship + EffectivePersona + TurnContext → Lead → reply/tool/wait/no_reply → commit`；不新增子 Agent 人格工作包。
+
 ## 架构决策状态
 
 - `DSR-DEC-001`（已确认）：把真实 DeerFlow fork 提升为当前项目根仓库/唯一源码事实源，并将当前 Node 引导、doctor、配置与工作台资产搬入 fork 的 `ops/` 或等价发行目录，验证后退役累计 patch overlay。
-- `DSR-DEC-002`：第一个可验收闭环是否限定为 `external event → restore Identity + Self + Role + Relationship + EffectivePersona + TurnContext → Lead → reply/tool/wait/no_reply → commit`，而将 proactive、candidate compare、Jev advisory 和可选子 Agent 上下文传递放到后续阶段。当前推荐：是。不存在独立的“子 Agent 人格绑定”必做工作包。
+- `DSR-DEC-002`（已确认）：第一个可验收闭环限定为 `external event → restore Identity + Self + Role + Relationship + EffectivePersona + TurnContext → Lead → reply/tool/wait/no_reply → commit`，将 proactive、candidate compare、Jev advisory 和可选子 Agent 上下文传递放到后续阶段。不存在独立的“子 Agent 人格绑定”必做工作包。
 
 ## 任务台账
 
@@ -90,3 +92,4 @@
 - 2026-09-24 04:21 CST：3 项只读核查全部完成，未改产品代码。进入事实源与首个 Social Runtime 纵向闭环的方案比较。
 - 2026-09-24 04:27 CST：用户确认 `DSR-DEC-001`，当前项目根仓将迁移为完整 DeerFlow fork，累计 patch 只作为迁移前对照物。
 - 2026-09-24 04:34 CST：根据用户纠正复核 PERSONA-REV1；删除“人格必须绑定子 Agent”的误解。子 Agent 覆盖保持可选，具体人设由 Identity/Self/Role 与当前有效 Persona 组合得到，原计划其他边界不变。
+- 2026-09-24 04:36 CST：用户确认 `DSR-DEC-002`，第一阶段纵向闭环范围锁定；进入内部架构方案比较，仍未启动实现。
