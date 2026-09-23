@@ -19,6 +19,7 @@
 9. “具体人设”不由子 Agent 绑定产生；它由真实 Identity、持续的 Self Memory/观点与承诺、Role 共同组成，再穿上当前有效 Persona，同时保留 Relationship 和 TurnContext。
 
 10. `DSR-DEC-002` 已由用户确认：第一个可验收闭环是 `external event → restore Identity + Self + Role + Relationship + EffectivePersona + TurnContext → Lead → reply/tool/wait/no_reply → commit`；不新增子 Agent 人格工作包。
+11. 用户明确要求直接按已提供的详细方案施工；停止重新提出替代架构或反复确认已冻结的产品决策。
 
 ## 架构决策状态
 
@@ -33,11 +34,12 @@
 | `DSR-AUDIT-001` | 核查 patch overlay → 真实 fork 事实源的迁移路径 | `/root/audit_fork_migration` | 完成 | 根仓、`.runtime/deer-flow`、包装脚本 | 已交付拓扑、分阶段迁移、5 项主要风险和验证；未改文件 |
 | `DSR-AUDIT-002` | 映射 Social Runtime 原生接入点 | `/root/map_social_runtime` | 完成 | Lead/ThreadState/Memory/Subagent/Gateway/Channel | 已交付文件/符号级接入点、数据流、失败关闭与测试切面；未改文件 |
 | `DSR-AUDIT-003` | 评估 Phase 0 人格基础的保留与迁移边界 | `/root/audit_persona_foundation` | 完成 | `ad8d9aa`、`deerflow.creator_agent`、关系持久化 | 已交付保留/搬迁/退役矩阵与验收矩阵；未改文件 |
-| `DSR-DESIGN-001` | 提出 2–3 种事实源与原生化方案 | `/root` | 执行中 | 三项核查结果 | 明确推荐、交易与不选理由 |
-| `DSR-DESIGN-002` | 分节向用户确认架构、数据流、异常与测试 | `/root` | 待执行 | `DSR-DESIGN-001` | 每节有明确确认门 |
-| `DSR-SPEC-001` | 写入并自审 Social Runtime 设计文档 | `/root` | 待执行 | 用户确认的分节设计 | 无 TBD/TODO/矛盾/歧义；提交 Git；等用户复审 |
-| `DSR-PLAN-001` | 生成测试先行的实施计划 | `/root` | 待执行 | 用户批准的 spec | 使用 writing-plans；实现任务可并行且文件边界无冲突 |
-| `DSR-IMPL-*` | 实现与独立验收 | 未派工 | 待执行 | 批准后的 plan | 当前不得启动 |
+| `DSR-DESIGN-001` | 核对附件方案与当前源码 | `/root` | 完成 | 三项核查结果，FINAL / PERSONA-REV1，本体化补充方案 | 用户确认不再重新选型，直接施工 |
+| `DSR-DESIGN-002` | 锁定事实源、纵向闭环和人格/子 Agent 边界 | `/root` | 完成 | `DSR-DEC-001` / `DSR-DEC-002` | 决策已写入“已锁定决策” |
+| `DSR-SPEC-001` | 复核用户提供的最终规格 | `/root` | 完成 | FINAL_SPEC、PERSONALITY_SYSTEM、IMPLEMENTATION_MAP、MIGRATION_FROM_FINAL、本体化补充 | 附件方案就是已批准 spec，不重写第二份产品方案 |
+| `DSR-PLAN-001` | 生成测试先行的实施计划 | `/root` | 完成 | 用户批准的 spec | `docs/superpowers/plans/2026-09-24-deerflow-social-agent-native-runtime.md`；10 个任务，58 个步骤 |
+| `DSR-IMPL-001` | 把当前根仓迁移为真实 DeerFlow fork | 待派工 | 待执行 | plan Task 1 | 上游和旧项目历史均为祖先；Phase 0 成为普通源码提交；不破坏现场数据 |
+| `DSR-IMPL-002+` | 按 plan Tasks 2–10 实现与独立验收 | 待派工 | 待执行 | `DSR-IMPL-001` | 依赖图内独立文件域并行，每批 RED/GREEN/审查/提交 |
 
 ## Phase 0 保留验收约束
 
@@ -93,3 +95,4 @@
 - 2026-09-24 04:27 CST：用户确认 `DSR-DEC-001`，当前项目根仓将迁移为完整 DeerFlow fork，累计 patch 只作为迁移前对照物。
 - 2026-09-24 04:34 CST：根据用户纠正复核 PERSONA-REV1；删除“人格必须绑定子 Agent”的误解。子 Agent 覆盖保持可选，具体人设由 Identity/Self/Role 与当前有效 Persona 组合得到，原计划其他边界不变。
 - 2026-09-24 04:36 CST：用户确认 `DSR-DEC-002`，第一阶段纵向闭环范围锁定；进入内部架构方案比较，仍未启动实现。
+- 2026-09-24 04:58 CST：用户纠正“不要重新设计，直接按四份详细方案施工”。已将方案映射为 10 个可验收实施任务，下一步直接执行 Task 1。
