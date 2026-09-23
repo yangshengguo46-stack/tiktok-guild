@@ -169,6 +169,8 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         payload["relationship"]["shared_topics"],
         payload["relationship"]["preferences"],
     ]
+    expression = payload["persona"]["behavior"]
+    temporary_style = payload["turn"]["temporary_style"]
     while True:
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         data = escape(raw, quote=False)
@@ -182,5 +184,28 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         source = payload["turn"]["source_text"]
         if source:
             payload["turn"]["source_text"] = source[: len(source) // 2]
+            continue
+        reducible: list[tuple[int, dict, str, int | None]] = []
+        for values in (expression, temporary_style):
+            for key, value in values.items():
+                if isinstance(value, str) and len(value) > 1:
+                    reducible.append((len(escape(value, quote=False)), values, key, None))
+                elif isinstance(value, list):
+                    for index, item in enumerate(value):
+                        if len(item) > 1:
+                            reducible.append((len(escape(item, quote=False)), values, key, index))
+        if reducible:
+            _, values, key, index = max(reducible, key=lambda item: item[0])
+            if index is None:
+                values[key] = values[key][: len(values[key]) // 2]
+            else:
+                value = values[key][index]
+                values[key][index] = value[: len(value) // 2]
+            continue
+        if expression:
+            expression.pop(next(reversed(expression)))
+            continue
+        if temporary_style:
+            temporary_style.pop(next(reversed(temporary_style)))
             continue
         raise ValueError("social context exceeds bounded data budget")

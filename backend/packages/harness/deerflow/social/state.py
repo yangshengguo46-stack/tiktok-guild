@@ -55,7 +55,7 @@ def merge_social(existing: SocialState | None, new: SocialState | None) -> Socia
     for key in _REF_FIELDS:
         if key in merged:
             bounded_text(merged[key], key, 128 if key != "persona_fingerprint" else 64)
-        if existing is not None and key in {"identity_ref", "role_ref", "persona_fingerprint"} and key in new and key in existing and new[key] != existing[key]:
+        if existing is not None and key in {"identity_ref", "role_ref", "persona_fingerprint"} and key in new and (key not in existing or new[key] != existing[key]):
             raise ValueError(f"{key} binding cannot change through social state")
     for key in _REVISION_FIELDS:
         if key in merged and (type(merged[key]) is not int or merged[key] < 0):

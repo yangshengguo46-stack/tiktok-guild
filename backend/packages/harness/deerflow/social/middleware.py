@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Protocol, override
+from uuid import uuid4
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
@@ -27,7 +28,7 @@ class SocialContextMiddleware(AgentMiddleware):
         super().__init__()
         self._runtime = runtime
         self._bound_scope = bound_scope
-        self._marker_token = object()
+        self._marker_token = uuid4().hex
 
     def _inject(self, request: ModelRequest) -> ModelRequest:
         social = request.state.get("social")
@@ -40,7 +41,7 @@ class SocialContextMiddleware(AgentMiddleware):
         snapshot = self._runtime.snapshot_for(self._bound_scope)
         if not isinstance(snapshot, SocialContextSnapshot) or snapshot.scope != self._bound_scope:
             raise ValueError("runtime returned a mismatched social snapshot")
-        messages = [message for message in request.messages if getattr(message, "additional_kwargs", {}).get(_SOCIAL_MARKER) is not self._marker_token]
+        messages = [message for message in request.messages if getattr(message, "additional_kwargs", {}).get(_SOCIAL_MARKER) != self._marker_token]
         authority = SystemMessage(content=build_social_context(snapshot), additional_kwargs={_SOCIAL_MARKER: self._marker_token})
         data = HumanMessage(content=build_social_context_data(snapshot), additional_kwargs={_SOCIAL_MARKER: self._marker_token, "hide_from_ui": True})
         return request.override(messages=insert_after_leading_system_messages(messages, [authority, data]))

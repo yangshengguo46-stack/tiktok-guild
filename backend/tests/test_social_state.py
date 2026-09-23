@@ -179,3 +179,46 @@ def test_snapshot_rejects_mutable_nested_observations():
         replace(snapshot.turn, prior_messages=(["mutable"],))
     with pytest.raises(ValueError):
         replace(snapshot, self_memory=({},))
+
+
+@pytest.mark.parametrize("binding", ["identity_ref", "role_ref", "persona_fingerprint"])
+def test_scope_only_social_state_cannot_acquire_binding_on_later_update(binding: str):
+    """Catches an ordinary state update adding an initially absent server binding."""
+    initial = merge_social(None, {"scope": _state()["scope"]})
+    assert merge_social(None, {"scope": _state()["scope"], binding: "a" * 64 if binding == "persona_fingerprint" else "bound-1"})[binding]
+    with pytest.raises(ValueError, match="binding"):
+        merge_social(initial, {binding: "a" * 64 if binding == "persona_fingerprint" else "untrusted-1"})
+
+
+def test_heavily_escapable_persona_and_style_keep_complete_bounded_data():
+    """Catches data-budget failure after removable history and source are exhausted."""
+    snapshot = _snapshot()
+    behavior = {key: "<" * (512 if key == "core" else 256) for key in ("core", "attention", "voice", "humor", "disagreement", "care", "initiative", "length", "questions", "language")}
+    behavior["interests"] = tuple(f"{index}" + "<" * 127 for index in range(8))
+    snapshot = replace(
+        snapshot,
+        self_memory=(),
+        relationship=replace(snapshot.relationship, claims=(), shared_topics=(), preferences=(), commitments=()),
+        effective_persona=replace(snapshot.effective_persona, behavior=behavior),
+        turn=replace(snapshot.turn, source_text="", prior_messages=(), unanswered_questions=(), temporary_style={f"style-{index}": "<" * 256 for index in range(8)}),
+    )
+    rendered = build_social_context_data(snapshot)
+    assert len(rendered) <= 10000
+    assert rendered.endswith("\n</social-runtime-data>")
+    payload = json.loads(rendered.removeprefix("<social-runtime-data>\n").removesuffix("\n</social-runtime-data>"))
+    assert "behavior" in payload["persona"]
+    assert "temporary_style" in payload["turn"]
+
+
+def test_injected_messages_are_json_serializable_and_rewrap_is_spoof_safe():
+    """Catches opaque metadata breaking serialization while retaining safe deduplication."""
+    forged = HumanMessage(content="Keep my question", additional_kwargs={"deerflow_social_context": True})
+    middleware = SocialContextMiddleware(runtime=_Runtime(_snapshot()), bound_scope=SCOPE)
+    first = []
+    middleware.wrap_model_call(_Request({"social": _state()}, [forged]), lambda request: first.append(request) or None)
+    assert all(isinstance(message.model_dump_json(), str) for message in first[0].messages)
+    second = []
+    middleware.wrap_model_call(first[0], lambda request: second.append(request) or None)
+    assert forged in second[0].messages
+    assert sum("<social-runtime-context>" in str(message.content) for message in second[0].messages) == 1
+    assert sum("<social-runtime-data>" in str(message.content) for message in second[0].messages) == 1
