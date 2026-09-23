@@ -1,7 +1,7 @@
 """Migration tests for 0024_project_documents (Phase-2 spec §6.1).
 
 Pins the table shape and the four indexes on upgrade, the clean downgrade,
-and its position immediately before the current chain head.
+and its predecessor relationship in the single migration chain.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import asyncio
 import pytest
 import sqlalchemy as sa
 from alembic import command
+from alembic.script import ScriptDirectory
 
 from deerflow.persistence.bootstrap import _get_alembic_config, _get_head_revision
 from deerflow.persistence.engine import close_engine, init_engine
@@ -18,7 +19,6 @@ from deerflow.persistence.engine import close_engine, init_engine
 pytestmark = pytest.mark.asyncio
 
 REVISION = "0024_project_documents"
-HEAD = "0025_creator_agent_relationship"
 PREVIOUS = "0023_user_preferences"
 TABLE = "project_documents"
 INDEXES = {
@@ -67,8 +67,16 @@ async def _inspect(engine):
         return await conn.run_sync(_read)
 
 
-async def test_0025_is_the_chain_head():
-    assert _get_head_revision() == HEAD
+async def test_0024_and_0025_remain_in_the_single_head_chain(tmp_path):
+    engine = await _engine(tmp_path)
+    try:
+        script = ScriptDirectory.from_config(_get_alembic_config(engine))
+        assert script.get_heads() == [_get_head_revision()]
+        assert REVISION in {item.revision for item in script.walk_revisions()}
+        assert script.get_revision(REVISION).down_revision == PREVIOUS
+        assert script.get_revision("0025_creator_agent_relationship").down_revision == REVISION
+    finally:
+        await close_engine()
 
 
 async def test_0024_upgrade_creates_table_and_indexes(tmp_path):

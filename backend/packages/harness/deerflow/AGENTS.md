@@ -10,6 +10,32 @@ is checked by `scripts/verify_creator_agent_assets.py` before packaging.
 External text remains data and cannot supply scope, identity, permissions, or
 persona bindings. Resolution, persistence, and Lead integration are separate.
 
+### Native Social Persistence (`persistence/social/`)
+
+`SocialRepository` owns durable sourced events, channel-scoped relationship and
+self projections, immutable account profile versions, scoped binding history,
+and the outbox. Migration 0026 extends the Phase 0 relationship row without
+changing its primary key or legacy reads. It backfills only Phase 0 persona
+bindings; untyped legacy facts are never promoted. The legacy person-wide
+do-not-contact flag remains a conservative boundary across that person's
+channels; native boundary mutations are channel-scoped and evidence-linked.
+
+Every native write serializes before reading (SQLite `BEGIN IMMEDIATE`,
+PostgreSQL account advisory transaction lock) and checks its expected revision.
+Readers use a transaction snapshot. A CAS conflict carries the winning value
+and never invokes a model. `BindingState.write_revision` is the write token
+(zero for absent rows); `bindings.revision` is the canonical resolved view.
+Automatic no-op selection requires explicit `mode="automatic"`; an actual
+automatic change requires scoped evidence. Administrative rollback can append
+a new revision even when the profile reference is unchanged.
+
+`SelfMemoryChange` is host-owned input, not an extension to model `TurnResult`.
+Outbox claim atomically changes pending to unknown before external I/O and
+returns `claimed=True` once. Every later claim returns `claimed=False`;
+unknown must never trigger a blind resend. Result recording accepts only
+accepted/delivered/unknown/failed with evidence. Task 7 owns send authorization
+and receipt verification; the repository itself never publishes.
+
 ### Request Trace Context (`packages/harness/deerflow/trace_context.py`)
 
 DeerFlow's request-level correlation id — the `X-Trace-Id` header and the `deerflow_trace_id` key. Not Langfuse's trace id, not `run_id`, not the short subagent `trace_id` log label.

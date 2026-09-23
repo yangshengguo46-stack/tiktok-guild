@@ -31,3 +31,9 @@ class CreatorAgentRelationshipRow(Base):
     decision_ids_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+    # Phase 0 fields above remain intact. New channel snapshots are independent
+    # of its bounded evidence window and never reinterpret its untyped facts.
+    social_snapshots_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    identity_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    human_takeover: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    receipt_state: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown", server_default="unknown")
