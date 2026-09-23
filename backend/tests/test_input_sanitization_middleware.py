@@ -179,6 +179,16 @@ def test_escapes_blocked_tag(tag):
 # test_denylist_covers_framework_authority_blocks pins the list against the
 # actual framework source so a newly added block cannot silently slip past.
 _FRAMEWORK_STRUCTURED_TAGS = [
+    "social-context",
+    "social-runtime-context",
+    "social-runtime-data",
+    "identity",
+    "display-name",
+    "organization",
+    "disclosure",
+    "responsibility",
+    "capabilities",
+    "authorization-ref",
     "soul",
     "self_update",
     "thinking_style",

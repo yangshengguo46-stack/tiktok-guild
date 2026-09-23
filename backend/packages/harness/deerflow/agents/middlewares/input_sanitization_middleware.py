@@ -122,6 +122,16 @@ _BLOCKED_TAG_NAMES: frozenset[str] = frozenset(
         # Lead-only CreatorAgent authority and hidden relationship-data blocks.
         "creator-agent-persona",
         "creator-agent-relationship-data",
+        "social-context",
+        "social-runtime-context",
+        "social-runtime-data",
+        "identity",
+        "display-name",
+        "organization",
+        "disclosure",
+        "responsibility",
+        "capabilities",
+        "authorization-ref",
         # Common prompt-injection tag patterns
         "system",
         "instruction",

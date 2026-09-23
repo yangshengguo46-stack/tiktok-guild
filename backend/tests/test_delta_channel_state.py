@@ -281,6 +281,22 @@ def test_mode_selects_expected_state_schema() -> None:
     assert any(isinstance(item, DeltaChannel) for item in message_hint.__metadata__)
 
 
+@pytest.mark.parametrize("mode", ["full", "delta"])
+def test_social_scope_survives_checkpoint_restart_in_both_modes(mode: str) -> None:
+    """Catches a social field lost by delta schema adaptation or checkpoint replay."""
+    scope = {"owner_user_id": "owner-1", "account_id": "guild-1", "person_ref": "creator-1", "channel_thread_ref": "dm-1", "agent_instance_id": "lead_agent"}
+    builder = StateGraph(get_thread_state_schema(mode))
+    builder.add_node("remember", lambda state: {"social": {"scope": scope, "latest_external_event_id": "evt-1"}})
+    builder.set_entry_point("remember")
+    builder.set_finish_point("remember")
+    saver = InMemorySaver()
+    graph = builder.compile(checkpointer=saver)
+    config = {"configurable": {"thread_id": f"social-{mode}"}}
+    graph.invoke({"messages": [HumanMessage(content="hello")]}, config)
+    restarted = builder.compile(checkpointer=saver)
+    assert restarted.get_state(config).values["social"]["scope"] == scope
+
+
 def _delta_channel(schema: type) -> DeltaChannel:
     hint = get_type_hints(schema, include_extras=True)["messages"]
     return next(item for item in hint.__metadata__ if isinstance(item, DeltaChannel))

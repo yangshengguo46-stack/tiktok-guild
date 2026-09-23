@@ -19,6 +19,7 @@ import deerflow.checkpoint_patches as _checkpoint_patches  # noqa: F401 - import
 from deerflow.agents.goal_state import GoalState
 from deerflow.agents.task_continuity.state import TaskNotesChannel, merge_task_notes
 from deerflow.config.database_config import DEFAULT_CHECKPOINT_SNAPSHOT_FREQUENCY, CheckpointChannelMode
+from deerflow.social.state import SocialState, merge_social
 from deerflow.subagents.status_contract import SUBAGENT_STATUS_VALUES
 
 
@@ -278,6 +279,7 @@ def merge_skill_context(existing: list[SkillEntry] | None, new: list[SkillEntry]
 
 
 class ThreadState(AgentState):
+    social: Annotated[SocialState | None, merge_social]
     sandbox: SandboxStateField
     thread_data: NotRequired[ThreadDataState | None]
     title: NotRequired[str | None]
