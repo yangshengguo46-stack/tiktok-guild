@@ -14,10 +14,11 @@
 4. 人格库/沟通知识库、主播主页预分析和 World Memory 的深度实现继续放在后续 roadmap，不阻塞主体纵向闭环。
 5. 不把工作台变成手动人格切换器；AI 依据当前主播有来源证据自动选择。
 6. 不执行或宣称未验证的 TikTok 收发、邀约或回执。
+7. `DSR-DEC-001` 已由用户确认：当前项目根目录最终直接成为完整 DeerFlow fork；启动、doctor、本机配置和发行辅助能力搬入 `ops/` 或等价目录；迁移验证完成后退役 `.runtime/deer-flow` 和累计 patch overlay。
 
-## 待确认的架构决策
+## 架构决策状态
 
-- `DSR-DEC-001`：是否把真实 DeerFlow fork 提升为产品根仓库/唯一源码事实源，并将当前 Node 引导、doctor、配置与工作台资产搬入 fork 的 `ops/` 或等价发行目录，最终退役累计 patch overlay。当前推荐：是。
+- `DSR-DEC-001`（已确认）：把真实 DeerFlow fork 提升为当前项目根仓库/唯一源码事实源，并将当前 Node 引导、doctor、配置与工作台资产搬入 fork 的 `ops/` 或等价发行目录，验证后退役累计 patch overlay。
 - `DSR-DEC-002`：第一个可验收闭环是否限定为 `external event → restore → social context → reply/tool/wait/no_reply → commit`，而将 proactive、candidate compare、Jev advisory 和子 Agent persona binding 放到后续阶段。当前推荐：是。
 
 ## 任务台账
@@ -85,3 +86,4 @@
 
 - 2026-09-24 04:12 CST：建立本台账，登记 2 个只读并行核查任务，未启动实现。
 - 2026-09-24 04:21 CST：3 项只读核查全部完成，未改产品代码。进入事实源与首个 Social Runtime 纵向闭环的方案比较。
+- 2026-09-24 04:27 CST：用户确认 `DSR-DEC-001`，当前项目根仓将迁移为完整 DeerFlow fork，累计 patch 只作为迁移前对照物。
