@@ -15,11 +15,13 @@
 5. 不把工作台变成手动人格切换器；AI 依据当前主播有来源证据自动选择。
 6. 不执行或宣称未验证的 TikTok 收发、邀约或回执。
 7. `DSR-DEC-001` 已由用户确认：当前项目根目录最终直接成为完整 DeerFlow fork；启动、doctor、本机配置和发行辅助能力搬入 `ops/` 或等价目录；迁移验证完成后退役 `.runtime/deer-flow` 和累计 patch overlay。
+8. 保持 PERSONA-REV1 原设计：PersonaProfile 是可换装但不止于浅层语气的独立表达资产；Agent/子 Agent 覆盖只是可选解析层，`agent_override = null` 时直接继承账号/关系配置。不为人格创建或强制绑定子 Agent。
+9. “具体人设”不由子 Agent 绑定产生；它由真实 Identity、持续的 Self Memory/观点与承诺、Role 共同组成，再穿上当前有效 Persona，同时保留 Relationship 和 TurnContext。
 
 ## 架构决策状态
 
 - `DSR-DEC-001`（已确认）：把真实 DeerFlow fork 提升为当前项目根仓库/唯一源码事实源，并将当前 Node 引导、doctor、配置与工作台资产搬入 fork 的 `ops/` 或等价发行目录，验证后退役累计 patch overlay。
-- `DSR-DEC-002`：第一个可验收闭环是否限定为 `external event → restore → social context → reply/tool/wait/no_reply → commit`，而将 proactive、candidate compare、Jev advisory 和子 Agent persona binding 放到后续阶段。当前推荐：是。
+- `DSR-DEC-002`：第一个可验收闭环是否限定为 `external event → restore Identity + Self + Role + Relationship + EffectivePersona + TurnContext → Lead → reply/tool/wait/no_reply → commit`，而将 proactive、candidate compare、Jev advisory 和可选子 Agent 上下文传递放到后续阶段。当前推荐：是。不存在独立的“子 Agent 人格绑定”必做工作包。
 
 ## 任务台账
 
@@ -87,3 +89,4 @@
 - 2026-09-24 04:12 CST：建立本台账，登记 2 个只读并行核查任务，未启动实现。
 - 2026-09-24 04:21 CST：3 项只读核查全部完成，未改产品代码。进入事实源与首个 Social Runtime 纵向闭环的方案比较。
 - 2026-09-24 04:27 CST：用户确认 `DSR-DEC-001`，当前项目根仓将迁移为完整 DeerFlow fork，累计 patch 只作为迁移前对照物。
+- 2026-09-24 04:34 CST：根据用户纠正复核 PERSONA-REV1；删除“人格必须绑定子 Agent”的误解。子 Agent 覆盖保持可选，具体人设由 Identity/Self/Role 与当前有效 Persona 组合得到，原计划其他边界不变。
