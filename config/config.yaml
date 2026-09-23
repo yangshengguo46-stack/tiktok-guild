@@ -1,0 +1,35 @@
+config_version: 45
+models:
+  - name: codex
+    display_name: Codex CLI
+    use: deerflow.models.openai_codex_provider:CodexChatModel
+    model: gpt-5.4
+    supports_thinking: true
+    supports_reasoning_effort: true
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: false
+skills:
+  container_path: /mnt/skills
+tool_groups:
+  - name: file:read
+  - name: file:write
+tools:
+  - name: ls
+    group: file:read
+    use: deerflow.sandbox.tools:ls_tool
+  - name: read_file
+    group: file:read
+    use: deerflow.sandbox.tools:read_file_tool
+  - name: write_file
+    group: file:write
+    use: deerflow.sandbox.tools:write_file_tool
+  - name: str_replace
+    group: file:write
+    use: deerflow.sandbox.tools:str_replace_tool
+tool_search:
+  enabled: false
+scheduler:
+  enabled: false
+database:
+  backend: sqlite

@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "guild_operator": {
+      "enabled": true,
+      "required": true,
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/yangyucheng/plugins/tiktok-live-guild-operator/src/server.mjs"
+      ],
+      "cwd": "/Users/yangyucheng/plugins/tiktok-live-guild-operator",
+      "tool_name_prefix": false,
+      "enabled_tools": [
+        "guild_workspace",
+        "guild_creators",
+        "guild_recruitment",
+        "guild_messaging",
+        "guild_operations",
+        "guild_revenue",
+        "guild_governance",
+        "guild_intelligence"
+      ]
+    },
+    "tkdesk": {
+      "enabled": true,
+      "required": true,
+      "type": "stdio",
+      "command": "/Users/yangyucheng/plugins/tkdesk-agent/scripts/launch_mcp",
+      "args": [],
+      "cwd": "/Users/yangyucheng/plugins/tkdesk-agent",
+      "tool_name_prefix": false
+    }
+  }
+}

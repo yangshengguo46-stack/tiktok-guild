@@ -1,0 +1,12 @@
+{
+  "tools": [
+    { "name": "guild_workspace", "input_schema_sha256": "f1292d28c9b829d797138806eb53a29a412469a814bb78249c8e4e65e6557c8e" },
+    { "name": "guild_creators", "input_schema_sha256": "003602555510e67266554039dd868de322a4aef90d5a167d06acfca0a8c65bbc" },
+    { "name": "guild_recruitment", "input_schema_sha256": "4ec032707eff248e9a4ae60afe83a0a8317411862beca78e17cbabf1f726d39c" },
+    { "name": "guild_messaging", "input_schema_sha256": "ac717ed722e946060bfad5a649e9cbc1118c518317ed7af0ef4ef5f069acb902" },
+    { "name": "guild_operations", "input_schema_sha256": "7235380b68ea4df8ae6b94e83a76471bb2663b4bcf18fa898d6649a05d3c4e86" },
+    { "name": "guild_revenue", "input_schema_sha256": "0f7e1c72a76c509667f515723f3e39f255e8fb09502e07f529d7e13c930e7a95" },
+    { "name": "guild_governance", "input_schema_sha256": "792d119c0e9ff9c1f49eb6995a6417e670595ac6e1c54ff01135f180bbbe6cc1" },
+    { "name": "guild_intelligence", "input_schema_sha256": "3f0a1156b6958fbfc6cf2a3e6cd5a6f5ec7c4fe74dccbeb3cd6ac49a7b6cb6a2" }
+  ]
+}
