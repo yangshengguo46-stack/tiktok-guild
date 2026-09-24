@@ -68,7 +68,12 @@ discarding an unknown policy. Ordinary operator Chat is unchanged.
 
 Social main-model and selector calls also carry the journal-local private-output
 capability obtained from the server-injected `__run_journal` object, not from
-client config tags. A static tag or prefix grants no suppression authority:
+client config tags. A task-local private callback scope preserves only that
+typed journal (or no callbacks), isolating inherited and model-local tracing
+without affecting the native handler or concurrent operator runs. Global debug,
+verbose and environment-created automatic tracing callbacks fail closed before
+private model invocation; see `runtime/AGENTS.md` for exact conditions. A static
+tag or prefix grants no suppression authority:
 `nostream` alone does not prevent RunJournal persistence. Only post-commit reply
 text enters ordinary graph/journal history; private calls retain token/latency
 accounting without prompt/output/error payloads. Native text blocks are normalized

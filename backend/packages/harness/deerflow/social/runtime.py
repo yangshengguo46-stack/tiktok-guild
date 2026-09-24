@@ -12,6 +12,7 @@ from langgraph.types import Command
 
 from deerflow.persistence.social import SocialConflictError, SocialRepository
 from deerflow.runtime.journal import RunJournal
+from deerflow.runtime.private_model import private_model_callbacks, private_model_copy
 from deerflow.social.context import RelationshipMemoryItem, RelationshipSnapshot, SelfMemoryItem, SocialContextSnapshot, TurnContext
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_text
 from deerflow.social.middleware import SocialContextMiddleware
@@ -193,9 +194,10 @@ class SocialTurnMiddleware(SocialContextMiddleware):
         # The normal create_agent handler still binds tools and invokes the same
         # model. Suppress its callbacks, including nonstreaming on_llm_end frames.
         private_tags = [journal._private_output_tag] if journal is not None and journal._private_output_tag is not None else []
-        model = request.model.model_copy(update={"tags": [*(request.model.tags or []), TAG_NOSTREAM, *private_tags], "disable_streaming": True})
+        model = private_model_copy(request.model).model_copy(update={"tags": [*(request.model.tags or []), TAG_NOSTREAM, *private_tags], "disable_streaming": True})
         try:
-            response = await handler(request.override(model=model, model_settings={**request.model_settings, "stream": False}))
+            with private_model_callbacks(journal):
+                response = await handler(request.override(model=model, model_settings={**request.model_settings, "stream": False}))
         except Exception:
             # Provider exceptions may embed raw model content. Do not propagate
             # it through root chain-error/history callbacks or retry generation.

@@ -831,7 +831,7 @@ async def test_no_journal_social_selector_and_main_use_no_private_capability(mon
     config["callbacks"] = [capture]
     result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
     assert result["messages"][-1].content == "no-journal reply"
-    assert len(capture.tags) == 2 and len((await repo.restore(SCOPE)).outbound) == 1
+    assert capture.tags == [] and len((await repo.restore(SCOPE)).outbound) == 1
     assert not any(tag.startswith("deerflow:private_output") for tags in capture.tags for tag in tags)
     selector = config["context"]["__social_binding"].selector
     assert not any(tag.startswith("deerflow:private_output") for tag in selector._bound_model.config["tags"])
@@ -930,3 +930,256 @@ async def test_native_write_locks_existing_legacy_relationship_before_boundary_r
         assert statements[2][0] == "boundary-read-and-outbox-write"
     else:
         assert statements == [("BEGIN IMMEDIATE", None), ("boundary-read-and-outbox-write", None)]
+
+
+def callback_observers(monkeypatch):
+    from langchain_core.callbacks import BaseCallbackHandler
+    from langchain_core.tracers.langchain import LangChainTracer
+
+    exports, generic = [], []
+
+    class MemoryExporter:
+        otel_exporter = None
+
+        def create_run(self, **kwargs):
+            exports.append({"run_type": kwargs.get("run_type"), "data": repr({key: kwargs.get(key) for key in ("inputs", "outputs", "error", "tags", "name")})})
+
+        def update_run(self, *args, **kwargs):
+            self.create_run(**kwargs)
+
+    # Only the transport is replaced; the actual tracer and LangSmith run tree
+    # still manage every root/child run and serialize inputs/outputs/errors.
+    tracer = LangChainTracer(client=MemoryExporter(), project_name="offline-private-test")
+
+    class Observer(BaseCallbackHandler):
+        run_inline = True
+
+        def on_chat_model_start(self, serialized, messages, **kwargs):
+            generic.append(("model-start", repr((messages, kwargs))))
+
+        def on_llm_end(self, response, **kwargs):
+            generic.append(("model-end", repr((response, kwargs))))
+
+        def on_llm_error(self, error, **kwargs):
+            generic.append(("model-error", repr((error, kwargs))))
+
+        def on_chain_start(self, serialized, inputs, **kwargs):
+            generic.append(("chain-start", repr((inputs, kwargs))))
+
+        def on_chain_end(self, outputs, **kwargs):
+            generic.append(("chain-end", repr((outputs, kwargs))))
+
+        def on_chain_error(self, error, **kwargs):
+            generic.append(("chain-error", repr((error, kwargs))))
+
+    return tracer, Observer(), exports, generic
+
+
+def private_fixture_model(message, *, before=None):
+    # Keep scripted output outside model fields: real providers do not have a
+    # public `responses` field for middleware tracing to serialize as input.
+    calls = []
+
+    class Model(BaseChatModel):
+        @property
+        def _llm_type(self):
+            return "private-offline"
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, **kwargs):
+            calls.append(messages)
+            return ChatResult(generations=[ChatGeneration(message=message)])
+
+        async def _agenerate(self, messages, **kwargs):
+            if before:
+                await before()
+            return self._generate(messages)
+
+    return Model(), calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_journal", [False, True])
+@pytest.mark.parametrize("failure", [None, "parse", "cas", "boundary", "provider"])
+async def test_external_tracer_and_generic_callbacks_never_receive_private_calls(monkeypatch, repo, with_journal, failure):
+    from deerflow.runtime.events.store.memory import MemoryRunEventStore
+    from deerflow.runtime.journal import RunJournal
+
+    tracer, observer, exports, generic = callback_observers(monkeypatch)
+    usage = {"input_tokens": 7, "output_tokens": 4, "total_tokens": 11}
+    selection, _ = private_fixture_model(AIMessage(content='{"action":"stay","persona_id":"relaxed_wit","confidence":1,"evidence_refs":["ref1"],"reason":"PRIVATE_SELECTOR"}', usage_metadata=usage))
+
+    async def provider_error():
+        raise ValueError("PRIVATE_PROVIDER_ERROR")
+
+    main, _ = private_fixture_model(
+        AIMessage(
+            content="PRIVATE_MALFORMED"
+            if failure == "parse"
+            else [{"type": "thinking", "thinking": "PRIVATE_REASONING", "signature": "PRIVATE_SIGNATURE"}, {"type": "text", "text": '{"reply":"committed-visible","decision_note":"PRIVATE_DECISION","state_delta":[]}'}],
+            usage_metadata=usage,
+            response_metadata={"private_provider_metadata": "PRIVATE_METADATA"},
+        ),
+        before=provider_error if failure == "provider" else None,
+    )
+    main.callbacks = selection.callbacks = [observer]
+    graph, config = await assembly(monkeypatch, repo, main, binding_changes={"selector": AutomaticPersonaSelector(selection)})
+    journal = RunJournal("isolated", "isolated", MemoryRunEventStore(), flush_threshold=1) if with_journal else None
+    if journal:
+        install_host_journal(config, journal)
+    config.setdefault("callbacks", []).extend([tracer, observer])
+    original_commit = repo.commit_turn
+    before_commit = []
+
+    async def commit(*args, **kwargs):
+        before_commit.append(repr((exports, generic)))
+        if failure == "cas":
+            await repo.record_event(SCOPE, ExternalEvent("new", "new-ref", "creator_message", "newer"))
+        if failure == "boundary":
+            await repo.set_boundaries(SCOPE, expected_revision=2, update=BoundaryUpdate(True, True, False, ("ref1",)))
+        return await original_commit(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "commit_turn", commit)
+    result = await graph.ainvoke({"messages": [HumanMessage(content="creator input")]}, config)
+    external = repr((before_commit, exports, generic))
+    for secret in ("PRIVATE_SELECTOR", "PRIVATE_MALFORMED", "PRIVATE_DECISION", "PRIVATE_PROVIDER_ERROR", "PRIVATE_REASONING", "PRIVATE_SIGNATURE", "PRIVATE_METADATA", "Choose one supplied expression template", "<social-runtime-data>"):
+        assert secret not in external
+    assert not any(run.get("run_type") == "llm" for run in exports)
+    assert not any(kind.startswith("model-") for kind, _ in generic)
+    assert any(run.get("run_type") == "chain" for run in exports) and any(kind == "chain-end" for kind, _ in generic)
+    assert result["messages"][-1].content == ("committed-visible" if failure is None else "")
+    assert len((await repo.restore(SCOPE)).outbound) == (failure is None)
+    if journal:
+        await journal.flush()
+        assert journal._private_output_tag not in external
+        assert journal.get_completion_data()["total_tokens"] == (11 if failure == "provider" else 22)
+        await journal.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_private_social_callbacks_do_not_cross_suppress_concurrent_operator(monkeypatch, repo, cancelled):
+    from deerflow.runtime.events.store.memory import MemoryRunEventStore
+    from deerflow.runtime.journal import RunJournal
+
+    tracer, observer, exports, generic = callback_observers(monkeypatch)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def wait_inside_model():
+        entered.set()
+        await release.wait()
+
+    main, _ = private_fixture_model(AIMessage(content='{"reply":"social-visible","decision_note":"PRIVATE_DECISION"}'), before=wait_inside_model)
+    selection, _ = private_fixture_model(AIMessage(content='{"action":"stay","persona_id":"relaxed_wit","confidence":1,"evidence_refs":["ref1"],"reason":"PRIVATE_SELECTOR"}'))
+    social, config = await assembly(monkeypatch, repo, main, binding_changes={"selector": AutomaticPersonaSelector(selection)})
+    journal = RunJournal("concurrent", "concurrent", MemoryRunEventStore())
+    install_host_journal(config, journal)
+    config["callbacks"].extend([tracer, observer])
+    ordinary, _ = private_fixture_model(AIMessage(content="ordinary-concurrent"))
+    monkeypatch.setattr(lead, "create_chat_model", lambda **kwargs: ordinary)
+    monkeypatch.setattr(lead, "build_middlewares", lambda *args, **kwargs: [])
+    monkeypatch.setattr("deerflow.creator_agent.runtime.runtime_for_lead", lambda *args: None)
+    app = AppConfig(models=[ModelConfig(name="fake", use="langchain_openai:ChatOpenAI", model="fake", supports_thinking=False)], sandbox=SandboxConfig(use="deerflow.sandbox.local:LocalSandboxProvider"))
+    ordinary_config = {"context": {"user_id": "owner"}, "callbacks": [tracer, observer]}
+    operator = (await asyncio.to_thread(lead.assemble_lead_agent, ordinary_config, app_config=app)).graph
+    pending = asyncio.create_task(social.ainvoke({"messages": [HumanMessage(content="hello")]}, config))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        result = await operator.ainvoke({"messages": [HumanMessage(content="operator input")]}, ordinary_config)
+        assert result["messages"][-1].content == "ordinary-concurrent"
+        if cancelled:
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+        else:
+            release.set()
+            assert (await pending)["messages"][-1].content == "social-visible"
+        following, _ = private_fixture_model(AIMessage(content="ordinary-after"))
+        await following.ainvoke([HumanMessage(content="after input")], config={"callbacks": [tracer, observer]})
+        external = repr((exports, generic))
+        assert "ordinary-concurrent" in external and "ordinary-after" in external
+        assert "PRIVATE_" not in external and "<social-runtime-data>" not in external and journal._private_output_tag not in external
+        assert len((await repo.restore(SCOPE)).outbound) == (not cancelled)
+    finally:
+        release.set()
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        await journal.close()
+
+
+@pytest.mark.asyncio
+async def test_private_callback_context_restores_on_cancellation_in_owning_task(monkeypatch):
+    from langchain_core.runnables.config import ensure_config, var_child_runnable_config
+    from langchain_core.tracers.context import tracing_v2_callback_var
+
+    from deerflow.runtime.private_model import private_model_callbacks
+
+    tracer, observer, exports, generic = callback_observers(monkeypatch)
+    marker = object()
+    original = {"callbacks": [tracer, observer], "configurable": {"host-marker": marker}, "recursion_limit": 19}
+    token = var_child_runnable_config.set(original)
+    trace_token = tracing_v2_callback_var.set(tracer)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            with private_model_callbacks(None):
+                assert ensure_config()["configurable"]["host-marker"] is marker
+                assert ensure_config()["recursion_limit"] == 19
+                assert ensure_config()["callbacks"] == [] and tracing_v2_callback_var.get() is None
+                raise asyncio.CancelledError()
+        assert var_child_runnable_config.get() is original and tracing_v2_callback_var.get() is tracer
+        model, _ = private_fixture_model(AIMessage(content="ordinary-restored"))
+        await model.ainvoke([HumanMessage(content="ordinary next")])
+        assert "ordinary-restored" in repr((exports, generic))
+    finally:
+        tracing_v2_callback_var.reset(trace_token)
+        var_child_runnable_config.reset(token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["debug", "verbose", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING", "LANGSMITH_TRACING", "LANGCHAIN_HANDLER", "registered_env"])
+async def test_unisolatable_global_callback_sources_fail_closed_before_models(monkeypatch, repo, caplog, source):
+    from contextvars import ContextVar
+
+    from langchain_core import globals as lc_globals
+    from langchain_core.runnables.config import var_child_runnable_config
+    from langchain_core.tracers import context as trace_context
+
+    from deerflow.runtime import private_model
+
+    tracer, observer, exports, generic = callback_observers(monkeypatch)
+    main, main_calls = private_fixture_model(AIMessage(content='{"reply":"PRIVATE_MAIN"}'))
+    selection, selector_calls = private_fixture_model(AIMessage(content="PRIVATE_SELECTOR"))
+    graph, config = await assembly(monkeypatch, repo, main, binding_changes={"selector": AutomaticPersonaSelector(selection)})
+    config["callbacks"] = [tracer, observer]
+    if source in {"debug", "verbose"}:
+        monkeypatch.setattr(lc_globals, "_" + source, True)
+    elif source == "registered_env":
+        hook = (ContextVar("private_test_hook", default=None), True, type(observer), "DEERFLOW_TEST_PRIVATE_CALLBACK")
+        monkeypatch.setattr(trace_context, "_configure_hooks", [*trace_context._configure_hooks, hook])
+        monkeypatch.setattr(private_model, "_configure_hooks", trace_context._configure_hooks)
+        monkeypatch.setenv("DEERFLOW_TEST_PRIVATE_CALLBACK", "true")
+    else:
+        monkeypatch.setenv(source, "true")
+        if source in {"LANGCHAIN_TRACING", "LANGCHAIN_HANDLER"}:
+            # Legacy tracing alone is rejected by LangChain before graph entry.
+            monkeypatch.setenv("LANGCHAIN_TRACING_V2", "true")
+    original = var_child_runnable_config.get()
+    # Supply the real offline tracer as ambient v2 as well: the test suite
+    # disables environment-driven exports, and legacy v1 alone cannot enter
+    # the native graph. The private preflight still detects each exact source.
+    trace_token = trace_context.tracing_v2_callback_var.set(tracer)
+    try:
+        result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+        assert main_calls == [] and selector_calls == []
+        assert result["messages"][-1].content == "" and not (await repo.restore(SCOPE)).outbound
+        assert var_child_runnable_config.get() is original
+        assert "Private model callbacks blocked" in caplog.text
+        assert "PRIVATE_" not in repr((exports, generic))
+        ordinary, ordinary_calls = private_fixture_model(AIMessage(content="ordinary-auto-callbacks"))
+        await ordinary.ainvoke([HumanMessage(content="ordinary input")], config={"callbacks": [tracer, observer]})
+        assert len(ordinary_calls) == 1 and "ordinary-auto-callbacks" in repr((exports, generic))
+    finally:
+        trace_context.tracing_v2_callback_var.reset(trace_token)

@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
 
 from deerflow.runtime.journal import RunJournal
+from deerflow.runtime.private_model import private_model_callbacks, private_model_copy
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
 from deerflow.utils.file_io import run_file_io
@@ -118,12 +119,13 @@ class AutomaticPersonaSelector:
             return None
         payload = {"current_profile_ref": current_profile_ref, "candidates": [{"ref": ref, **dict(value)} for ref, value in sorted(candidates.items())], "evidence": owned}
         try:
-            model = await run_file_io(self._get_model)
+            model = private_model_copy(await run_file_io(self._get_model))
             # Per-call binding: a cached selector must not retain another run's
             # journal capability. No journal means no privacy tag is necessary.
             if isinstance(private_journal, RunJournal) and private_journal._private_output_tag is not None:
                 model = model.with_config(tags=[*(getattr(model, "config", {}).get("tags") or []), private_journal._private_output_tag])
-            reply = await asyncio.wait_for(model.ainvoke([SystemMessage(content=_SYSTEM), HumanMessage(content=json.dumps(payload, ensure_ascii=False, sort_keys=True))], stream=False), timeout=self._timeout_seconds)
+            with private_model_callbacks(private_journal):
+                reply = await asyncio.wait_for(model.ainvoke([SystemMessage(content=_SYSTEM), HumanMessage(content=json.dumps(payload, ensure_ascii=False, sort_keys=True))], stream=False), timeout=self._timeout_seconds)
         except Exception:
             return None
         decision = parse_decision(getattr(reply, "content", None))

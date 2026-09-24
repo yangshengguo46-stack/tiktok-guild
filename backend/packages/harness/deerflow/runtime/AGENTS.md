@@ -1,5 +1,26 @@
 ### Private native model output
 
+`private_model.py` isolates selector and social-main execution in a task-local
+child runnable config. It replaces (never merges) inherited callbacks with only
+the typed owning `RunJournal`, or none, strips model-local callbacks on a shallow
+model copy, and clears ambient tracing ancestry/context callback hooks. Native
+model/tool binding and non-callback runnable/runtime config remain intact.
+ContextVar tokens restore the caller on success, error and external cancellation;
+concurrent operator runs retain their callbacks. Root chain callbacks see only
+sanitized post-commit output, never private prompts, JSON, reasoning or capability.
+
+Process-wide automatic callbacks cannot safely be disabled per task. Before each
+private invocation, fail closed for LangChain global debug/verbose, any enabled
+`LANGCHAIN_TRACING_V2`, `LANGSMITH_TRACING_V2`, `LANGCHAIN_TRACING`,
+`LANGSMITH_TRACING`, `LANGCHAIN_HANDLER`, or enabled environment-backed callback
+factory registered in LangChain's configure hooks. Detection uses LangChain's
+`env_var_is_set` semantics (nonempty except `0`, `false`, `False`). The internal
+`Private model callbacks blocked` warning names the conditions and asks the host
+to disable automatic tracing/debug on the social worker; it contains no private
+data or environment values and produces no channel text/outbox. Never mutate
+global debug, environment or callback registries to permit a social call.
+Explicitly inherited tracers remain supported through task-local isolation.
+
 Each `RunJournal` creates its own unguessable private-output tag capability.
 Only that exact token makes model calls accounting-only in that journal:
 client-supplied static strings, prefixes, guesses and another journal's token
