@@ -71,7 +71,8 @@ capability obtained from the server-injected `__run_journal` object, not from
 client config tags. A task-local private callback scope preserves only that
 typed journal (or no callbacks), isolating inherited and model-local tracing
 without affecting the native handler or concurrent operator runs. Global debug,
-verbose and environment-created automatic tracing callbacks fail closed before
+verbose, environment-created automatic tracing callbacks, and configured/installed
+process-global Monocle instrumentation fail closed before
 private model invocation; see `runtime/AGENTS.md` for exact conditions. A static
 tag or prefix grants no suppression authority:
 `nostream` alone does not prevent RunJournal persistence. Only post-commit reply

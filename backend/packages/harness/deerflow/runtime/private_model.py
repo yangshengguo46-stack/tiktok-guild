@@ -1,6 +1,7 @@
 """Task-local callback isolation for host-owned private model execution."""
 
 import logging
+import sys
 from contextlib import contextmanager
 
 from langchain_core.globals import get_debug, get_verbose
@@ -11,7 +12,9 @@ from langchain_core.tracers.context import _configure_hooks, tracing_v2_callback
 from langchain_core.utils.env import env_var_is_set
 from langsmith import tracing_context
 
+from deerflow.config import is_monocle_tracing_enabled
 from deerflow.runtime.journal import RunJournal
+from deerflow.tracing.monocle import is_monocle_setup_completed
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,13 @@ logger = logging.getLogger(__name__)
 def _check_auto_callbacks() -> None:
     """Reject auto callbacks which cannot be disabled with task-local config."""
     conditions = []
+    # Installed instrumentation necessarily loaded this module. Inspect its
+    # real getter without importing the optional dependency (or triggering
+    # blocking import I/O). Env/config and host setup flags are independent
+    # fences: clearing either cannot uninstall process-global wrappers.
+    monocle = sys.modules.get("monocle_apptrace.instrumentation.common.instrumentor")
+    if env_var_is_set("MONOCLE_TRACING") or is_monocle_tracing_enabled() or is_monocle_setup_completed() or (monocle is not None and monocle.get_monocle_instrumentor() is not None):
+        conditions.append("Monocle")
     if get_debug():
         conditions.append("LangChain global debug")
     if get_verbose():

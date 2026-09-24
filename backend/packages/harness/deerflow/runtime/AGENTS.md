@@ -21,6 +21,18 @@ data or environment values and produces no channel text/outbox. Never mutate
 global debug, environment or callback registries to permit a social call.
 Explicitly inherited tracers remain supported through task-local isolation.
 
+Monocle is not a callback: its process-global wrappers intercept native model
+methods outside the isolated callback config. Private model preflight therefore
+also refuses when `MONOCLE_TRACING` is enabled, cached native Monocle config is
+enabled, native `is_monocle_setup_completed()` is true, or the already-loaded
+Monocle instrumentor module's real `get_monocle_instrumentor()` returns an
+installed instance. Environment clearing or a stale host setup flag cannot
+disable the installed-instance fence. The optional package is never imported by
+preflight; installed instrumentation necessarily loaded its owner module, so
+minimal installs remain usable without blocking import I/O. The internal warning
+names only `Monocle`, never exporter configuration or data. Do not uninstrument,
+replace the OTel provider, clear environment or change ordinary operator tracing.
+
 Each `RunJournal` creates its own unguessable private-output tag capability.
 Only that exact token makes model calls accounting-only in that journal:
 client-supplied static strings, prefixes, guesses and another journal's token
