@@ -75,6 +75,30 @@ def test_unknown_reference_and_non_expression_adjustment_fail_closed():
         resolve_profile(catalog=catalog, profiles={}, bindings=bindings(account="missing@1", relation="warm_candid@1.0.1"))
 
 
+@pytest.mark.parametrize("profile_id,version", [("x@1", "2"), ("x", "1@2")])
+def test_persona_profile_never_produces_ambiguous_serialized_ref(profile_id, version):
+    with pytest.raises(ValueError, match="separator"):
+        PersonaProfile(profile_id, version, "relaxed_wit@1.0.1", {}, "operator", ())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("profile_id,version", [("x@1", "2"), ("x", "1@2")])
+async def test_generator_rejects_ambiguous_identity_before_model_call(profile_id, version):
+    model = FakeModel('{"overrides":{"length":"brief"},"diff_summary":"brief","examples":["One","Two"]}')
+    with pytest.raises(ValueError, match="separator"):
+        await PersonaProfileGenerator(model).generate(
+            base_profile=PersonaProfile("base", "1", "relaxed_wit@1.0.1", {}, "operator", ()),
+            profile_id=profile_id,
+            version=version,
+            requirement="brief",
+            creator_preferences=(),
+            immutable_identity_facts={},
+            basis_refs=("note",),
+            valid_basis_refs=("note",),
+        )
+    assert model.calls == []
+
+
 class FakeModel:
     def __init__(self, content):
         self.content = content

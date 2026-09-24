@@ -74,6 +74,9 @@ class PersonaProfileGenerator:
     ) -> GeneratedPersonaCandidate:
         if not isinstance(base_profile, PersonaProfile):
             raise ValueError("base_profile must be immutable PersonaProfile")
+        # Validate the proposed reference before any configured model I/O.
+        # This uses the same canonical contract as persisted profile content.
+        PersonaProfile(profile_id, version, base_profile.base_template_ref, {}, "operator", ())
         if base_profile.base_template_ref not in load_persona_catalog():
             raise ValueError("base profile must use an approved template")
         if not isinstance(requirement, (str, type(None))) or (requirement is not None and not 0 < len(requirement.strip()) <= 1024):

@@ -49,6 +49,15 @@ def _account(table, scope):
     return (table.c.owner_user_id == scope.owner_user_id, table.c.account_id == scope.account_id)
 
 
+def _profile_ref_query(scope, ref):
+    """Registry identity is the serialized reference across the whole account.
+
+    The account write lock serializes this read with inserts on both supported
+    databases; tuple primary keys alone cannot protect legacy separator aliases.
+    """
+    return sa.select(social_persona_profile).where(*_account(social_persona_profile, scope), (social_persona_profile.c.profile_id + "@" + social_persona_profile.c.version) == ref)
+
+
 def _event_scope(scope):
     return (*_account(social_event, scope), social_event.c.person_ref == scope.person_ref, social_event.c.channel_thread_ref == scope.channel_thread_ref, social_event.c.agent_instance_id == scope.agent_instance_id)
 
@@ -424,6 +433,9 @@ class SocialRepository:
 
     async def _profiles(self, session, scope):
         rows = (await session.execute(sa.select(social_persona_profile).where(*_account(social_persona_profile, scope)).order_by(social_persona_profile.c.revision))).mappings().all()
+        refs = [f"{row['profile_id']}@{row['version']}" for row in rows]
+        if len(refs) != len(set(refs)):
+            raise ValueError("duplicate serialized profile reference in account registry")
         profiles = {}
         for row in rows:
             value = deepcopy(row["profile_json"])
@@ -514,6 +526,10 @@ class SocialRepository:
         Management provenance is stored alongside the immutable profile JSON;
         historical rows without this optional metadata remain compatible.
         """
+        if candidate is not None:
+            if not isinstance(candidate, PersonaProfile):
+                raise ValueError("candidate must be PersonaProfile")
+            candidate = replace(candidate)  # Revalidate even if a caller bypassed the frozen constructor.
         bounded_text(reason, "reason", 512)
         if type(activate) is not bool:
             raise ValueError("activation intent must be boolean")
@@ -532,17 +548,9 @@ class SocialRepository:
                 if candidate.base_template_ref not in catalog or profile_ref in catalog:
                     raise ValueError("profile must extend a canonical template")
                 await self._management_basis(session, scope, candidate.basis_refs)
-                row = (
-                    (
-                        await session.execute(
-                            sa.select(social_persona_profile).where(*_account(social_persona_profile, scope), social_persona_profile.c.profile_id == candidate.profile_id, social_persona_profile.c.version == candidate.version)
-                        )
-                    )
-                    .mappings()
-                    .one_or_none()
-                )
+                row = (await session.execute(_profile_ref_query(scope, profile_ref))).mappings().one_or_none()
                 if row is not None:
-                    if profiles.get(profile_ref) != candidate or row["profile_json"].get("management_scope") != asdict(scope):
+                    if (row["profile_id"], row["version"]) != (candidate.profile_id, candidate.version) or profiles.get(profile_ref) != candidate or row["profile_json"].get("management_scope") != asdict(scope):
                         raise ValueError("profile versions and provenance are immutable")
                 else:
                     value = {
@@ -610,12 +618,14 @@ class SocialRepository:
     async def register_profile(self, scope: ProfileScope, candidate: PersonaProfile, *, expected_revision: int) -> PersonaProfile:
         if not isinstance(candidate, PersonaProfile):
             raise ValueError("candidate must be PersonaProfile")
+        candidate = replace(candidate)
         async with self._write(scope) as session:
             profiles, revision = await self._profiles(session, scope)
             ref = f"{candidate.profile_id}@{candidate.version}"
             bounded_text(ref, "profile_ref", 128)
-            if ref in profiles:
-                if profiles[ref] != candidate:
+            row = (await session.execute(_profile_ref_query(scope, ref))).mappings().one_or_none()
+            if row is not None:
+                if (row["profile_id"], row["version"]) != (candidate.profile_id, candidate.version) or profiles.get(ref) != candidate:
                     raise ValueError("profile versions are immutable")
                 return profiles[ref]
             _check_revision(revision, expected_revision, {"revision": revision, "profiles": profiles})

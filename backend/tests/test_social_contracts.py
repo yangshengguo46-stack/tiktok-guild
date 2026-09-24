@@ -119,3 +119,17 @@ def test_effective_persona_behavior_is_expression_only_and_immutable():
         effective.behavior["voice"] = "changed"
     with pytest.raises(ValueError):
         EffectivePersona(profile_ref="profile@1", base_template_ref="relaxed_wit@1.0.1", behavior={"permissions": "send"}, binding_revision=1, evidence_version=0, fingerprint="a" * 64)
+
+
+@pytest.mark.parametrize("profile_id,version", [("x@1", "2"), ("x", "1@2")])
+def test_persona_profile_identity_rejects_reference_separator(profile_id, version):
+    from deerflow.social.persona.models import PersonaProfile
+
+    with pytest.raises(ValueError, match="separator"):
+        PersonaProfile(profile_id, version, "relaxed_wit@1.0.1", {}, "operator", ())
+
+
+@pytest.mark.parametrize("base_ref", ["relaxed_wit", "relaxed_wit@@1", "@1", "relaxed_wit@"])
+def test_base_template_reference_requires_one_nonempty_separator(base_ref):
+    with pytest.raises(ValueError, match="reference"):
+        PersonaProfile("x", "1", base_ref, {}, "operator", ())

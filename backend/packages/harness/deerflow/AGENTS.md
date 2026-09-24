@@ -27,6 +27,13 @@ optional management scope in profile JSON, preserving earlier rows and schema.
 Scoped generated profiles cannot be read/bound outside their originating agent
 or relation. Clearing writes a tombstone, and rollback reads an exact historical
 scope/revision and appends a new revision with `rollback:<revision>` provenance.
+Profile IDs and versions cannot contain `@`; only their serialized reference
+contains that separator. Generator preflight and both repository registration
+paths revalidate the canonical profile contract. Repository reads reject duplicate
+serialized refs across the whole owner/account registry before scope filtering;
+write-side uniqueness queries compare serialized refs under the existing account
+transaction lock, not only the tuple primary key. Corrupt historical aliases
+fail closed and require separately authorized repair; no migration is automatic.
 
 Generation uses `PersonaProfileGenerator` and the resolved configured model.
 `source_message_id` must identify a genuine current operator HumanMessage,

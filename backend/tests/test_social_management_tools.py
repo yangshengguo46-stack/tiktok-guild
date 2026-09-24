@@ -482,3 +482,18 @@ def test_gateway_gives_idless_current_operator_message_a_stable_admitted_id():
     cap = operator_management_for_request(request, {"context": {}}, thread_id="thread", graph_input=graph_input)
     message = graph_input["messages"][0]
     assert message.id and cap.operator_messages == {message.id: "Keep it brief"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activate", [False, True])
+@pytest.mark.parametrize("profile_id,version", [("x@1", "2"), ("x", "1@2")])
+async def test_tool_rejects_ambiguous_profile_identity_without_touching_active(db, activate, profile_id, version):
+    service, runtime = host(db)
+    await generate(service, runtime, profile_id="active", activate=True, expected_binding_revision=0)
+    before = await service.resolve_profile(SCOPE)
+    rows = await db.get_profiles(SCOPE)
+    with pytest.raises(ValueError, match="separator"):
+        await generate(service, runtime, profile_id=profile_id, version=version, expected_revision=1, activate=activate, expected_binding_revision=1)
+    assert await service.resolve_profile(SCOPE) == before
+    assert await db.get_profiles(SCOPE) == rows
+    assert (await db.get_binding_state(SCOPE)).write_revision == 1

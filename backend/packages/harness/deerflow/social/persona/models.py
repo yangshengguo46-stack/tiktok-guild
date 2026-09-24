@@ -54,6 +54,10 @@ class PersonaProfile:
     def __post_init__(self) -> None:
         for name in ("profile_id", "version", "base_template_ref"):
             bounded_text(getattr(self, name), name, 128)
+        if "@" in self.profile_id or "@" in self.version:
+            raise ValueError("profile_id and version must not contain the @ reference separator")
+        if self.base_template_ref.count("@") != 1 or not all(self.base_template_ref.split("@")):
+            raise ValueError("base_template_ref must be an id@version reference")
         if self.created_by not in {"operator", "generated"}:
             raise ValueError("invalid profile creator")
         bounded_refs(self.basis_refs, "basis_refs", minimum=1 if self.created_by == "generated" else 0)

@@ -49,6 +49,114 @@ def event(social, number=1, **kwargs):
     return social.ExternalEvent(source_event_id=f"e{number}", source_ref=f"ref{number}", source_kind="creator_message", text="hello", **kwargs)
 
 
+async def insert_legacy_profile(repo, *, profile_id, version, revision, length="brief", origin=None):
+    """Corrupt/historical fixture bypasses constructors intentionally, not writes under test."""
+    from datetime import UTC
+
+    from deerflow.persistence.social.model import social_persona_profile
+
+    payload = {"profile_id": profile_id, "version": version, "base_template_ref": "relaxed_wit@1.0.1", "overrides": {"length": length}, "created_by": "operator", "basis_refs": []}
+    if origin:
+        payload["management_scope"] = origin
+    async with repo.session_factory.begin() as session:
+        await session.execute(
+            social_persona_profile.insert().values(
+                owner_user_id="owner", account_id="account", profile_id=profile_id, version=version, revision=revision, profile_json=payload, basis_refs_json=[], status="registered", created_at=datetime.now(UTC)
+            )
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hidden_duplicate", [False, True])
+async def test_corrupt_duplicate_serialized_refs_fail_closed_before_scope_filter(db, hidden_duplicate):
+    _, repo, _ = db
+    scope = ProfileScope("owner", "account", "lead_agent", "person")
+    await insert_legacy_profile(repo, profile_id="x@1", version="2", revision=1)
+    origin = {"owner_user_id": "owner", "account_id": "account", "agent_instance_id": "other", "relation_ref": "other"} if hidden_duplicate else None
+    await insert_legacy_profile(repo, profile_id="x", version="1@2", revision=2, length="verbose", origin=origin)
+    with pytest.raises(ValueError, match="duplicate serialized profile reference"):
+        await repo.get_profiles(scope)
+    with pytest.raises(ValueError, match="duplicate serialized profile reference"):
+        await repo.restore(SCOPE)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["register", "candidate", "activate"])
+async def test_repository_revalidates_bypassed_profile_constructor(db, operation):
+    _, repo, _ = db
+    scope = ProfileScope("owner", "account", "lead_agent", "person")
+    active = PersonaProfile("active", "1", "relaxed_wit@1.0.1", {"length": "brief"}, "operator", ())
+    await repo.register_profile(scope, active, expected_revision=0)
+    await repo.update_binding(scope, "active@1", expected_revision=0, reason="active")
+    before = await repo.restore(SCOPE)
+    candidate = PersonaProfile("x", "2", "relaxed_wit@1.0.1", {"length": "verbose"}, "operator", ())
+    object.__setattr__(candidate, "profile_id", "x@1")
+    with pytest.raises(ValueError, match="separator"):
+        if operation == "register":
+            await repo.register_profile(scope, candidate, expected_revision=1)
+        else:
+            await repo.manage_profile(scope, candidate=candidate, expected_registry_revision=1, expected_revision=1, reason="collision", activate=operation == "activate")
+    assert await repo.restore(SCOPE) == before
+    assert set(await repo.get_profiles(scope)) == {"active@1"}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_bypassed_aliases_cannot_write_either_tuple(db):
+    _, repo, _ = db
+    scope = ProfileScope("owner", "account")
+    first = PersonaProfile("x", "2", "relaxed_wit@1.0.1", {"length": "brief"}, "operator", ())
+    second = PersonaProfile("x", "2", "relaxed_wit@1.0.1", {"length": "verbose"}, "operator", ())
+    object.__setattr__(first, "profile_id", "x@1")
+    object.__setattr__(second, "version", "1@2")
+    outcomes = await asyncio.gather(repo.register_profile(scope, first, expected_revision=0), repo.register_profile(scope, second, expected_revision=0), return_exceptions=True)
+    assert all(isinstance(outcome, ValueError) for outcome in outcomes)
+    assert await repo.get_profiles(scope) == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activate", [False, True])
+async def test_second_alias_cannot_overwrite_legacy_active_profile_or_binding(db, activate):
+    from deerflow.persistence.social.model import social_persona_binding, social_persona_profile
+
+    _, repo, _ = db
+    scope = ProfileScope("owner", "account", "lead_agent", "person")
+    # This is the review's first x@1 / 2 profile as it may exist from old code.
+    # Existing malformed data is never migrated or served under a new meaning.
+    await insert_legacy_profile(repo, profile_id="x@1", version="2", revision=1, length="brief")
+    async with repo._write(scope) as session:
+        await repo._insert_binding(session, scope, "x@1@2", expected_revision=0, reason="legacy active", evidence_ids=())
+
+    async def rows():
+        async with repo.session_factory() as session:
+            profiles = (await session.execute(sa.select(social_persona_profile))).mappings().all()
+            bindings = (await session.execute(sa.select(social_persona_binding))).mappings().all()
+            return profiles, bindings
+
+    before = await rows()
+    candidate = PersonaProfile("x", "1", "relaxed_wit@1.0.1", {"length": "verbose"}, "operator", ())
+    object.__setattr__(candidate, "version", "1@2")
+    with pytest.raises(ValueError, match="separator"):
+        await repo.manage_profile(scope, candidate=candidate, expected_registry_revision=1, expected_revision=1, reason="alias", activate=activate)
+    assert await rows() == before  # No new row, active behavior/ref/revision unchanged.
+    assert before[0][0]["profile_json"]["overrides"]["length"] == "brief"
+    with pytest.raises(ValueError, match="separator"):
+        await repo.restore(SCOPE)  # Corrupt historical references cannot resolve a changed fingerprint.
+
+
+def test_postgres_serialized_ref_lookup_is_account_scoped_and_not_tuple_only():
+    from sqlalchemy.dialects import postgresql
+
+    from deerflow.persistence.social import sql
+
+    assert hasattr(sql, "_profile_ref_query"), "account-wide serialized reference query is missing"
+    query = sql._profile_ref_query(ProfileScope("owner", "account", "agent", "relation"), "x@1@2")
+    compiled = query.compile(dialect=postgresql.dialect())
+    assert {"owner", "account", "@", "x@1@2"} <= set(compiled.params.values())
+    where = str(compiled).split("WHERE", 1)[1]
+    assert "||" in where and "profile_id" in where and "version" in where
+    assert "scope_key" not in where and "management_scope" not in where
+
+
 @pytest.mark.asyncio
 async def test_event_idempotency_survives_restart_and_70_later_events(db):
     social, repo, engine = db

@@ -23,6 +23,8 @@ Chat on the default Lead: list, generate, preview, bind, clear overrides and
 rollback (`social_*` tools). Generation produces a candidate unless the operator
 explicitly requests activation with the target binding revision. Clear restores
 inheritance; rollback appends a new revision and preserves facts and commitments.
+Profile IDs and versions must not contain `@`; ambiguous historical references
+are rejected rather than silently resolving to different profile content.
 Generation needs a configured model and a current operator message or explicitly
 selected scoped creator evidence. External channels, custom agents, subagents,
 bootstrap, PAT and auth-disabled runs do not receive management capabilities.
