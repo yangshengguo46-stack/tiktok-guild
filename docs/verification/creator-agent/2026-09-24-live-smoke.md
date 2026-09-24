@@ -2,7 +2,7 @@
 
 时间：2026-09-24（Asia/Shanghai）  
 派发号：`DSR-LIVE-20260924-01`  
-版本：`master@e451326a`
+版本：`master@a08ff2f0`
 
 ## 本机启动
 
