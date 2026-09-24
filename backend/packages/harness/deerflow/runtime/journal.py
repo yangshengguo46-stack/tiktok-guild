@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import threading
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
@@ -51,10 +52,6 @@ if TYPE_CHECKING:
     from deerflow.runtime.events.store.base import RunEventStore
 
 logger = logging.getLogger(__name__)
-
-# Host-only model-call boundary. Unlike TAG_NOSTREAM, this also excludes raw
-# prompts, outputs and provider errors from durable event/history consumers.
-TAG_PRIVATE_OUTPUT = "deerflow:private_output"
 
 _LEGACY_SUMMARY_MESSAGE_NAME = "summary"
 _PERSISTED_HIDDEN_HUMAN_INPUT_RESPONSE_SOURCES = frozenset({"ask_clarification", "sandbox_network"})
@@ -251,6 +248,9 @@ class RunJournal(BaseCallbackHandler):
         self.thread_id = thread_id
         self._store: RunEventStore | None = event_store
         self._closed = False
+        # Config tags are client-controlled, so only this journal's fresh host
+        # capability may suppress content. Never recognize a public prefix.
+        self._private_output_tag: str | None = "deerflow:private_output:" + secrets.token_urlsafe(32)
         self._private_output_runs: set[str] = set()
         self._private_lead_output = False
         self._track_tokens = track_token_usage
@@ -327,7 +327,7 @@ class RunJournal(BaseCallbackHandler):
 
     def _private_output(self, run_id, tags=None) -> bool:
         rid = str(run_id)
-        if TAG_PRIVATE_OUTPUT in (tags or []):
+        if self._private_output_tag is not None and self._private_output_tag in (tags or []):
             self._private_output_runs.add(rid)
         return rid in self._private_output_runs
 
@@ -500,7 +500,8 @@ class RunJournal(BaseCallbackHandler):
         private = self._private_output(run_id, tags)
         if private and caller == "lead_agent":
             self._private_lead_output = True
-        logger.debug("on_llm_end %s: tags=%s", run_id, tags)
+        if not private:
+            logger.debug("on_llm_end %s: tags=%s", run_id, tags)
         for generation in response.generations:
             for gen in generation:
                 if hasattr(gen, "message"):
@@ -1218,6 +1219,7 @@ class RunJournal(BaseCallbackHandler):
         self._counted_message_llm_run_ids.clear()
         self._llm_response_callers.clear()
         self._private_output_runs.clear()
+        self._private_output_tag = None
         self._private_lead_output = False
         self._llm_start_times.clear()
         self._seen_llm_starts.clear()

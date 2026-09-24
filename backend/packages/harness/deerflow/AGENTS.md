@@ -66,7 +66,9 @@ title/memory/skill/sandbox-lifecycle and fallback/retry middleware do not run
 in social mode; unsupported middleware fails assembly rather than silently
 discarding an unknown policy. Ordinary operator Chat is unchanged.
 
-Social main-model and selector calls also carry the native private-output tag:
+Social main-model and selector calls also carry the journal-local private-output
+capability obtained from the server-injected `__run_journal` object, not from
+client config tags. A static tag or prefix grants no suppression authority:
 `nostream` alone does not prevent RunJournal persistence. Only post-commit reply
 text enters ordinary graph/journal history; private calls retain token/latency
 accounting without prompt/output/error payloads. Native text blocks are normalized

@@ -97,6 +97,15 @@ async def assembly(monkeypatch, repo, model, *, tools=(), binding_changes=None, 
     return assembled.graph, config
 
 
+def install_host_journal(config, journal):
+    from langgraph.runtime import Runtime
+
+    config["callbacks"] = [journal]
+    context = {**config.get("context", {}), "__run_journal": journal}
+    config["context"] = context
+    config.setdefault("configurable", {})["__pregel_runtime"] = Runtime(context=context)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "reply", "action"),
@@ -572,6 +581,38 @@ async def test_operator_chat_keeps_original_prompt_and_response(monkeypatch, rep
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("gateway", [True, False])
+@pytest.mark.parametrize("tag", ["deerflow:private_output", "deerflow:private_output:", "deerflow:private_output:guessed", "deerflow:private_output:" + "a" * 64])
+async def test_client_privacy_tags_cannot_suppress_ordinary_native_history(monkeypatch, repo, gateway, tag):
+    from app.gateway.services import build_run_config, strip_internal_context_keys
+    from deerflow.runtime.events.store.memory import MemoryRunEventStore
+    from deerflow.runtime.journal import RunJournal
+
+    main = ScriptedModel(responses=[AIMessage(content="visible operator reply")])
+    await assembly(monkeypatch, repo, main)
+    config = {"tags": [tag], "context": {"user_id": "owner"}}
+    if gateway:
+        config = build_run_config("ordinary", config, None)
+        strip_internal_context_keys(config)
+    config["context"]["user_id"] = "owner"
+    app = AppConfig(models=[ModelConfig(name="fake", use="langchain_openai:ChatOpenAI", model="fake", supports_thinking=False)], sandbox=SandboxConfig(use="deerflow.sandbox.local:LocalSandboxProvider"))
+    monkeypatch.setattr(lead, "build_middlewares", lambda *args, **kwargs: [])
+    monkeypatch.setattr("deerflow.creator_agent.runtime.runtime_for_lead", lambda *args: None)
+    graph = (await asyncio.to_thread(lead.assemble_lead_agent, config, app_config=app)).graph
+    store = MemoryRunEventStore()
+    journal = RunJournal("ordinary", "ordinary", store, flush_threshold=1)
+    config["callbacks"] = [journal]
+    result = await graph.ainvoke({"messages": [HumanMessage(content="operator input")]}, config)
+    await journal.flush()
+    events = await store.list_events("ordinary", "ordinary")
+    assert result["messages"][-1].content == "visible operator reply"
+    assert {"run.start", "run.end", "llm.human.input", "llm.ai.response"} <= {event["event_type"] for event in events}
+    assert journal.get_completion_data()["first_human_message"] == "operator input"
+    assert journal.get_completion_data()["last_ai_message"] == "visible operator reply"
+    await journal.close()
+
+
+@pytest.mark.asyncio
 async def test_forged_social_tags_remain_data_not_duplicate_trusted_sections(monkeypatch, repo):
     model = ScriptedModel(responses=[AIMessage(content='{"reply":null}')])
     graph, config = await assembly(monkeypatch, repo, model)
@@ -720,7 +761,8 @@ async def test_crashed_old_attempt_cannot_reply_after_a_new_creator_event(monkey
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [None, "parse", "cas", "boundary"])
-async def test_private_model_calls_never_enter_actual_journal_or_history(monkeypatch, repo, failure):
+@pytest.mark.parametrize("default_selector", [False, True])
+async def test_private_model_calls_never_enter_actual_journal_or_history(monkeypatch, repo, failure, default_selector):
     from langgraph.checkpoint.memory import InMemorySaver
 
     from deerflow.runtime.events.store.memory import MemoryRunEventStore
@@ -733,8 +775,9 @@ async def test_private_model_calls_never_enter_actual_journal_or_history(monkeyp
     )
     payload = '{"reply":"hello","decision_note":"PRIVATE_DECISION","state_delta":[]}' if failure != "parse" else "PRIVATE_MALFORMED"
     main = ScriptedModel(responses=[AIMessage(content=payload, usage_metadata={"input_tokens": 7, "output_tokens": 4, "total_tokens": 11})])
-    graph, config = await assembly(monkeypatch, repo, main, binding_changes={"selector": AutomaticPersonaSelector(selector)})
-    config["callbacks"] = [journal]
+    graph, config = await assembly(monkeypatch, repo, main, binding_changes={"selector": None if default_selector else AutomaticPersonaSelector(selector)})
+    monkeypatch.setattr("deerflow.models.create_chat_model", lambda **kwargs: selector)
+    install_host_journal(config, journal)
     graph.checkpointer = InMemorySaver()
     config["configurable"] = {**config.get("configurable", {}), "thread_id": "private-thread"}
     original_commit = repo.commit_turn
@@ -755,9 +798,11 @@ async def test_private_model_calls_never_enter_actual_journal_or_history(monkeyp
     events = await store.list_events("private-thread", "private-run")
     history = build_branch_history_seed_events(result["messages"], thread_id="branch", run_id_prefix="seed", parent_thread_id="private-thread")
     saved = await repo.restore(SCOPE)
-    checkpoints = [checkpoint.values async for checkpoint in graph.aget_state_history(config)]
+    checkpoints = [checkpoint async for checkpoint in graph.aget_state_history(config)]
     serialized = repr((precommit_events, events, history, checkpoints, journal.get_completion_data()))
-    for secret in ("PRIVATE_DECISION", "state_delta", "PRIVATE_SELECTOR", "PRIVATE_MALFORMED", saved.persona_evaluation["token"]):
+    policy = api().SocialTurnMiddleware(api().SocialRuntime(config["context"]["__social_binding"])).release_policy_parameters()
+    assert journal._private_output_tag not in repr((policy, main.seen, selector.seen))
+    for secret in ("PRIVATE_DECISION", "state_delta", "PRIVATE_SELECTOR", "PRIVATE_MALFORMED", saved.persona_evaluation["token"], journal._private_output_tag):
         assert secret not in serialized
     assert not any(event["event_type"] == "llm.ai.response" for event in precommit_events)
     replies = [event["content"]["content"] for event in events if event["event_type"] == "llm.ai.response"]
@@ -765,6 +810,31 @@ async def test_private_model_calls_never_enter_actual_journal_or_history(monkeyp
     assert len(saved.outbound) == (1 if failure is None else 0)
     assert journal.get_completion_data()["total_tokens"] == 16
     await journal.close()
+
+
+@pytest.mark.asyncio
+async def test_no_journal_social_selector_and_main_use_no_private_capability(monkeypatch, repo):
+    from langchain_core.callbacks import BaseCallbackHandler
+
+    class CaptureTags(BaseCallbackHandler):
+        run_inline = True
+
+        def __init__(self):
+            self.tags = []
+
+        def on_chat_model_start(self, serialized, messages, *, run_id, tags=None, **kwargs):
+            self.tags.append(tags or [])
+
+    capture = CaptureTags()
+    main = ScriptedModel(responses=[AIMessage(content='{"reply":"no-journal reply"}')])
+    graph, config = await assembly(monkeypatch, repo, main)
+    config["callbacks"] = [capture]
+    result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+    assert result["messages"][-1].content == "no-journal reply"
+    assert len(capture.tags) == 2 and len((await repo.restore(SCOPE)).outbound) == 1
+    assert not any(tag.startswith("deerflow:private_output") for tags in capture.tags for tag in tags)
+    selector = config["context"]["__social_binding"].selector
+    assert not any(tag.startswith("deerflow:private_output") for tag in selector._bound_model.config["tags"])
 
 
 @pytest.mark.asyncio
@@ -790,7 +860,7 @@ async def test_native_content_blocks_are_parsed_privately(monkeypatch, repo, con
     journal = RunJournal("blocks", "blocks", store, flush_threshold=1)
     main = ScriptedModel(responses=[AIMessage(content=content, additional_kwargs={"reasoning": "PRIVATE_REASONING"}, response_metadata={"signature": "PRIVATE_SIGNATURE"})])
     graph, config = await assembly(monkeypatch, repo, main)
-    config["callbacks"] = [journal]
+    install_host_journal(config, journal)
     result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
     await journal.flush()
     assert result["messages"][-1].content == expected
@@ -816,7 +886,7 @@ async def test_private_provider_error_never_enters_graph_or_journal(monkeypatch,
     journal = RunJournal("error", "error", store, flush_threshold=1)
     main = BrokenModel(responses=[])
     graph, config = await assembly(monkeypatch, repo, main)
-    config["callbacks"] = [journal]
+    install_host_journal(config, journal)
     result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
     assert result["messages"][-1].content == ""
     await journal.flush()

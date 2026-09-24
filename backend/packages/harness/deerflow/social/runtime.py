@@ -11,7 +11,7 @@ from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import Command
 
 from deerflow.persistence.social import SocialConflictError, SocialRepository
-from deerflow.runtime.journal import TAG_PRIVATE_OUTPUT
+from deerflow.runtime.journal import RunJournal
 from deerflow.social.context import RelationshipMemoryItem, RelationshipSnapshot, SelfMemoryItem, SocialContextSnapshot, TurnContext
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_text
 from deerflow.social.middleware import SocialContextMiddleware
@@ -83,7 +83,7 @@ class SocialRuntime:
         self._app_config = app_config
         self._model_name = model_name
 
-    async def restore_context(self):
+    async def restore_context(self, *, journal: RunJournal | None = None):
         snapshot = await self.repository.restore(self.binding.scope)
         event = next((event for event in snapshot.events if event["source_event_id"] == self.binding.event_id), None)
         if event is None:
@@ -103,6 +103,7 @@ class SocialRuntime:
                     evidence_version=snapshot.revision,
                     evaluated_evidence_version=snapshot.evaluated_persona_evidence_version,
                     binding_revision=snapshot.effective_persona.binding_revision,
+                    private_journal=journal,
                 )
                 snapshot = await self.repository.finish_persona_evaluation(claim, choice=choice)
             else:
@@ -168,11 +169,15 @@ class SocialTurnMiddleware(SocialContextMiddleware):
 
     async def awrap_model_call(self, request, handler):
         runtime = self._runtime
+        context = getattr(request.runtime, "context", None)
+        journal = context.get("__run_journal") if isinstance(context, dict) else None
+        if not isinstance(journal, RunJournal):
+            journal = None
         if runtime.finished:
             return ModelResponse(result=[AIMessage(content="")])
         if runtime.snapshot is None:
             try:
-                await runtime.restore_context()
+                await runtime.restore_context(journal=journal)
             except SocialConflictError:
                 runtime.snapshot = await runtime.repository.restore(runtime.binding.scope)
                 runtime.finished = True
@@ -187,7 +192,8 @@ class SocialTurnMiddleware(SocialContextMiddleware):
         request = self._inject(request)
         # The normal create_agent handler still binds tools and invokes the same
         # model. Suppress its callbacks, including nonstreaming on_llm_end frames.
-        model = request.model.model_copy(update={"tags": [*(request.model.tags or []), TAG_NOSTREAM, TAG_PRIVATE_OUTPUT], "disable_streaming": True})
+        private_tags = [journal._private_output_tag] if journal is not None and journal._private_output_tag is not None else []
+        model = request.model.model_copy(update={"tags": [*(request.model.tags or []), TAG_NOSTREAM, *private_tags], "disable_streaming": True})
         try:
             response = await handler(request.override(model=model, model_settings={**request.model_settings, "stream": False}))
         except Exception:

@@ -1,12 +1,19 @@
 ### Private native model output
 
-Host-tagged `deerflow:private_output` model calls are accounting-only in
-`RunJournal`: no prompt, raw response, provider-error text, message summary or
+Each `RunJournal` creates its own unguessable private-output tag capability.
+Only that exact token makes model calls accounting-only in that journal:
+client-supplied static strings, prefixes, guesses and another journal's token
+have no suppression effect. Social middleware obtains the capability only from
+the typed, server-injected `runtime.context.__run_journal` object and passes it
+to the selector per call; neither the reusable selector nor graph state stores
+it. No-journal runs need no private tag. Tokens never enter prompts, release
+policy, events, summaries or checkpoint/history data and are revoked on close.
+For private calls, no prompt, raw response, provider-error text, message summary or
 tool-call bookkeeping enters event/history storage. Their existing token
 accumulation remains active, and `middleware:private_model_usage` records only
 usage, latency and call attribution. The run id retains privacy when a provider
 replays a callback without tags. Tagged chain starts/ends/errors are also private.
-The tag is distinct from LangGraph `nostream`; ordinary operator and existing
+This host capability is distinct from LangGraph `nostream`; ordinary operator and existing
 nostream journaling are unchanged. A native social graph returns only a committed
 reply (or empty silence), and root chain-end reconciles that sanitized final reply
 into `llm.ai.response`. Raw private output must never be placed in graph state:

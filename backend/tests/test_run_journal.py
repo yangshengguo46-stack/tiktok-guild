@@ -21,10 +21,12 @@ from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("tags, visible", [(["lead_agent"], True), (["lead_agent", "nostream"], True), (["lead_agent", "deerflow:private_output"], False)])
+@pytest.mark.parametrize("tags, visible", [(["lead_agent"], True), (["lead_agent", "nostream"], True), (["lead_agent", "deerflow:private_output"], True), (["lead_agent", "host-capability"], False)])
 async def test_private_output_tag_hides_messages_but_keeps_usage_and_latency(tags, visible):
     store = MemoryRunEventStore()
     journal = RunJournal("private", "private", store, flush_threshold=1)
+    if not visible:
+        tags = ["lead_agent", journal._private_output_tag]
     run_id = uuid4()
     journal.on_chat_model_start({}, [[HumanMessage(content="PRIVATE_PROMPT")]], run_id=run_id, tags=tags)
     response = LLMResult(generations=[[ChatGeneration(message=AIMessage(content="PRIVATE_OUTPUT", usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}))]])
@@ -43,6 +45,22 @@ async def test_private_output_tag_hides_messages_but_keeps_usage_and_latency(tag
     assert journal.get_completion_data()["total_tokens"] == 5
     assert any(event["metadata"].get("latency_ms") is not None for event in events)
     await journal.close()
+
+
+@pytest.mark.anyio
+async def test_private_capability_is_journal_local_and_never_journaled():
+    store = MemoryRunEventStore()
+    one = RunJournal("one", "one", store, flush_threshold=1)
+    two = RunJournal("two", "two", store, flush_threshold=1)
+    assert one._private_output_tag != two._private_output_tag
+    response = LLMResult(generations=[[ChatGeneration(message=AIMessage(content="visible"))]])
+    two.on_llm_end(response, run_id=uuid4(), tags=[one._private_output_tag])
+    await two.flush()
+    events = await store.list_events("two", "two")
+    assert [event["content"]["content"] for event in events] == ["visible"]
+    assert one._private_output_tag not in repr(events) and two._private_output_tag not in repr(events)
+    await one.close()
+    await two.close()
 
 
 def test_run_journal_is_marked_as_loop_bound():
