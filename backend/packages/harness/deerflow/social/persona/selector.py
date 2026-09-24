@@ -12,6 +12,7 @@ from langgraph.constants import TAG_NOSTREAM
 
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
+from deerflow.utils.file_io import run_file_io
 
 _FIELDS = {"action", "persona_id", "confidence", "evidence_refs", "reason"}
 _SYSTEM = (
@@ -50,7 +51,7 @@ def parse_decision(content: object) -> dict | None:
         return None
     if not isinstance(raw, dict) or set(raw) != _FIELDS:
         return None
-    if raw["action"] not in {"stay", "switch"} or not isinstance(raw["persona_id"], str):
+    if not isinstance(raw["action"], str) or raw["action"] not in {"stay", "switch"} or not isinstance(raw["persona_id"], str):
         return None
     confidence = raw["confidence"]
     if type(confidence) not in {int, float} or not 0 <= confidence <= 1:
@@ -89,7 +90,7 @@ class AutomaticPersonaSelector:
     ) -> AutomaticPersonaChoice | None:
         if type(evidence_version) is not int or type(evaluated_evidence_version) is not int or evidence_version <= evaluated_evidence_version or type(binding_revision) is not int or binding_revision < 1:
             return None
-        if not isinstance(scope, ProfileScope) or candidates != load_persona_catalog():
+        if not isinstance(scope, ProfileScope) or candidates != await run_file_io(load_persona_catalog):
             return None
         owned = []
         for row in evidence[:32]:
@@ -107,7 +108,8 @@ class AutomaticPersonaSelector:
             return None
         payload = {"current_profile_ref": current_profile_ref, "candidates": [{"ref": ref, **dict(value)} for ref, value in sorted(candidates.items())], "evidence": owned}
         try:
-            reply = await asyncio.wait_for(self._get_model().ainvoke([SystemMessage(content=_SYSTEM), HumanMessage(content=json.dumps(payload, ensure_ascii=False, sort_keys=True))], stream=False), timeout=self._timeout_seconds)
+            model = await run_file_io(self._get_model)
+            reply = await asyncio.wait_for(model.ainvoke([SystemMessage(content=_SYSTEM), HumanMessage(content=json.dumps(payload, ensure_ascii=False, sort_keys=True))], stream=False), timeout=self._timeout_seconds)
         except Exception:
             return None
         decision = parse_decision(getattr(reply, "content", None))

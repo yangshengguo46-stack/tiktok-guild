@@ -51,6 +51,48 @@ unknown must never trigger a blind resend. Result recording accepts only
 accepted/delivered/unknown/failed with evidence. Task 7 owns send authorization
 and receipt verification; the repository itself never publishes.
 
+Native Lead social turns use a frozen `SocialRuntimeBinding` supplied by the
+host in `config.context.__social_binding`, with `social_mode=True` and a matching
+owner. Dictionaries from HTTP/model text cannot create this capability. Each
+assembly is bound to one sourced event; async invocation reuses the native
+`create_agent` graph, checkpoint/store attachment and tool authorization. The
+host supplies the channel-safe tool allowlist, intersected with ordinary tool
+authorization before deferred setup. One `SocialTurnMiddleware` restores the
+trusted context, buffers the native model response, validates minimal JSON
+`TurnResult`, and commits before returning only assistant reply text. Native
+sanitization, guardrail authorization, sandbox audit and read-before-write
+guards remain active. Provider safety detectors run before commit. Operator
+title/memory/skill/sandbox-lifecycle and fallback/retry middleware do not run
+in social mode; unsupported middleware fails assembly rather than silently
+discarding an unknown policy. Ordinary operator Chat is unchanged.
+
+Automatic selection uses durable `claim_persona_evaluation` and
+`finish_persona_evaluation` calls. A host-only random token identifies one
+attempt per scoped creator event, with conversational revision and effective
+binding generation CAS. The native event JSON retains the attempt across
+restart; no lease or timed retry exists. A crashed attempt is skipped on retry,
+which may continue the main turn using the current resolved persona. Finishing
+an evaluation checks the token, event revision, binding generation and contact
+boundaries under the existing write lock, then atomically records completion
+and an optional relation binding. Same-profile selection is a durable no-op.
+Evaluation audit writes do not advance conversational revision. The binding
+write token is independently obtained from `BindingState.write_revision`.
+
+`commit_turn(enforce_contact_boundaries=True)` is a host-only pre-outbox fence,
+not send authorization. It rejects replies under native or legacy DNC,
+unverified identity, takeover, or any unresolved unknown outbox action. WAIT
+and NO_REPLY may be persisted without outbound; the runtime itself short
+circuits blocked turns before generation. Receipt context is projected from
+action history: none/only-pending -> none; any unknown -> unknown; otherwise
+accepted/delivered/failed -> known. Persisted raw receipt values are not rewritten.
+Generic relationship notes remain typed sourced notes in bounded data context;
+they are never relabeled as claims, topics or preferences. `TurnContext.source_ref`
+is optional for legacy constructors and comes only from the restored scoped
+event. It is bounded untrusted data for claim citations, never authority.
+Selector prompts,
+tokens, decisions and profile-generation fields are not channel text. Task 7
+still owns authenticated ingress, actual publishing and verified receipts.
+
 ### Request Trace Context (`packages/harness/deerflow/trace_context.py`)
 
 DeerFlow's request-level correlation id — the `X-Trace-Id` header and the `deerflow_trace_id` key. Not Langfuse's trace id, not `run_id`, not the short subagent `trace_id` log label.

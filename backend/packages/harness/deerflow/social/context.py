@@ -34,6 +34,23 @@ class SelfMemoryItem:
 
 
 @dataclass(frozen=True)
+class RelationshipMemoryItem:
+    """Sourced relationship note, without fabricating a claim or topic kind."""
+
+    memory_id: str
+    text: str
+    evidence_ids: tuple[str, ...]
+    status: Literal["active", "retracted", "completed"]
+
+    def __post_init__(self) -> None:
+        bounded_text(self.memory_id, "memory_id", 128)
+        bounded_text(self.text, "text", 2048)
+        bounded_refs(self.evidence_ids, "evidence_ids", minimum=1)
+        if self.status not in {"active", "retracted", "completed"}:
+            raise ValueError("invalid relationship memory status")
+
+
+@dataclass(frozen=True)
 class RelationshipSnapshot:
     revision: int
     claims: tuple[ClaimPatch, ...]
@@ -44,10 +61,15 @@ class RelationshipSnapshot:
     human_takeover: bool
     identity_verified: bool
     receipt_state: Literal["none", "known", "unknown"]
+    notes: tuple[RelationshipMemoryItem, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.revision) is not int or self.revision < 0:
             raise ValueError("relationship revision must be nonnegative")
+        if any(type(value) is not bool for value in (self.do_not_contact, self.human_takeover, self.identity_verified)):
+            raise ValueError("relationship boundaries must be authoritative booleans")
+        if not isinstance(self.notes, tuple) or any(not isinstance(item, RelationshipMemoryItem) for item in self.notes):
+            raise ValueError("relationship notes must contain immutable memory items")
         for name in ("claims", "shared_topics", "preferences", "commitments"):
             if not isinstance(getattr(self, name), tuple):
                 raise ValueError(f"{name} must be a tuple")
@@ -68,10 +90,13 @@ class TurnContext:
     prior_messages: tuple[str, ...]
     unanswered_questions: tuple[str, ...]
     temporary_style: Mapping[str, str]
+    source_ref: str | None = None
 
     def __post_init__(self) -> None:
         bounded_text(self.event_id, "event_id", 128)
         bounded_text(self.source_text, "source_text", 4096, allow_empty=True)
+        if self.source_ref is not None:
+            bounded_text(self.source_ref, "source_ref", 128)
         for name in ("prior_messages", "unanswered_questions"):
             if not isinstance(getattr(self, name), tuple):
                 raise ValueError(f"{name} must be a tuple")
@@ -142,6 +167,7 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
             "shared_topics": [item[:256] for item in relationship.shared_topics[:_LIST_LIMIT]],
             "preferences": [item[:256] for item in relationship.preferences[:_LIST_LIMIT]],
             "commitments": [{"id": item.memory_id, "text": item.text[:512], "status": item.status} for item in relationship.commitments[:_LIST_LIMIT]],
+            "notes": [{"id": item.memory_id, "text": item.text[:512], "evidence_ids": item.evidence_ids[:_LIST_LIMIT], "status": item.status} for item in relationship.notes[:_LIST_LIMIT]],
             "do_not_contact": relationship.do_not_contact,
             "human_takeover": relationship.human_takeover,
             "identity_verified": relationship.identity_verified,
@@ -154,6 +180,7 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         },
         "turn": {
             "event_id": turn.event_id,
+            "source_ref": turn.source_ref,
             "source_text": turn.source_text[:2048],
             "prior_messages": [item[:512] for item in turn.prior_messages[:_LIST_LIMIT]],
             "unanswered_questions": [item[:256] for item in turn.unanswered_questions[:_LIST_LIMIT]],
@@ -165,6 +192,7 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         payload["relationship"]["claims"],
         payload["self_memory"],
         payload["relationship"]["commitments"],
+        payload["relationship"]["notes"],
         payload["turn"]["unanswered_questions"],
         payload["relationship"]["shared_topics"],
         payload["relationship"]["preferences"],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict, fields, replace
@@ -21,6 +22,7 @@ from deerflow.persistence.social.model import (
     ExternalEvent,
     Outbound,
     OutboundClaim,
+    PersonaEvaluationClaim,
     SelfMemoryChange,
     SocialConflictError,
     SocialSnapshot,
@@ -187,6 +189,88 @@ class SocialRepository:
         async with self._read() as session:
             return await self._snapshot(session, scope)
 
+    async def is_turn_committed(self, scope: SocialScope, event_id: str) -> bool:
+        async with self._read() as session:
+            digest = (await session.execute(sa.select(social_event.c.turn_digest).where(*_event_scope(scope), social_event.c.source_event_id == event_id))).scalar_one_or_none()
+            return digest is not None
+
+    async def claim_persona_evaluation(self, scope: SocialScope, *, expected_revision: int, event_id: str, expected_binding_generation: int) -> PersonaEvaluationClaim | None:
+        """Durably consume one creator-event attempt before calling a selector.
+
+        No lease or retry: a crash leaves an attempted audit row. A later turn
+        can proceed with the currently resolved persona, without calling again.
+        """
+        from deerflow.social.turns import contact_blocked
+
+        async with self._write(scope) as session:
+            snapshot = await self._snapshot(session, scope)
+            _check_revision(snapshot.revision, expected_revision, snapshot)
+            _check_revision(snapshot.effective_persona.binding_revision, expected_binding_generation, snapshot)
+            event_where = (*_event_scope(scope), social_event.c.source_event_id == event_id)
+            event = (await session.execute(sa.select(social_event).where(*event_where))).mappings().one_or_none()
+            if event is None:
+                raise ValueError("selector event does not belong to scope")
+            if event["turn_digest"] is not None or event["source_kind"] != "creator_message" or contact_blocked(snapshot):
+                return None
+            if not snapshot.events or snapshot.events[-1]["source_event_id"] != event_id:
+                raise SocialConflictError(snapshot)
+            if (event["turn_context_json"] or {}).get("persona_evaluation") is not None:
+                return None
+            claim = PersonaEvaluationClaim(scope, event_id, expected_revision, expected_binding_generation, secrets.token_hex(24))
+            audit = {"event_id": event_id, "evidence_version": expected_revision, "binding_generation": expected_binding_generation, "token": claim.token, "status": "attempted", "evidence_refs": [], "reason": ""}
+            await session.execute(social_event.update().where(*event_where).values(turn_context_json={"persona_evaluation": audit}))
+            await _save(session, scope, {**_projection(snapshot), "evaluated_persona_evidence_version": expected_revision, "persona_evaluation": audit})
+            return claim
+
+    async def finish_persona_evaluation(self, claim: PersonaEvaluationClaim, *, choice=None) -> SocialSnapshot:
+        """Finish exactly the claimed evaluation, with evidence and binding CAS."""
+        from deerflow.social.persona.selector import AutomaticPersonaChoice
+        from deerflow.social.turns import contact_blocked
+
+        if not isinstance(claim, PersonaEvaluationClaim) or (choice is not None and not isinstance(choice, AutomaticPersonaChoice)):
+            raise ValueError("evaluation requires typed host inputs")
+        scope = claim.scope
+        async with self._write(scope) as session:
+            snapshot = await self._snapshot(session, scope)
+            _check_revision(snapshot.revision, claim.evidence_version, snapshot)
+            _check_revision(snapshot.effective_persona.binding_revision, claim.binding_generation, snapshot)
+            event_where = (*_event_scope(scope), social_event.c.source_event_id == claim.event_id)
+            event = (await session.execute(sa.select(social_event).where(*event_where))).mappings().one_or_none()
+            audit = (event["turn_context_json"] or {}).get("persona_evaluation") if event else None
+            if (
+                not audit
+                or audit.get("token") != claim.token
+                or audit.get("status") != "attempted"
+                or audit.get("evidence_version") != claim.evidence_version
+                or audit.get("binding_generation") != claim.binding_generation
+                or contact_blocked(snapshot)
+            ):
+                raise SocialConflictError(snapshot)
+            if choice is not None:
+                _check_revision(choice.expected_evidence_version, claim.evidence_version, snapshot)
+                _check_revision(choice.expected_binding_revision, claim.binding_generation, snapshot)
+                bounded_refs(choice.evidence_refs, "evidence_refs", minimum=1, maximum=8)
+                bounded_text(choice.reason, "reason", 512, allow_empty=True)
+                if choice.profile_ref not in await run_file_io(load_persona_catalog) or type(choice.confidence) not in {int, float} or not 0.75 <= choice.confidence <= 1:
+                    raise ValueError("invalid automatic persona choice")
+                # The selector sees only this exact current creator-authored event.
+                if event["source_kind"] != "creator_message" or set(choice.evidence_refs) != {event["body_json"]["source_ref"]}:
+                    raise ValueError("selector evidence must identify the current creator event")
+                profile_scope = ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id, scope.person_ref)
+                binding_state = await self._binding_state(session, profile_scope)
+                if choice.profile_ref != snapshot.effective_persona.profile_ref:
+                    await self._insert_binding(session, profile_scope, choice.profile_ref, expected_revision=binding_state.write_revision, reason=choice.reason or "automatic selection", evidence_ids=choice.evidence_refs)
+            completed = {
+                **audit,
+                "status": "completed",
+                "evidence_refs": list(choice.evidence_refs) if choice else [],
+                "reason": choice.reason if choice else "stay_or_invalid",
+                "profile_ref": choice.profile_ref if choice else snapshot.effective_persona.profile_ref,
+            }
+            await session.execute(social_event.update().where(*event_where).values(turn_context_json={"persona_evaluation": completed}))
+            await _save(session, scope, {**_projection(snapshot), "persona_evaluation": completed})
+            return await self._snapshot(session, scope)
+
     async def record_event(self, scope: SocialScope, event: ExternalEvent, *, expected_revision: int | None = None) -> SocialSnapshot:
         if not isinstance(event, ExternalEvent):
             raise ValueError("event must be an ExternalEvent")
@@ -232,7 +316,16 @@ class SocialRepository:
             return await self._snapshot(session, scope)
 
     async def commit_turn(
-        self, scope: SocialScope, *, expected_revision: int, event_id: str, result: TurnResult, persona_fingerprint: str, memory_changes: tuple[SelfMemoryChange, ...] = (), turn_adjustment: TurnAdjustment | None = None
+        self,
+        scope: SocialScope,
+        *,
+        expected_revision: int,
+        event_id: str,
+        result: TurnResult,
+        persona_fingerprint: str,
+        memory_changes: tuple[SelfMemoryChange, ...] = (),
+        turn_adjustment: TurnAdjustment | None = None,
+        enforce_contact_boundaries: bool = False,
     ) -> CommitResult:
         if not isinstance(result, TurnResult):
             raise ValueError("result must be TurnResult")
@@ -249,6 +342,11 @@ class SocialRepository:
         async with self._write(scope) as session:
             snapshot = await self._snapshot(session, scope)
             event_where = (*_event_scope(scope), social_event.c.source_event_id == event_id)
+            if enforce_contact_boundaries:
+                from deerflow.social.turns import contact_blocked
+
+                if result.reply is not None and contact_blocked(snapshot):
+                    raise SocialConflictError(snapshot)
             event = (await session.execute(sa.select(social_event).where(*event_where))).mappings().one_or_none()
             if event is None:
                 raise ValueError("turn event does not exist in this scope")
@@ -267,6 +365,7 @@ class SocialRepository:
             if authoritative_persona.fingerprint != persona_fingerprint:
                 raise SocialConflictError(snapshot)
             turn_context = {"bindings": {**asdict(bindings), "effective_at": bindings.effective_at.isoformat()}, "evidence_version": snapshot.revision, "adjustment": adjustment_payload}
+            event_context = {**(event["turn_context_json"] or {}), **turn_context}
             projection = _projection(snapshot)
             for patch in result.state_delta:
                 _evidence(snapshot, patch.evidence_ids)
@@ -302,7 +401,7 @@ class SocialRepository:
                         updated_at=now,
                     )
                 )
-            await session.execute(social_event.update().where(*event_where).values(turn_digest=digest, action_id=action_id, turn_context_json=turn_context))
+            await session.execute(social_event.update().where(*event_where).values(turn_digest=digest, action_id=action_id, turn_context_json=event_context))
             await _save(session, scope, projection)
             saved = await self._snapshot(session, scope)
             return CommitResult(saved, next((item for item in saved.outbound if item.action_id == action_id), None))
@@ -449,24 +548,27 @@ class SocialRepository:
                 bodies = (await session.execute(sa.select(social_event.c.body_json).where(*predicates))).scalars().all()
                 if not set(evidence_ids) <= {body["source_ref"] for body in bodies}:
                     raise ValueError("binding evidence must belong to its scope")
-            generation = (await session.execute(sa.select(sa.func.max(social_persona_binding.c.generation)).where(*_account(social_persona_binding, scope)))).scalar_one_or_none() or 1
-            await session.execute(
-                social_persona_binding.insert().values(
-                    owner_user_id=scope.owner_user_id,
-                    account_id=scope.account_id,
-                    scope_key=_scope_key(scope),
-                    agent_instance_id=scope.agent_instance_id,
-                    relation_ref=scope.relation_ref,
-                    revision=expected_revision + 1,
-                    generation=generation + 1,
-                    profile_ref=profile_ref,
-                    reason=reason,
-                    evidence_refs_json=list(evidence_ids),
-                    status="applied",
-                    effective_at=datetime.now(UTC),
-                )
-            )
+            await self._insert_binding(session, scope, profile_ref, expected_revision=expected_revision, reason=reason, evidence_ids=evidence_ids)
             return await self._bindings(session, scope)
+
+    async def _insert_binding(self, session, scope, profile_ref, *, expected_revision, reason, evidence_ids):
+        generation = (await session.execute(sa.select(sa.func.max(social_persona_binding.c.generation)).where(*_account(social_persona_binding, scope)))).scalar_one_or_none() or 1
+        await session.execute(
+            social_persona_binding.insert().values(
+                owner_user_id=scope.owner_user_id,
+                account_id=scope.account_id,
+                scope_key=_scope_key(scope),
+                agent_instance_id=scope.agent_instance_id,
+                relation_ref=scope.relation_ref,
+                revision=expected_revision + 1,
+                generation=generation + 1,
+                profile_ref=profile_ref,
+                reason=reason,
+                evidence_refs_json=list(evidence_ids),
+                status="applied",
+                effective_at=datetime.now(UTC),
+            )
+        )
 
     async def _action(self, session, scope, action_id):
         row = (await session.execute(sa.select(social_outbound).where(*_outbound_scope(scope), social_outbound.c.action_id == action_id))).mappings().one_or_none()

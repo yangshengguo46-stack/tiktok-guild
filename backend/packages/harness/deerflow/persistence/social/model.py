@@ -110,6 +110,19 @@ class SocialSnapshot:
     boundary_history: tuple[dict, ...] = ()
     followup: dict | None = None
     effective_persona: EffectivePersona | None = None
+    evaluated_persona_evidence_version: int = 0
+    persona_evaluation: dict | None = None
+
+
+@dataclass(frozen=True)
+class PersonaEvaluationClaim:
+    """Host-only, durable at-most-once selector capability; never model input."""
+
+    scope: SocialScope
+    event_id: str
+    evidence_version: int
+    binding_generation: int
+    token: str
 
 
 @dataclass(frozen=True)

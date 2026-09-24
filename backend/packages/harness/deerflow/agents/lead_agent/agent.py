@@ -939,6 +939,9 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
     from deerflow.runtime.user_context import resolve_config_user_id
 
     resolved_user_id = resolve_config_user_id(config)
+    from deerflow.social.runtime import SocialRuntime, binding_for_lead
+
+    social_binding = binding_for_lead(config, user_id=resolved_user_id)
 
     requested_model_name: str | None = cfg.get("model_name") or cfg.get("model")
     is_plan_mode = cfg.get("is_plan_mode", False)
@@ -988,6 +991,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
     # Phase 3: enforce model:use authorization. On deny, fall back to the first
     # allowed model (graceful) rather than crashing the run (RFC §9).
     model_name = _authorize_model_name(model_name, context=cfg, app_config=resolved_app_config)
+    social_runtime = SocialRuntime(social_binding, app_config=resolved_app_config, model_name=model_name) if social_binding else None
 
     model_config = resolved_app_config.get_model_config(model_name)
 
@@ -1190,7 +1194,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
     )
     configured_tools = raw_tools + extra_tools
     creator_agent_runtime = None
-    if agent_name is None:
+    if agent_name is None and social_runtime is None:
         from deerflow.creator_agent.middleware import is_operator_surface
 
         if is_operator_surface(cfg):
@@ -1213,6 +1217,8 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         _append_memory_tools_without_name_conflicts(authorization_candidates)
     _append_project_document_tools_if_pinned(authorization_candidates, cfg)
     append_task_continuity_tools(authorization_candidates, resolved_app_config)
+    if social_binding is not None:
+        authorization_candidates = [tool for tool in authorization_candidates if tool.name in social_binding.channel_safe_tool_names]
     configured_tool_ids = {id(tool) for tool in configured_tools}
     authorized_tools, _authz_provider = apply_tool_authorization(
         authorization_candidates,
@@ -1221,7 +1227,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
     )
     configured_tools = [tool for tool in authorized_tools if id(tool) in configured_tool_ids]
     late_tools = [tool for tool in authorized_tools if id(tool) not in configured_tool_ids]
-    final_tools, setup = assemble_deferred_tools(configured_tools, enabled=resolved_app_config.tool_search.enabled)
+    final_tools, setup = assemble_deferred_tools(configured_tools, enabled=resolved_app_config.tool_search.enabled and social_runtime is None)
     final_tools.extend(late_tools)
     mcp_routing_middleware = build_mcp_routing_middleware(
         final_tools,
@@ -1258,6 +1264,11 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         subagent_execution_capacity=subagent_execution_capacity,
         memory_enabled=memory_enabled,
     )
+    if social_runtime is not None:
+        from deerflow.social.runtime import TURN_OUTPUT_PROMPT, middlewares_for_lead
+
+        middlewares = middlewares_for_lead(social_runtime, middlewares)
+        system_prompt = TURN_OUTPUT_PROMPT
     graph = create_agent(
         model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort, app_config=resolved_app_config, attach_tracing=False, model_overrides=agent_model_overrides),
         tools=final_tools,

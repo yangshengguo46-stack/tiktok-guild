@@ -19,6 +19,13 @@
 - Custom Agent `memory_enabled: false` disables memory reads, writes, tools, and compaction flushes while retaining date context; manual compaction trusts the state-producing checkpoint's agent binding, and global disable stays authoritative. Embedded clients cache the named policy by agent/user until `reset_agent()`; unreadable configs keep the legacy enabled default and log a warning.
 - **Prompt trust**: framework authority uses the system channel; user/model-influenced text uses the sanitized `HumanMessage` data channel. Never interpolate untrusted values into system text—even escaped tags do not neutralize natural-language injection (PR #5090).
 - Pass the same rendered prompt and middleware objects to the graph and assembly descriptor so observers describe the live graph, including Custom Agent `allowed_subagents` scope.
+- A typed host `SocialRuntimeBinding` with `social_mode=True` selects the native
+  social turn policy in this same factory. Its signatures and bare graph return
+  type remain unchanged. One social context middleware owns restoration,
+  automatic persona evaluation and commit-before-disclosure. It uses native
+  permission and tool wrappers, intersects tool visibility with a host-owned
+  channel allowlist, and suppresses model tokens until the strict TurnResult
+  has committed. See the harness guide's Native Social Persistence section.
 
 **ThreadState** (`packages/harness/deerflow/agents/thread_state.py`):
 - Extends `AgentState` with: `sandbox`, `thread_data`, `title`, `artifacts`, `todos`, `uploaded_files`, `viewed_images`, `goal`, `promoted`, `delegations`, `skill_context`, `summary_text`
