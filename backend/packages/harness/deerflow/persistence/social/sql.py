@@ -14,6 +14,7 @@ from typing import Literal
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from deerflow.persistence.channel_connections.model import ChannelConnectionRow
 from deerflow.persistence.creator_agent_relationship.model import CreatorAgentRelationshipRow
 from deerflow.persistence.social.model import (
     BindingState,
@@ -25,6 +26,7 @@ from deerflow.persistence.social.model import (
     PersonaEvaluationClaim,
     SelfMemoryChange,
     SocialConflictError,
+    SocialConnectionGuard,
     SocialSnapshot,
     TurnAdjustment,
     social_event,
@@ -598,10 +600,27 @@ class SocialRepository:
                 return None
             return _outbound(await self._action(session, scope, row["action_id"]))
 
-    async def claim_outbound(self, scope: SocialScope, action_id: str, *, expected_revision: int, event_id: str | None = None, persona_fingerprint: str | None = None) -> OutboundClaim:
+    async def _validate_connection_guard(self, session, scope, guard):
+        if guard.owner_user_id != scope.owner_user_id:
+            raise ValueError("send connection owner does not match social scope")
+        query = sa.select(ChannelConnectionRow).where(ChannelConnectionRow.id == guard.connection_id)
+        if session.get_bind().dialect.name == "postgresql":
+            query = query.with_for_update()
+        # SQLite's enclosing BEGIN IMMEDIATE already serializes UPDATE writers.
+        # PostgreSQL must lock this exact connection, not just the social rows:
+        # disconnect/transfer UPDATEs do not acquire the social advisory lock.
+        connection = (await session.execute(query)).scalar_one_or_none()
+        if connection is None or connection.status != "connected" or any(getattr(connection, name) != getattr(guard, name) for name in ("owner_user_id", "provider", "external_account_id", "workspace_id")):
+            raise ValueError("send connection is no longer authorized")
+
+    async def claim_outbound(self, scope: SocialScope, action_id: str, *, expected_revision: int, event_id: str | None = None, persona_fingerprint: str | None = None, connection_guard: SocialConnectionGuard | None = None) -> OutboundClaim:
         if (event_id is None) != (persona_fingerprint is None):
             raise ValueError("send claim requires event and persona fingerprint together")
+        if connection_guard is not None and (not isinstance(connection_guard, SocialConnectionGuard) or event_id is None):
+            raise ValueError("send connection guard requires a typed host identity and event")
         async with self._write(scope) as session:
+            if connection_guard is not None:
+                await self._validate_connection_guard(session, scope, connection_guard)
             row = await self._action(session, scope, action_id)
             if row["state"] != "pending":
                 return OutboundClaim(_outbound(row), False)

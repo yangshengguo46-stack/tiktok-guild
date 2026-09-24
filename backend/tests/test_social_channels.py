@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_gateway_services import _stub_app_config  # noqa: F401
 
@@ -16,6 +17,7 @@ from app.channels.manager import ChannelManager
 from app.channels.message_bus import InboundMessage, MessageBus
 from app.channels.store import ChannelStore
 from deerflow.persistence.base import Base
+from deerflow.persistence.channel_connections.model import ChannelConnectionRow
 from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SocialConflictError, SocialRepository
 from deerflow.social.contracts import IdentityProfile, RoleProfile, SocialScope, TurnResult
 from deerflow.social.persona.models import ProfileScope
@@ -136,7 +138,8 @@ def test_worker_social_binding_is_runtime_only_and_released(repository):
 
 
 @pytest.mark.asyncio
-async def test_native_gateway_launch_uses_runmanager_without_persisting_binding(repository, monkeypatch):
+@pytest.mark.parametrize("thread_backend", ["memory", "sqlite"])
+async def test_native_gateway_launch_uses_runmanager_without_persisting_binding(repository, monkeypatch, thread_backend):
     from test_gateway_services import _make_start_run_request
 
     from app.gateway import services
@@ -149,6 +152,10 @@ async def test_native_gateway_launch_uses_runmanager_without_persisting_binding(
     manager = RunManager()
     request = _make_start_run_request(manager)
     request.app.state.stream_bridge = MemoryStreamBridge()
+    if thread_backend == "sqlite":
+        from deerflow.persistence.thread_meta.sql import ThreadMetaRepository
+
+        request.app.state.thread_store = ThreadMetaRepository(repository.session_factory)
     await request.app.state.thread_store.create("social-thread", user_id="owner")
     seen = []
 
@@ -189,6 +196,179 @@ def social_api():
     from app.channels import social
 
     return social
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", [None, "default", "unrelated", "missing"])
+@pytest.mark.parametrize("phase", ["initial", "admission"])
+@pytest.mark.parametrize("thread_backend", ["memory", "sqlite"])
+@pytest.mark.parametrize("strict_flag", [True, False])
+@pytest.mark.usefixtures("_stub_app_config")
+async def test_social_launch_requires_exact_persisted_thread_owner(repository, monkeypatch, owner, phase, thread_backend, strict_flag):
+    from fastapi import HTTPException
+    from test_gateway_services import _make_start_run_request
+
+    from app.gateway import services
+    from deerflow.runtime import MemoryStreamBridge, RunManager
+    from deerflow.social.runtime import SocialRuntimeBinding
+
+    manager = RunManager()
+    request = _make_start_run_request(manager)
+    request.app.state.stream_bridge = MemoryStreamBridge()
+    if thread_backend == "sqlite":
+        from deerflow.persistence.thread_meta.sql import ThreadMetaRepository
+
+        request.app.state.thread_store = ThreadMetaRepository(repository.session_factory)
+    store = request.app.state.thread_store
+    if phase == "admission" or owner != "missing":
+        await store.create("social-thread", user_id="owner" if phase == "admission" else owner)
+
+    async def prepare(*args, **kwargs):
+        if phase == "admission":
+            await store.delete("social-thread", user_id=None)
+            if owner != "missing":
+                await store.create("social-thread", user_id=owner)
+
+    async def noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(services, "ensure_checkpoint_history_seeded", prepare)
+    monkeypatch.setattr(services, "resolve_trusted_internal_owner_for_attribution", noop)
+
+    async def worker(bridge, run_manager, record, **kwargs):
+        from deerflow.runtime import RunStatus
+
+        await run_manager.set_status(record.run_id, RunStatus.success)
+        await bridge.publish_end(record.run_id)
+
+    monkeypatch.setattr(services, "run_agent", worker)
+    if not strict_flag:
+        original_start = services.start_run
+
+        async def default_start(*args, **kwargs):
+            kwargs.pop("require_existing_thread")
+            return await original_start(*args, **kwargs)
+
+        monkeypatch.setattr(services, "start_run", default_start)
+    binding = SocialRuntimeBinding(repository, SCOPE, IDENTITY, ROLE, "e1")
+    with pytest.raises(HTTPException) as denied:
+        await services.launch_social_channel_turn(app=request.app, binding=binding, thread_id="social-thread", text="hello")
+    assert denied.value.status_code == 404
+    assert not manager._runs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("status", "revoked"), ("owner_user_id", "new-owner")])
+async def test_connection_change_after_final_read_before_claim_never_publishes(repository, tmp_path, monkeypatch, field, value):
+    fixture = await channel_fixture(repository, tmp_path)
+    original = repository.claim_outbound
+
+    async def claim_after_connection_change(*args, **kwargs):
+        async with repository.session_factory.begin() as session:
+            await session.execute(sa.update(ChannelConnectionRow).where(ChannelConnectionRow.id == "connection").values(**{field: value}))
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "claim_outbound", claim_after_connection_change)
+    await fixture.manager._handle_message(fixture.msg)
+    assert fixture.provider.sent == fixture.published == []
+    assert (await repository.get_turn_outbound(SCOPE, "e1")).state == "pending"
+
+
+def connection_guard(**changes):
+    from deerflow.persistence.social.model import SocialConnectionGuard
+
+    return SocialConnectionGuard(**{"connection_id": "connection", "owner_user_id": "owner", "provider": "synthetic-social", "external_account_id": "external-creator", "workspace_id": "workspace", **changes})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("connection_id", "missing"), ("owner_user_id", "other"), ("provider", "other"), ("external_account_id", "other"), ("workspace_id", "other")])
+async def test_claim_connection_guard_requires_all_exact_dimensions(repository, tmp_path, field, value):
+    await channel_fixture(repository, tmp_path)
+    action = await pending(repository)
+    with pytest.raises(ValueError):
+        await repository.claim_outbound(SCOPE, action.action_id, expected_revision=0, event_id="e1", persona_fingerprint=action.persona_fingerprint, connection_guard=connection_guard(**{field: value}))
+    assert (await repository.get_turn_outbound(SCOPE, "e1")).state == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("status", "revoked"), ("owner_user_id", "new-owner")])
+@pytest.mark.parametrize("winner", ["claim", "update"])
+async def test_sqlite_claim_serializes_with_connection_revoke_and_transfer(repository, tmp_path, monkeypatch, field, value, winner):
+    from contextlib import asynccontextmanager
+
+    await channel_fixture(repository, tmp_path)
+    action = await pending(repository)
+    guard = connection_guard()
+    locked, release, competing = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_write = repository._write
+
+    @asynccontextmanager
+    async def controlled_write(scope):
+        if winner == "update":
+            competing.set()
+        async with original_write(scope) as session:
+            if winner == "claim":
+                locked.set()
+                await release.wait()
+            yield session
+
+    monkeypatch.setattr(repository, "_write", controlled_write)
+
+    async def claim():
+        return await repository.claim_outbound(SCOPE, action.action_id, expected_revision=0, event_id="e1", persona_fingerprint=action.persona_fingerprint, connection_guard=guard)
+
+    async def update():
+        async with repository.session_factory.begin() as session:
+            if winner == "claim":
+                competing.set()
+            await session.execute(sa.update(ChannelConnectionRow).where(ChannelConnectionRow.id == "connection").values(**{field: value}))
+            if winner == "update":
+                locked.set()
+                await release.wait()
+
+    first = asyncio.create_task(claim() if winner == "claim" else update())
+    await asyncio.wait_for(locked.wait(), 2)
+    second = asyncio.create_task(update() if winner == "claim" else claim())
+    try:
+        await asyncio.wait_for(competing.wait(), 2)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(second), 0.05)
+    finally:
+        release.set()
+    if winner == "claim":
+        assert (await first).claimed
+        await second
+        assert (await repository.get_turn_outbound(SCOPE, "e1")).state == "unknown"
+    else:
+        await first
+        with pytest.raises(ValueError):
+            await second
+        assert (await repository.get_turn_outbound(SCOPE, "e1")).state == "pending"
+    async with repository.session_factory() as session:
+        row = await session.get(ChannelConnectionRow, "connection")
+        assert getattr(row, field) == value
+
+
+@pytest.mark.asyncio
+async def test_postgres_connection_authorization_emits_exact_row_lock(repository):
+    from sqlalchemy.dialects import postgresql
+
+    statements = []
+
+    class Session:
+        def get_bind(self):
+            return SimpleNamespace(dialect=postgresql.dialect())
+
+        async def execute(self, statement):
+            statements.append(statement)
+            return SimpleNamespace(scalar_one_or_none=lambda: ChannelConnectionRow(id="connection", owner_user_id="owner", provider="synthetic-social", external_account_id="external-creator", workspace_id="workspace", status="connected"))
+
+    await repository._validate_connection_guard(Session(), SCOPE, connection_guard())
+    sql = statements[0].compile(dialect=postgresql.dialect())
+    assert "FROM channel_connections" in str(sql)
+    assert "WHERE channel_connections.id =" in str(sql)
+    assert str(sql).endswith("FOR UPDATE")
+    assert sql.params == {"id_1": "connection"}
 
 
 class SyntheticSocialProvider(Channel):
@@ -243,6 +423,9 @@ async def channel_fixture(repository, tmp_path, *, reply="hi", result="accepted"
     provider.result = social.SocialProviderResult(result, "provider-message", "provider-evidence", "provider-evidence" if result == "delivered" else None)
     binding = social.SocialConnection(repository, SCOPE, IDENTITY, ROLE, "social-thread", "synthetic-social", "external-creator", "workspace", "chat", identity_verified=True)
     connection = {"id": "connection", "owner_user_id": "owner", "provider": "synthetic-social", "external_account_id": "external-creator", "workspace_id": "workspace", "status": "connected"}
+    async with repository.session_factory.begin() as session:
+        if await session.get(ChannelConnectionRow, "connection") is None:
+            session.add(ChannelConnectionRow(**connection))
 
     async def resolve(**kwargs):
         assert kwargs == {"provider": "synthetic-social", "external_account_id": "external-creator", "workspace_id": "workspace"}

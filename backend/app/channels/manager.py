@@ -46,6 +46,7 @@ from app.gateway.path_utils import resolve_outputs_confined_path
 from deerflow.config.agents_config import list_custom_agents, load_agent_config
 from deerflow.config.paths import make_safe_user_id
 from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SocialConflictError
+from deerflow.persistence.social.model import SocialConnectionGuard
 from deerflow.runtime import END_SENTINEL, StreamBridge
 from deerflow.runtime.goal import parse_goal_command
 from deerflow.runtime.keyed_lock import AsyncKeyedLockTable
@@ -2192,7 +2193,14 @@ class ChannelManager:
         current_connection = await self._connection_repo.find_connection_by_external_identity(provider=resolved.provider, external_account_id=resolved.external_account_id, workspace_id=resolved.workspace_id)
         if not isinstance(current_connection, dict) or any(current_connection.get(key) != connection.get(key) for key in ("id", "owner_user_id", "provider", "external_account_id", "workspace_id", "status")):
             return
-        claim = await repository.claim_outbound(envelope.scope, action.action_id, expected_revision=action.revision, event_id=envelope.source_event_id, persona_fingerprint=action.persona_fingerprint)
+        claim = await repository.claim_outbound(
+            envelope.scope,
+            action.action_id,
+            expected_revision=action.revision,
+            event_id=envelope.source_event_id,
+            persona_fingerprint=action.persona_fingerprint,
+            connection_guard=SocialConnectionGuard(connection["id"], envelope.scope.owner_user_id, resolved.provider, resolved.external_account_id, resolved.workspace_id),
+        )
         if not claim.claimed:
             return
         outbound = OutboundMessage(channel_name=resolved.provider, chat_id=resolved.chat_id, thread_id=resolved.thread_id, text=claim.outbound.reply_text, connection_id=connection["id"], owner_user_id=envelope.scope.owner_user_id)

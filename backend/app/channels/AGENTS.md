@@ -27,7 +27,13 @@ and completion, with an opaque scope/event/thread idempotency key. Even a
 previously committed pending action requires successful native completion.
 Only the exact event's committed pending action can be claimed; claim rechecks
 current evidence revision, inherited persona binding and all contact boundaries
-under the write lock. A final connection read also rejects revocation/transfer.
+under the write lock. The host-resolved `SocialConnectionGuard` pins the exact
+connection ID, owner, provider, external account and workspace. Claim validates
+that connected row in the same write transaction (SQLite `BEGIN IMMEDIATE`,
+PostgreSQL exact-row `FOR UPDATE`), serializing with revoke/transfer UPDATEs.
+The manager's earlier connection read is only a preliminary check. If revoke
+commits first, claim fails closed; if claim wins, that send was authorized at
+its linearization point. The network send itself is outside the transaction.
 The pending→unknown crash fence precedes the single `Channel.send_social` call;
 never call the normal retry helper or infer delivery from MessageBus callbacks.
 Accepted means accepted. Delivered additionally requires an explicit provider

@@ -49,7 +49,14 @@ Outbox claim atomically changes pending to unknown before external I/O and
 returns `claimed=True` once. Every later claim returns `claimed=False`;
 unknown must never trigger a blind resend. Result recording accepts only
 accepted/delivered/unknown/failed with evidence. Task 7 owns send authorization
-and receipt verification; the repository itself never publishes.
+and receipt verification; the repository itself never publishes. Channel send
+claims carry a host-only typed `SocialConnectionGuard`. Within the same claim
+write transaction, the exact `channel_connections` row must be connected and
+match owner/provider/external account/workspace (PostgreSQL `FOR UPDATE`;
+SQLite already holds `BEGIN IMMEDIATE`). Revoke/transfer UPDATEs serialize with
+pending→unknown; no preliminary manager read replaces this authorization check.
+The older no-guard repository API remains available for Task 5 persistence use,
+but the social channel manager always supplies the guard.
 
 Channel send claims supply both `event_id` and `persona_fingerprint`. Inside
 the write transaction the repository checks exact committed creator-event/action

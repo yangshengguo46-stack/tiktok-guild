@@ -15,6 +15,21 @@ from deerflow.social.persona.models import EffectivePersona, PersonaBindings, Pr
 
 
 @dataclass(frozen=True)
+class SocialConnectionGuard:
+    """Host-resolved connection identity revalidated at send authorization."""
+
+    connection_id: str
+    owner_user_id: str
+    provider: str
+    external_account_id: str
+    workspace_id: str
+
+    def __post_init__(self):
+        for name, limit in (("connection_id", 64), ("owner_user_id", 64), ("provider", 32), ("external_account_id", 128), ("workspace_id", 128)):
+            bounded_text(getattr(self, name), name, limit, allow_empty=name == "workspace_id")
+
+
+@dataclass(frozen=True)
 class ExternalEvent:
     source_event_id: str
     source_ref: str

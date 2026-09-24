@@ -7,7 +7,11 @@ the native bridge and returns only successful terminal status. The typed social
 binding travels via `RunContext.social_binding`, never RunCreateRequest,
 configurable, RunRecord kwargs, or HTTP JSON. `start_run` rejects social_mode or
 binding fields from both HTTP config carriers, including internally authenticated
-requests. Ordinary run creation remains unchanged.
+requests. A typed social binding always requires an existing thread: persisted
+`thread_meta.user_id` must exactly match its owner at the initial check and again
+before durable admission. NULL/default/unrelated/missing owners cannot use the
+ordinary channel legacy-access compatibility path. Ordinary run creation remains
+unchanged.
 
 `conversation_access.py` binds an opt-in read-only tool to a run request's
 explicit `conversation_references` and effective `runs:read` permission. Never

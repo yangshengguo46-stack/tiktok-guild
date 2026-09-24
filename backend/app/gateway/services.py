@@ -1539,6 +1539,7 @@ async def start_run(
         if not isinstance(social_binding, SocialRuntimeBinding) or social_binding.scope.owner_user_id != owner_user_id or getattr(request.state, "auth_source", None) != AUTH_SOURCE_INTERNAL:
             raise HTTPException(status_code=403, detail="Social binding does not match authenticated owner")
         run_ctx = replace(run_ctx, social_binding=social_binding)
+        require_existing_thread = True
     # Stateless run endpoints carry thread_id in the request *body*, so the
     # @require_permission(owner_check=True) decorator -- which resolves ownership
     # from the path param -- cannot protect them. Enforce thread ownership here,
@@ -1554,6 +1555,12 @@ async def start_run(
     user = getattr(request.state, "user", None)
 
     async def thread_access_allowed() -> bool:
+        if social_binding is not None:
+            # Social admission cannot claim legacy/shared/default-owned rows.
+            # Check persisted ownership, including immediately before durable
+            # admission; never inherit the ordinary channel compatibility path.
+            thread = await run_ctx.thread_store.get(thread_id, user_id=None)
+            return thread is not None and thread.get("user_id") == social_binding.scope.owner_user_id
         if user is None:
             if not require_existing_thread:
                 return True
