@@ -8,8 +8,41 @@
 
 实施分支：`codex/deerflow-social-runtime`
 
-状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；外层 ignored 状态已复核
-当前写入者：`/root/task10_migration_final`
+状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；现场试运行第一批完成，等待管理员初始化
+当前写入者：`/root`
+
+## 现场试运行阶段（DSR-LIVE-20260924-01）
+
+目标：在不声称 TikTok 外部能力已完成的前提下，验证当前唯一版本能在本机启动，
+并完成一次不触发平台写入的真实模型自动人格闭环。
+
+顺序：
+
+1. 本机只读 `doctor`、`acceptance` 与启动前置检查；
+2. 启动当前 fork 的 Gateway/前端/工作台，做 UI 与原生 Lead 冒烟；
+3. 用 `gpt-6-sol` 做一次非业务人格生成与自动选择验证，记录严格 JSON、耗时和结果；
+4. 只有在取得明确授权后，才进入 TikTok 只读来信和受控单条写入验证；
+5. 人格库、沟通知识库、主页预分析列入后续阶段，不阻塞本轮主体。
+
+安全边界：本阶段不删除旧 runtime、不向远端 push、不执行平台写入；任何模型或通道
+阻塞都记录为 `blocked`/`unverified-external`，不以 fixture 或 MCP 连通替代真实证据。
+
+现场发现（DSR-LIVE-20260924-01）：公会入口 `npm start` 已进入真实 `make start`，
+但前端依赖安装失败。根因已定位为 `ops/guild-runtime/scripts/start.mjs` 将固定
+pnpm 工具路径写成 `ops/guild-runtime/.runtime/...`，实际已安装工具位于 fork 根
+`.runtime/tools/pnpm/...`，导致回退到主机 pnpm `11.19.0`。该问题进入单一 TDD
+修复批次；现场尚未进入真实模型调用或 TikTok 通道。
+
+Ruling：停止上述“修复 start 路径”的派工——复核入口契约后确认 `npm run bootstrap`
+是 `npm start` 的前置步骤，`bootstrap` 会把固定 pnpm 安装到 `ops/guild-runtime/.runtime`；
+本次失败来自跳过前置步骤，不是生产代码缺陷。代价：若后续按文档顺序启动仍失败，
+再以新的可复现证据开启代码修复批次。
+
+现场结果：按正确顺序 bootstrap/doctor/acceptance/start 后，固定 pnpm `10.26.2` 生效；
+Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200，`/workspace/guild`
+在首个管理员账户缺失时重定向 `/setup`。真实 `gpt-6-sol` 人格生成耗时 12.886 秒并产出
+未激活候选；选择器返回合规 `stay`，真实模型语义 switch 仍未证明。完整证据见
+`docs/verification/creator-agent/2026-09-24-live-smoke.md`。
 
 ## 唯一生效边界
 
@@ -41,7 +74,7 @@
 | 7 | 完成 | 有身份 Channel 门禁、去重、二次边界校验和不盲重试完成；无 TikTok provider。 |
 | 8 | 完成 | 默认 Chat 中的认证管理工具完成；ignored start config 已从不受支持的 `gpt-5.4` 改为 `gpt-6-sol`，真实模型传输成功；第 6 次输出触发严格 expression parser，第 7 次最终 probe 超时，未激活。 |
 | 9 | 完成 | fork-native bootstrap/start/doctor/acceptance、两个直接 MCP 静态合同和开发评测加载完成。 |
-| 10 | 完成 | 隔离副本迁移、SOUL 保留、定向/离线/整库门禁与最终证据完成；等待 root 独立复审和 cutover。 |
+| 10 | 完成 | 隔离副本迁移、SOUL 保留、定向/离线/整库门禁、独立复审和本地 fast-forward 完成。 |
 
 ## Task 10 迁移纠正
 
@@ -77,6 +110,7 @@
 ## 外部阻塞
 
 - 真实模型：传输 `verified-model`，人格生成质量 `blocked`。共 7 次授权调用；配置已改为 `gpt-6-sol`。第 6 次 raw/usage 已保存但嵌套 override 被严格 parser 拒绝；补齐 flat contract 后第 7 次最终 probe 以 30.003 秒 `invalid generator response` 超时，WP1 multi-turn 未发送。默认 generator timeout 已由 15 秒调为 45 秒，以覆盖实测 20.532 秒成功响应。
+- 现场追加的非业务探针已用 `gpt-6-sol` 在 12.886 秒生成未激活候选；真实选择器能返回严格 `stay` 决策，但尚未证明语义不匹配时会真实 `switch`，因此切换质量继续标记 `blocked`。
 - PostgreSQL：`blocked`，无 live server 集成证据。
 - TikTok inbound/outbound/invite/delivery/read receipt：全部 `unverified-external`。
 
@@ -87,3 +121,4 @@
 - 2026-09-24 04:34 CST：纠正“人格必须绑定子 Agent”的误解；人格只是可选解析层。
 - 2026-09-24 04:58 CST：用户要求按四份详细方案直接施工，实施计划锁定为 10 个任务。
 - 2026-09-24 15:xx CST：Task 10 完成隔离状态 bootstrap、全产品验证和证据收口；独立复审通过并完成本地 fast-forward。
+- 2026-09-24 18:xx CST：现场试运行第一批完成；本机三服务启动成功，真实模型生成候选成功，等待用户完成 `/setup` 管理员初始化。
