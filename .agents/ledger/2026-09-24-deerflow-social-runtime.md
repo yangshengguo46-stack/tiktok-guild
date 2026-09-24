@@ -8,7 +8,7 @@
 
 实施分支：`codex/deerflow-social-runtime`
 
-状态：Task 1–10 实施完成，等待独立复审与本地 fast-forward
+状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；外层 ignored 状态已复核
 当前写入者：`/root/task10_migration_final`
 
 ## 唯一生效边界
@@ -69,7 +69,7 @@
 - Frontend check：通过；sidebar/workbench Playwright：`5 passed`。
 - Frontend full：201 files / 1626 tests，`1599 passed, 27 failed`；两个 DOM storage
   文件下的完全相同失败已在 untouched upstream + Node 26.4.0 复现。
-- Ops：`33 passed`；doctor 15/15；acceptance `ok: true`。
+- Ops：`34 passed`；doctor 15/15；acceptance `ok: true`。新增 WAL 快照 warm-up 回归覆盖 macOS 只读打开语义。
 - Backend full：`18 failed, 17531 passed, 189 skipped, 3 deselected`；18 项与 untouched
   upstream 精确匹配，分支新增失败为 0。详见
   `docs/verification/creator-agent/final-verification.md`。
@@ -86,4 +86,4 @@
 - 2026-09-24 04:27 CST：锁定真实 DeerFlow fork 为唯一代码事实源。
 - 2026-09-24 04:34 CST：纠正“人格必须绑定子 Agent”的误解；人格只是可选解析层。
 - 2026-09-24 04:58 CST：用户要求按四份详细方案直接施工，实施计划锁定为 10 个任务。
-- 2026-09-24 15:xx CST：Task 10 完成隔离状态 bootstrap、全产品验证和证据收口；待独立复审与 cutover。
+- 2026-09-24 15:xx CST：Task 10 完成隔离状态 bootstrap、全产品验证和证据收口；独立复审通过并完成本地 fast-forward。

@@ -199,7 +199,7 @@ export async function inspectPersonaCatalog({ assetsRoot }) {
 
 async function sqliteSourceState(databasePath) {
   const state = [];
-  for (const suffix of ['', '-wal']) {
+  for (const suffix of ['', '-wal', '-shm']) {
     const source = `${databasePath}${suffix}`;
     try {
       const info = await lstat(source, { bigint: true });
@@ -228,7 +228,12 @@ async function copyStableSqliteSnapshot(databasePath, snapshotPath) {
     await Promise.all(['', '-wal', '-shm'].map((suffix) => rm(`${snapshotPath}${suffix}`, { force: true })));
     try {
       for (const entry of before) {
-        if (!entry.missing) await copyFile(`${databasePath}${entry.suffix}`, `${snapshotPath}${entry.suffix}`);
+        // SQLite's WAL shared-memory index is a disposable, process-local sidecar.
+        // Never copy it from the live database: a temporary read/write warm-up
+        // below will build a fresh index beside the copied database and WAL.
+        if (!entry.missing && entry.suffix !== '-shm') {
+          await copyFile(`${databasePath}${entry.suffix}`, `${snapshotPath}${entry.suffix}`);
+        }
       }
     } catch (error) {
       if (attempt === 3) throw error;
@@ -247,6 +252,18 @@ export async function inspectDatabaseRevision({ databasePath, statPath = lstat, 
   const snapshotPath = path.join(snapshotRoot, 'deerflow.db');
   try {
     await copyStableSqliteSnapshot(databasePath, snapshotPath);
+    // A database whose header selects WAL mode cannot always be opened directly
+    // with mode=ro when the copied snapshot has no -shm file (macOS/sqlite3
+    // returns SQLITE_CANTOPEN before it can build the shared-memory index). The
+    // snapshot is disposable, so warm it once with a read-only SQLite connection
+    // that is allowed to create only its local sidecars. query_only prevents any
+    // SQL write; the live database and its DB/WAL/SHM files are never opened.
+    await requireSuccess(
+      'sqlite3',
+      [`${pathToFileURL(snapshotPath).href}?mode=rw`, 'PRAGMA query_only=ON; SELECT 1;'],
+      { cwd: snapshotRoot },
+      run,
+    );
     const revision = await requireSuccess(
       'sqlite3',
       [`${pathToFileURL(snapshotPath).href}?mode=ro`, 'SELECT version_num FROM alembic_version;'],

@@ -68,7 +68,7 @@ SHA-256 是对 `sqlite_master.sql` 原文的 UTF-8 字节计算。
 | Frontend check | ESLint + TypeScript 通过；精确 `pnpm@10.26.2` |
 | Frontend full | 201 files / 1626 tests；`1599 passed, 27 failed`；精确与 untouched upstream + Node 26.4.0 复现匹配 |
 | Workbench/sidebar Playwright | `5 passed` |
-| Ops unit | `33 passed` |
+| Ops unit | `34 passed`；包含 WAL 快照 warm-up 回归，确保 macOS 只读打开语义不触碰源 DB/sidecar |
 | Ops doctor | 15/15 checks passed；DB `0026_social_runtime`，6 人格，Guild 8 tools，TKDesk 28 tools，pnpm `10.26.2` |
 | Ops acceptance | `ok: true`；2 MCP servers，nativeGuildLead true |
 

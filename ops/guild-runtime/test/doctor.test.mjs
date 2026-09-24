@@ -19,6 +19,7 @@ import {
   runDoctor,
 } from '../scripts/doctor.mjs';
 import { startRuntime } from '../scripts/start.mjs';
+import { runCommand } from '../src/process.mjs';
 
 const FORK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const OPS_ROOT = path.join(FORK_ROOT, 'ops', 'guild-runtime');
@@ -136,6 +137,27 @@ test('native social source inspection finds the runtime, channel gate, persisten
   });
 });
 
+test('database revision inspection warms a WAL snapshot when the source has no sidecars', async (t) => {
+  const databaseRoot = await mkdtemp(path.join(os.tmpdir(), 'deerflow-doctor-wal-db-'));
+  t.after(() => rm(databaseRoot, { recursive: true, force: true }));
+  const databasePath = path.join(databaseRoot, 'deerflow.db');
+  const seed = [
+    'PRAGMA journal_mode=WAL;',
+    'CREATE TABLE alembic_version(version_num TEXT);',
+    "INSERT INTO alembic_version VALUES ('0026_social_runtime');",
+    'PRAGMA wal_checkpoint(TRUNCATE);',
+  ].join(' ');
+  const seeded = await runCommand('sqlite3', [databasePath, seed], { cwd: databaseRoot });
+  assert.equal(seeded.code, 0, seeded.stderr);
+  await Promise.all(['-wal', '-shm'].map((suffix) => rm(`${databasePath}${suffix}`, { force: true })));
+  const before = await readdir(databaseRoot);
+
+  assert.deepEqual(await inspectDatabaseRevision({ databasePath }), {
+    detail: 'database at 0026_social_runtime',
+  });
+  assert.deepEqual(await readdir(databaseRoot), before);
+});
+
 test('database revision inspection queries a disposable snapshot without changing the source directory', async (t) => {
   const databaseRoot = await mkdtemp(path.join(os.tmpdir(), 'deerflow-doctor-source-db-'));
   t.after(() => rm(databaseRoot, { recursive: true, force: true }));
@@ -166,15 +188,23 @@ test('database revision inspection queries a disposable snapshot without changin
       uri.search = '';
       const snapshotPath = fileURLToPath(uri);
       assert.equal(await readFile(`${snapshotPath}-wal`, 'utf8'), 'source wal bytes');
-      assert.equal(existsSync(`${snapshotPath}-shm`), false);
-      await writeFile(`${snapshotPath}-shm`, 'sqlite side effect');
+      if (calls.length === 1) {
+        assert.equal(uri.search, '');
+        assert.equal(new URL(args[0]).searchParams.get('mode'), 'rw');
+        assert.equal(args[1], 'PRAGMA query_only=ON; SELECT 1;');
+        assert.equal(existsSync(`${snapshotPath}-shm`), false);
+        await writeFile(`${snapshotPath}-shm`, 'sqlite side effect');
+        return { code: 0, stdout: '1\n', stderr: '' };
+      }
+      assert.equal(new URL(args[0]).searchParams.get('mode'), 'ro');
+      assert.equal(args[1], 'SELECT version_num FROM alembic_version;');
+      assert.equal(await readFile(`${snapshotPath}-shm`, 'utf8'), 'sqlite side effect');
       return { code: 0, stdout: '0026_social_runtime\n', stderr: '' };
     },
   }), { detail: 'database at 0026_social_runtime' });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, 'sqlite3');
-  assert.equal(calls[0].args[1], 'SELECT version_num FROM alembic_version;');
-  assert.notEqual(calls[0].args[0], `${pathToFileURL(databasePath).href}?mode=ro`);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(({ command }) => command), ['sqlite3', 'sqlite3']);
+  assert.notEqual(calls[1].args[0], `${pathToFileURL(databasePath).href}?mode=ro`);
   const after = await snapshotState();
   assert.deepEqual(after, before);
 });
