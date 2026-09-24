@@ -578,6 +578,8 @@ cleanup when migrating from legacy metadata credentials.
 
 #### IM Channels
 
+The native social channel boundary is available for host integrations: it authenticates sourced creator events, waits for the native run to finish, and sends only a committed, claimed reply. Intentional silence produces no placeholder; ambiguous sends remain unknown until a verified receipt arrives. No TikTok connector is installed, and TikTok inbound, outbound, and receipts remain unverified.
+
 DeerFlow supports receiving tasks from messaging apps. Channels auto-start when configured — no public IP required for any of them.
 
 DeerFlow can also expose user-owned IM channel connections in the workspace UI. When `channel_connections` is enabled, logged-in users can bind Telegram, Slack, Discord, Feishu/Lark, DingTalk, WeChat, WeCom, or Buzz from the sidebar / Settings > Channels. It reuses the existing outbound `channels.*` transports, so no public IP or provider callback URL is required. Incoming IM messages then run under the connected DeerFlow user account. See [IM Channel Connections](backend/docs/IM_CHANNEL_CONNECTIONS.md) for setup and security notes.

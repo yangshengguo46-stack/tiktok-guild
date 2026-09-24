@@ -125,6 +125,7 @@ class ChannelService:
         require_bound_identity: bool = False,
         app_config: AppConfig | None = None,
         get_stream_bridge: Callable[[], StreamBridge | None] | None = None,
+        launch_social_turn: Callable[..., Any] | None = None,
     ) -> None:
         config = dict(channels_config or {})
         inbound_queue_maxsize = _resolve_positive_int(config, "inbound_queue_maxsize", DEFAULT_INBOUND_QUEUE_MAXSIZE)
@@ -153,6 +154,7 @@ class ChannelService:
             require_bound_identity=require_bound_identity,
             inbound_dedupe_store=make_inbound_dedupe_store(app_config),
             get_stream_bridge=get_stream_bridge,
+            launch_social_turn=launch_social_turn,
         )
         self._channels: dict[str, Any] = {}  # name -> Channel instance
         self._config = config
@@ -165,6 +167,7 @@ class ChannelService:
         app_config: AppConfig | None = None,
         *,
         get_stream_bridge: Callable[[], StreamBridge | None] | None = None,
+        launch_social_turn: Callable[..., Any] | None = None,
     ) -> ChannelService:
         """Create a ChannelService from the application config.
 
@@ -192,6 +195,7 @@ class ChannelService:
             require_bound_identity=require_bound_identity,
             app_config=app_config,
             get_stream_bridge=get_stream_bridge,
+            launch_social_turn=launch_social_turn,
         )
 
     async def start(self) -> None:
@@ -557,6 +561,7 @@ async def start_channel_service(
     app_config: AppConfig | None = None,
     *,
     get_stream_bridge: Callable[[], StreamBridge | None] | None = None,
+    launch_social_turn: Callable[..., Any] | None = None,
 ) -> ChannelService:
     """Create and start the global ChannelService from app config.
 
@@ -573,7 +578,7 @@ async def start_channel_service(
     # from_app_config reads the JSON channel store and runtime config files;
     # keep that disk IO off the event loop. asyncio.to_thread forwards both
     # args and kwargs to the target callable.
-    _channel_service = await asyncio.to_thread(ChannelService.from_app_config, app_config, get_stream_bridge=get_stream_bridge)
+    _channel_service = await asyncio.to_thread(ChannelService.from_app_config, app_config, get_stream_bridge=get_stream_bridge, launch_social_turn=launch_social_turn)
     await _channel_service.start()
     return _channel_service
 

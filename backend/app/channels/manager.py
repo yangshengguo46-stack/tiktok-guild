@@ -34,6 +34,7 @@ from app.channels.message_bus import (
     ResolvedAttachment,
 )
 from app.channels.run_policy import CHANNEL_RUN_POLICY, ChannelRunPolicy
+from app.channels.social import _ENVELOPE_AUTHORITY, AuthenticatedSocialEvent, AuthenticatedSocialReceipt, SocialCapabilities, SocialConnection, SocialInboundEnvelope, SocialProviderResult
 from app.channels.store import ChannelStore
 from app.gateway.csrf_middleware import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
 
@@ -44,6 +45,7 @@ from app.gateway.internal_auth import create_internal_auth_headers
 from app.gateway.path_utils import resolve_outputs_confined_path
 from deerflow.config.agents_config import list_custom_agents, load_agent_config
 from deerflow.config.paths import make_safe_user_id
+from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SocialConflictError
 from deerflow.runtime import END_SENTINEL, StreamBridge
 from deerflow.runtime.goal import parse_goal_command
 from deerflow.runtime.keyed_lock import AsyncKeyedLockTable
@@ -51,6 +53,7 @@ from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.skills.slash import parse_slash_skill_reference
 from deerflow.skills.storage import get_or_new_skill_storage
 from deerflow.skills.storage.skill_storage import SkillStorage
+from deerflow.social.runtime import SocialRuntimeBinding
 from deerflow.trace_context import ensure_trace_context
 from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY
 
@@ -1203,6 +1206,9 @@ class ChannelManager:
         require_bound_identity: bool = False,
         inbound_dedupe_store: InboundDedupeStore | None = None,
         get_stream_bridge: Callable[[], StreamBridge | None] | None = None,
+        social_channels: Mapping[str, Any] | None = None,
+        social_connections: Mapping[str, SocialConnection] | None = None,
+        launch_social_turn: Callable[..., Awaitable[bool]] | None = None,
     ) -> None:
         if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency <= 0:
             raise ValueError("max_concurrency must be a positive integer")
@@ -1218,6 +1224,11 @@ class ChannelManager:
         self._default_session = _as_dict(default_session)
         self._channel_sessions = dict(channel_sessions or {})
         self._connection_repo = connection_repo
+        # Only in-process host wiring can provide these; YAML/session payloads
+        # and InboundMessage.metadata never enter the authority registry.
+        self._social_channels = dict(social_channels or {})
+        self._social_connections = dict(social_connections or {})
+        self._launch_social_turn = launch_social_turn
         self._require_bound_identity = require_bound_identity
         # Zero-arg accessor for the FastAPI app's StreamBridge singleton,
         # threaded in from app.py's lifespan via start_channel_service() ->
@@ -1942,9 +1953,10 @@ class ChannelManager:
                     # Dedupe before logging "received" so a provider retrying an
                     # event N times does not log N accepts. Provider ack side
                     # effects may still happen before this manager-level dedupe.
-                    if await self._is_duplicate_inbound(msg):
-                        continue
-                    dedupe_recorded = self._inbound_dedupe_key(msg) is not None
+                    if msg.channel_name not in self._social_channels:
+                        if await self._is_duplicate_inbound(msg):
+                            continue
+                        dedupe_recorded = self._inbound_dedupe_key(msg) is not None
                     logger.info(
                         "[Manager] received inbound: channel=%s, chat_id=%s, type=%s, text_len=%d, files=%d",
                         msg.channel_name,
@@ -2058,6 +2070,14 @@ class ChannelManager:
             logger.error("[Manager] unhandled error in message task: %s", exc, exc_info=exc)
 
     async def _handle_message(self, msg: InboundMessage) -> None:
+        if msg.channel_name in self._social_channels:
+            try:
+                await self._handle_social_message(msg)
+            except Exception:
+                # Do not emit generic errors, placeholders, typing, raw provider
+                # exceptions or model content on an intentional-silence channel.
+                logger.warning("Social channel dispatch refused or failed: channel=%s", msg.channel_name)
+            return
         msg = _apply_effective_owner(msg)
         try:
             # Commands are handled below because provider adapters consume
@@ -2101,6 +2121,129 @@ class ChannelManager:
             # for the dedupe TTL.
             await self._release_inbound_dedupe_key(msg)
             await self._send_error(msg, "An internal error occurred. Please try again.")
+
+    async def _handle_social_message(self, msg: InboundMessage) -> None:
+        channel = self._social_channels[msg.channel_name]
+        capabilities = channel.social_capabilities
+        if not isinstance(capabilities, SocialCapabilities) or not capabilities.inbound or not capabilities.outbound or self._connection_repo is None or self._launch_social_turn is None:
+            return
+        event = await channel.authenticate_social_event(msg)
+        if not isinstance(event, AuthenticatedSocialEvent) or event.source_kind != "creator_message":
+            return
+        if (msg.user_id, msg.workspace_id, msg.chat_id) != (event.external_account_id, event.workspace_id, event.chat_id):
+            return
+        connection = await self._connection_repo.find_connection_by_external_identity(provider=msg.channel_name, external_account_id=event.external_account_id, workspace_id=event.workspace_id)
+        if not isinstance(connection, dict) or connection.get("status") != "connected":
+            return
+        resolved = self._social_connections.get(connection.get("id"))
+        if not isinstance(resolved, SocialConnection):
+            return
+        if (connection.get("id"), connection.get("owner_user_id")) != (msg.connection_id, msg.owner_user_id):
+            return
+        if (connection.get("provider"), connection.get("external_account_id"), connection.get("workspace_id")) != (resolved.provider, resolved.external_account_id, resolved.workspace_id):
+            return
+        if (resolved.provider, resolved.external_account_id, resolved.workspace_id, resolved.chat_id, resolved.scope.owner_user_id) != (
+            msg.channel_name,
+            event.external_account_id,
+            event.workspace_id,
+            event.chat_id,
+            connection["owner_user_id"],
+        ):
+            return
+        envelope = SocialInboundEnvelope(resolved.scope, event.event_id, event.source_kind, resolved.identity_verified, "verified" if capabilities.receipts else "unverified", _ENVELOPE_AUTHORITY)
+        repository = resolved.repository
+        # Persist provider identity/text exactly once before admitting any model.
+        # source_ref is bounded and stable, independent of remote metadata.
+        import hashlib
+
+        source_ref = "channel:" + hashlib.sha256((resolved.provider + ":" + event.event_id).encode()).hexdigest()
+        snapshot = await repository.record_event(envelope.scope, ExternalEvent(envelope.source_event_id, source_ref, envelope.source_kind, event.text))
+        if not envelope.identity_verified:
+            return
+        # Provider/session authentication is distinct from creator/person
+        # verification. Only the host resolver can attest the latter. Initialize
+        # its first sourced fact once, never overwrite an explicit boundary.
+        if not snapshot.boundary_history and not snapshot.identity_verified:
+            try:
+                snapshot = await repository.set_boundaries(
+                    envelope.scope,
+                    expected_revision=snapshot.revision,
+                    update=BoundaryUpdate(True, snapshot.human_takeover, snapshot.do_not_contact, (source_ref,)),
+                )
+            except SocialConflictError:
+                # One read of the winner; never retry the boundary write over
+                # a concurrent stop, takeover or identity revocation.
+                snapshot = await repository.restore(envelope.scope)
+        if not snapshot.identity_verified:
+            return
+        binding = SocialRuntimeBinding(repository, envelope.scope, resolved.identity, resolved.role, envelope.source_event_id, resolved.channel_safe_tool_names)
+        action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
+        if action is not None and action.state != "pending":
+            return
+        # Even a previously committed pending action needs the native run's
+        # successful terminal status (a crash/error may follow graph commit).
+        # Gateway's durable idempotency key joins the original run on replay.
+        if await self._launch_social_turn(binding=binding, thread_id=resolved.thread_id, text=event.text) is not True:
+            return
+        action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
+        if action is None or action.state != "pending":
+            return
+        # A long native run may outlive connection revocation/ownership transfer.
+        current_connection = await self._connection_repo.find_connection_by_external_identity(provider=resolved.provider, external_account_id=resolved.external_account_id, workspace_id=resolved.workspace_id)
+        if not isinstance(current_connection, dict) or any(current_connection.get(key) != connection.get(key) for key in ("id", "owner_user_id", "provider", "external_account_id", "workspace_id", "status")):
+            return
+        claim = await repository.claim_outbound(envelope.scope, action.action_id, expected_revision=action.revision, event_id=envelope.source_event_id, persona_fingerprint=action.persona_fingerprint)
+        if not claim.claimed:
+            return
+        outbound = OutboundMessage(channel_name=resolved.provider, chat_id=resolved.chat_id, thread_id=resolved.thread_id, text=claim.outbound.reply_text, connection_id=connection["id"], owner_user_id=envelope.scope.owner_user_id)
+        # Deliberately bypass the fire-and-forget pub/sub API: its callback
+        # exceptions are swallowed and cannot prove provider acceptance.
+        result = await channel.send_social(outbound, action_id=claim.outbound.action_id)
+        if not isinstance(result, SocialProviderResult) or not result.evidence_ref:
+            return
+        if result.state in {"accepted", "delivered"} and not result.provider_ref:
+            return
+        if result.state == "delivered" and (not capabilities.receipts or not result.receipt_ref or result.receipt_ref != result.evidence_ref):
+            return
+        await repository.record_outbound_result(
+            envelope.scope, action.action_id, expected_revision=claim.outbound.revision, state="failed" if result.state == "rejected" else result.state, provider_ref=result.provider_ref, evidence_ids=(result.evidence_ref,)
+        )
+
+    async def handle_social_receipt(self, channel_name: str, raw_receipt: Any) -> None:
+        """Reconcile a provider-authenticated receipt; never sends or retries."""
+        try:
+            channel = self._social_channels.get(channel_name)
+            capabilities = channel.social_capabilities if channel else None
+            if not isinstance(capabilities, SocialCapabilities) or not capabilities.receipts or self._connection_repo is None:
+                return
+            receipt = await channel.authenticate_social_receipt(raw_receipt)
+            if not isinstance(receipt, AuthenticatedSocialReceipt):
+                return
+            connection = await self._connection_repo.find_connection_by_external_identity(provider=channel_name, external_account_id=receipt.external_account_id, workspace_id=receipt.workspace_id)
+            if not isinstance(connection, dict) or connection.get("status") != "connected":
+                return
+            resolved = self._social_connections.get(connection.get("id"))
+            if not isinstance(resolved, SocialConnection):
+                return
+            if (connection.get("provider"), connection.get("external_account_id"), connection.get("workspace_id"), connection.get("owner_user_id")) != (
+                resolved.provider,
+                resolved.external_account_id,
+                resolved.workspace_id,
+                resolved.scope.owner_user_id,
+            ):
+                return
+            if (channel_name, receipt.external_account_id, receipt.workspace_id, receipt.chat_id) != (resolved.provider, resolved.external_account_id, resolved.workspace_id, resolved.chat_id):
+                return
+            snapshot = await resolved.repository.restore(resolved.scope)
+            action = next((row for row in snapshot.outbound if row.action_id == receipt.action_id), None)
+            result = receipt.result
+            if action is None or action.state == "pending" or not result.provider_ref or not result.evidence_ref:
+                return
+            await resolved.repository.record_outbound_result(
+                resolved.scope, action.action_id, expected_revision=action.revision, state="failed" if result.state == "rejected" else result.state, provider_ref=result.provider_ref, evidence_ids=(result.evidence_ref,)
+            )
+        except Exception:
+            logger.warning("Social receipt refused or unavailable: channel=%s", channel_name)
 
     # -- chat handling -----------------------------------------------------
 

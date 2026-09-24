@@ -19,6 +19,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from test_social_channels import channel_fixture, repository  # noqa: F401
 
 from app.channels import manager as mgr
 from app.channels.message_bus import InboundMessage
@@ -55,3 +56,10 @@ async def test_ingest_inbound_files_does_not_block_event_loop(tmp_path: Path, mo
     assert created[0]["filename"] == "report.txt"
     written = await asyncio.to_thread(lambda: (get_uploads_dir("t1") / "report.txt").exists())
     assert written, "inbound file should be written under the tmp uploads dir"
+
+
+async def test_social_authenticated_ingress_claim_and_receipt_keep_io_off_loop(repository, tmp_path):  # noqa: F811
+    fixture = await channel_fixture(repository, tmp_path)
+    await fixture.manager._handle_message(fixture.msg)
+    assert len(fixture.provider.sent) == 1
+    assert fixture.provider.sent[0].text == "hi"

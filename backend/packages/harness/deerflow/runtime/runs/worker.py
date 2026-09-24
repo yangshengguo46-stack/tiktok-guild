@@ -200,6 +200,7 @@ def _release_run_scoped_references(
     """Remove worker-owned graph references once durable finalization is done."""
     internal_context_keys = {
         "__run_journal",
+        "__social_binding",
         CURRENT_RUN_PRE_EXISTING_MESSAGE_IDS_KEY,
         CONVERSATION_READER_CONTEXT_KEY,
     }
@@ -226,6 +227,7 @@ def _release_run_scoped_references(
         if isinstance(configurable, dict):
             configurable.pop("__pregel_runtime", None)
             configurable.pop(CONVERSATION_READER_CONTEXT_KEY, None)
+            configurable.pop("__social_binding", None)
         context = runnable_config.get("context")
         if isinstance(context, dict):
             for key in internal_context_keys:
@@ -522,6 +524,8 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: Final[frozenset[str]] = (
             CURRENT_RUN_PRE_EXISTING_MESSAGE_IDS_KEY,
             DEERFLOW_TRACE_METADATA_KEY,
             CONVERSATION_READER_CONTEXT_KEY,
+            "__social_binding",
+            "social_mode",
             "is_subagent",
             "agent_id",
             "__run_loop_detection_recorder",
@@ -545,6 +549,7 @@ def _build_runtime_context(
     task_store: Any | None = None,
     extensions: Any | None = None,
     conversation_reader: Any | None = None,
+    social_binding: Any | None = None,
 ) -> dict[str, Any]:
     """Build the dict that becomes ``ToolRuntime.context`` for the run.
 
@@ -568,6 +573,14 @@ def _build_runtime_context(
         runtime_ctx["app_config"] = app_config
     if conversation_reader is not None:
         runtime_ctx[CONVERSATION_READER_CONTEXT_KEY] = conversation_reader
+    if social_binding is not None:
+        from deerflow.social.runtime import SocialRuntimeBinding
+
+        if not isinstance(social_binding, SocialRuntimeBinding):
+            raise ValueError("social runtime requires a typed host binding")
+        runtime_ctx["__social_binding"] = social_binding
+        runtime_ctx["social_mode"] = True
+        runtime_ctx["user_id"] = social_binding.scope.owner_user_id
     if task_store is not None:
         from deerflow_extension_api import EXTENSION_TASK_STORE_KEY
 
@@ -627,6 +640,7 @@ class RunContext:
     on_run_completed: Any | None = field(default=None)
     # The host binds this capability to one run's authenticated reader and references.
     conversation_reader: Any | None = field(default=None)
+    social_binding: Any | None = field(default=None)
 
 
 def _install_runtime_context(config: dict, runtime_context: dict[str, Any]) -> None:
@@ -635,6 +649,8 @@ def _install_runtime_context(config: dict, runtime_context: dict[str, Any]) -> N
     configurable = config.get("configurable")
     if isinstance(configurable, dict):
         configurable.pop(CONVERSATION_READER_CONTEXT_KEY, None)
+        configurable.pop("__social_binding", None)
+        configurable.pop("social_mode", None)
     existing_context = config.get("context")
     if isinstance(existing_context, dict):
         existing_context.setdefault("thread_id", runtime_context["thread_id"])
@@ -1080,6 +1096,7 @@ async def run_agent(
             task_store,
             extensions,
             ctx.conversation_reader,
+            ctx.social_binding,
         )
         # Bind every checkpoint produced by this run to the effective agent
         # identity that produced its state. Manual compaction uses only this

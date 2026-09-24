@@ -1,5 +1,13 @@
 ### Private native model output
 
+`RunContext.social_binding` carries the typed host social capability through the
+native worker. Caller-carried social_mode/binding keys are scrubbed; the worker
+installs only its host value in runtime context before normal Lead assembly,
+removes configurable copies and releases the binding on final cleanup. The
+capability never belongs in RunRecord kwargs, checkpoint metadata or public
+request serialization. Native run admission, checkpoint/store attachment,
+journaling, permissions and completion remain shared with ordinary runs.
+
 `private_model.py` isolates selector and social-main execution in a task-local
 child runnable config. It replaces (never merges) inherited callbacks with only
 the typed owning `RunJournal`, or none, strips model-local callbacks on a shallow

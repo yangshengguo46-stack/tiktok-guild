@@ -423,6 +423,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # the lifespan reaches its normal shutdown boundary.
         try:
             from app.channels.service import start_channel_service
+            from app.gateway.services import launch_social_channel_turn
 
             # Closure over `app` (mirrors ScheduledTaskService's `launch_run`
             # above) rather than resolving `app.state.stream_bridge` here
@@ -436,6 +437,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             channel_service = await start_channel_service(
                 startup_config,
                 get_stream_bridge=lambda: getattr(app.state, "stream_bridge", None),
+                launch_social_turn=lambda **kwargs: launch_social_channel_turn(app=app, **kwargs),
             )
             logger.info("Channel service started: %s", channel_service.get_status())
         except Exception:

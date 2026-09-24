@@ -344,7 +344,12 @@ class MessageBus:
         self._outbound_listeners = [cb for cb in self._outbound_listeners if cb != callback]
 
     async def publish_outbound(self, msg: OutboundMessage) -> None:
-        """Dispatch an outbound message to all registered listeners."""
+        """Dispatch to listeners, without provider acceptance/delivery evidence.
+
+        Exceptions are contained for ordinary IM compatibility. Social outbox
+        sends use the exact authenticated channel's receipt-aware send method;
+        successful completion here must never be interpreted as delivery.
+        """
         logger.info(
             "[Bus] outbound dispatching: channel=%s, chat_id=%s, listeners=%d, text_len=%d",
             msg.channel_name,

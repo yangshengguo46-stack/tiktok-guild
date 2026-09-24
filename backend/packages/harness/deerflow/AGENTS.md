@@ -51,6 +51,15 @@ unknown must never trigger a blind resend. Result recording accepts only
 accepted/delivered/unknown/failed with evidence. Task 7 owns send authorization
 and receipt verification; the repository itself never publishes.
 
+Channel send claims supply both `event_id` and `persona_fingerprint`. Inside
+the write transaction the repository checks exact committed creator-event/action
+ownership, current contact boundaries and conversational revision, and re-resolves
+the current inherited binding with the committed evidence version and optional
+host adjustment. Any change fences sending. `get_turn_outbound` resolves exactly
+one committed event rather than selecting an arbitrary pending action. Claims
+without those optional fields retain the original internal persistence protocol;
+they are never platform send authorization.
+
 Native Lead social turns use a frozen `SocialRuntimeBinding` supplied by the
 host in `config.context.__social_binding`, with `social_mode=True` and a matching
 owner. Dictionaries from HTTP/model text cannot create this capability. Each

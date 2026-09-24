@@ -1,5 +1,43 @@
 ### IM Channels System (`app/channels/`)
 
+**Social ingress/outbox (Task 7):** `social.py` contains host-owned connection,
+authenticated event/receipt, and provider result contracts. Production has no
+social provider registration; TikTok inbound/outbound/receipts are explicitly
+unverified. Only host constructor arguments populate the manager's social
+channel/connection registry; never load these capabilities from YAML sessions,
+remote metadata or JSON. Adapters must authenticate signatures/sessions and
+creator authorship before returning `AuthenticatedSocialEvent`; merely building
+that DTO grants no authority. Manager re-resolves the active connection and
+checks owner, account mapping, creator, workspace, chat and agent scope before
+minting an envelope. The host connection pins an existing native Gateway thread,
+repository, identity/role and channel-safe tools. Ordinary commands and streaming
+paths are not used by registered social transports.
+
+Provider authentication alone never verifies a creator/person. The host resolver
+must explicitly attest `SocialConnection.identity_verified=True` (default false).
+After persisting its creator event, only an empty boundary history with current
+identity false may initialize a sourced verified fact, preserving DNC/takeover.
+Its evidence is the event source_ref. A CAS loser rereads once without retrying
+the boundary write. Any explicit history, including identity revocation, prevents
+initialization; an unverified envelope always stays silent.
+
+Provider event persistence precedes native launch. The app lifespan supplies
+`launch_social_channel_turn`, which uses existing RunManager/run_agent admission
+and completion, with an opaque scope/event/thread idempotency key. Even a
+previously committed pending action requires successful native completion.
+Only the exact event's committed pending action can be claimed; claim rechecks
+current evidence revision, inherited persona binding and all contact boundaries
+under the write lock. A final connection read also rejects revocation/transfer.
+The pending→unknown crash fence precedes the single `Channel.send_social` call;
+never call the normal retry helper or infer delivery from MessageBus callbacks.
+Accepted means accepted. Delivered additionally requires an explicit provider
+receipt reference and verified receipt capability. Ambiguous errors/cancellation
+stay unknown and never retry blindly. Receipt reconciliation authenticates the
+provider and resolves the connection anew; provider refs cannot change. No
+placeholder, typing, generic error or partial model stream is emitted on social
+paths. Unknown results need actual provider reconciliation, not timeout-based
+resending. Native graph model/permission/checkpoint policies remain in force.
+
 Bridges external messaging platforms (Feishu, Slack, Telegram, Discord, DingTalk, GitHub) to the DeerFlow agent via Gateway's LangGraph-compatible API.
 
 **Architecture**: Channels communicate with Gateway through the `langgraph-sdk` HTTP client (same as the frontend), ensuring threads are created and managed server-side. The internal SDK client injects process-local internal auth plus a matching CSRF cookie/header pair so Gateway accepts state-changing thread/run requests from channel workers without relying on browser session cookies.

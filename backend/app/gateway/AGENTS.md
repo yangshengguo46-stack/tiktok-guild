@@ -1,5 +1,14 @@
 ### Gateway API (`app/gateway/`)
 
+`launch_social_channel_turn` is an in-process ChannelManager adapter to the same
+`start_run`/RunManager/run_agent path. It requires an existing owned thread and
+hashes scope/event/thread into the durable run idempotency key; it waits through
+the native bridge and returns only successful terminal status. The typed social
+binding travels via `RunContext.social_binding`, never RunCreateRequest,
+configurable, RunRecord kwargs, or HTTP JSON. `start_run` rejects social_mode or
+binding fields from both HTTP config carriers, including internally authenticated
+requests. Ordinary run creation remains unchanged.
+
 `conversation_access.py` binds an opt-in read-only tool to a run request's
 explicit `conversation_references` and effective `runs:read` permission. Never
 derive grants from message contents or checkpoints. The callback travels through

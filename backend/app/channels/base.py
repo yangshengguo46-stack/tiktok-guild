@@ -73,6 +73,22 @@ class Channel(ABC):
     def supports_streaming(self) -> bool:
         return False
 
+    @property
+    def social_capabilities(self):
+        """No social authority by default, regardless of message/config flags."""
+        return None
+
+    async def authenticate_social_event(self, msg: InboundMessage):
+        """Adapters must verify provider authentication and authorship first."""
+        return None
+
+    async def authenticate_social_receipt(self, receipt):
+        return None
+
+    async def send_social(self, msg: OutboundMessage, *, action_id: str):
+        """One attempt only, returning actual provider evidence; never use send retry."""
+        raise NotImplementedError("No receipt-aware social transport is installed")
+
     # -- lifecycle ---------------------------------------------------------
 
     @abstractmethod

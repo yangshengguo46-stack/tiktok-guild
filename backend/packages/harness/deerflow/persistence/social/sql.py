@@ -590,13 +590,41 @@ class SocialRepository:
             raise ValueError("outbound action does not exist in this scope")
         return row
 
-    async def claim_outbound(self, scope: SocialScope, action_id: str, *, expected_revision: int) -> OutboundClaim:
+    async def get_turn_outbound(self, scope: SocialScope, event_id: str) -> Outbound | None:
+        """Resolve only the committed action belonging to this exact sourced turn."""
+        async with self._read() as session:
+            row = (await session.execute(sa.select(social_event).where(*_event_scope(scope), social_event.c.source_event_id == event_id))).mappings().one_or_none()
+            if row is None or row["turn_digest"] is None or row["action_id"] is None:
+                return None
+            return _outbound(await self._action(session, scope, row["action_id"]))
+
+    async def claim_outbound(self, scope: SocialScope, action_id: str, *, expected_revision: int, event_id: str | None = None, persona_fingerprint: str | None = None) -> OutboundClaim:
+        if (event_id is None) != (persona_fingerprint is None):
+            raise ValueError("send claim requires event and persona fingerprint together")
         async with self._write(scope) as session:
             row = await self._action(session, scope, action_id)
             if row["state"] != "pending":
                 return OutboundClaim(_outbound(row), False)
             snapshot = await self._snapshot(session, scope)
             _check_revision(row["revision"], expected_revision, snapshot)
+            if event_id is not None:
+                from deerflow.social.turns import contact_blocked
+
+                event = (await session.execute(sa.select(social_event).where(*_event_scope(scope), social_event.c.source_event_id == event_id))).mappings().one_or_none()
+                if event is None or event["turn_digest"] is None or event["action_id"] != action_id or event["source_kind"] != "creator_message":
+                    raise ValueError("send claim requires the exact committed creator event")
+                if contact_blocked(snapshot) or row["persona_fingerprint"] != persona_fingerprint or snapshot.revision != row["turn_revision"]:
+                    raise SocialConflictError(snapshot)
+                profile_scope = ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id, scope.person_ref)
+                bindings = await self._bindings(session, profile_scope)
+                profiles, _ = await self._profiles(session, profile_scope)
+                context = row["turn_context_json"]
+                adjustment = context.get("adjustment")
+                # The committed evidence version is immutable; outbox bookkeeping
+                # advances snapshot revision but must not invalidate its own turn.
+                current = resolve_profile(catalog=await run_file_io(load_persona_catalog), profiles=profiles, bindings=bindings, evidence_version=context["evidence_version"], turn_adjustment=adjustment["values"] if adjustment else None)
+                if current.fingerprint != persona_fingerprint:
+                    raise SocialConflictError(snapshot)
             await session.execute(
                 social_outbound.update()
                 .where(*_outbound_scope(scope), social_outbound.c.action_id == action_id, social_outbound.c.revision == expected_revision)

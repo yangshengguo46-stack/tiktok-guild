@@ -8,13 +8,14 @@ frames, and consuming stream bridge events.  Router modules
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 import threading
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -1463,6 +1464,7 @@ async def start_run(
     *,
     idempotency_key: str | None = None,
     require_existing_thread: bool = False,
+    social_binding: Any | None = None,
 ) -> RunRecord:
     """Create a RunRecord and launch the background agent task.
 
@@ -1478,6 +1480,13 @@ async def start_run(
         Reject a missing thread instead of auto-creating metadata. Internal
         notification runs use this so a deleted chat cannot be resurrected.
     """
+    # This capability is an in-process argument, never a body/config field,
+    # even on internally authenticated HTTP requests.
+    social_carriers = [getattr(body, "context", None)]
+    if isinstance(getattr(body, "config", None), dict):
+        social_carriers.extend(body.config.get(key) for key in ("context", "configurable"))
+    if any(isinstance(value, dict) and (value.get("social_mode") is not None or "__social_binding" in value) for value in social_carriers):
+        raise HTTPException(status_code=403, detail="Social mode requires an authenticated server connection")
     # Cancel-capability gate. interrupt/rollback strategies terminate an already
     # active run — runs:cancel capability, not runs:create — so a create-only
     # PAT must not reach them. Enforced here, the single choke point every
@@ -1524,6 +1533,12 @@ async def start_run(
             )
 
     owner_user_id = get_trusted_internal_owner_user_id(request)
+    if social_binding is not None:
+        from deerflow.social.runtime import SocialRuntimeBinding
+
+        if not isinstance(social_binding, SocialRuntimeBinding) or social_binding.scope.owner_user_id != owner_user_id or getattr(request.state, "auth_source", None) != AUTH_SOURCE_INTERNAL:
+            raise HTTPException(status_code=403, detail="Social binding does not match authenticated owner")
+        run_ctx = replace(run_ctx, social_binding=social_binding)
     # Stateless run endpoints carry thread_id in the request *body*, so the
     # @require_permission(owner_check=True) decorator -- which resolves ownership
     # from the path param -- cannot protect them. Enforce thread ownership here,
@@ -1794,6 +1809,26 @@ async def start_run(
     finally:
         if owner_context_token is not None:
             reset_current_user(owner_context_token)
+
+
+async def launch_social_channel_turn(*, app: Any, binding: Any, thread_id: str, text: str) -> bool:
+    """Use native run admission/completion; return no model or checkpoint text."""
+    from deerflow.social.runtime import SocialRuntimeBinding
+
+    if not isinstance(binding, SocialRuntimeBinding):
+        raise ValueError("social launch requires a typed host binding")
+
+    async def connected():
+        return False
+
+    request = SimpleNamespace(app=app, headers={INTERNAL_OWNER_USER_ID_HEADER_NAME: binding.scope.owner_user_id}, state=SimpleNamespace(user=get_internal_user(), auth_source=AUTH_SOURCE_INTERNAL), cookies={}, is_disconnected=connected)
+    body = RunCreateRequest(assistant_id="lead_agent", input={"messages": [{"role": "user", "content": text}]}, context={"user_id": binding.scope.owner_user_id}, stream_mode=["values"], on_disconnect="continue", multitask_strategy="reject")
+    with ensure_trace_context():
+        digest = hashlib.sha256(json.dumps([asdict(binding.scope), binding.event_id, thread_id], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        record = await start_run(body, thread_id, request, social_binding=binding, require_existing_thread=True, idempotency_key="social:" + digest)
+        completed = await wait_for_run_completion(get_stream_bridge(request), record, request, get_run_manager(request))
+        record = await get_run_manager(request).get(record.run_id, user_id=binding.scope.owner_user_id)
+        return bool(completed and record is not None and record.status == RunStatus.success)
 
 
 async def launch_scheduled_thread_run(

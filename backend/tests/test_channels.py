@@ -5074,8 +5074,9 @@ class TestGithubFollowupBuffer:
             def get_status(self):
                 return {}
 
-        def fake_from_app_config(app_config=None, *, get_stream_bridge=None):
+        def fake_from_app_config(app_config=None, *, get_stream_bridge=None, launch_social_turn=None):
             captured["get_stream_bridge"] = get_stream_bridge
+            captured["launch_social_turn"] = launch_social_turn
             return _FakeService()
 
         async def go():
