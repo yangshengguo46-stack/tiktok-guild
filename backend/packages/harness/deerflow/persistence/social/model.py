@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 import sqlalchemy as sa
 
 from deerflow.persistence.base import Base
 from deerflow.social.contracts import SocialScope, bounded_refs, bounded_text
-from deerflow.social.persona.models import PersonaBindings
+from deerflow.social.persona.models import EffectivePersona, PersonaBindings, ProfileScope, _expression
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,25 @@ class BoundaryUpdate:
 
 
 @dataclass(frozen=True)
+class TurnAdjustment:
+    """Server-owned ephemeral expression input, never a TurnResult field."""
+
+    values: Mapping[str, str | tuple[str, ...]]
+    source_ref: str
+    evidence_ids: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        bounded_text(self.source_ref, "source_ref", 128)
+        bounded_refs(self.evidence_ids, "evidence_ids")
+        if not isinstance(self.values, Mapping) or "core" in self.values:
+            raise ValueError("turn adjustment must contain only ephemeral expression fields")
+        object.__setattr__(self, "values", _expression(self.values))
+
+    def to_payload(self):
+        return {"values": {key: list(value) if isinstance(value, tuple) else value for key, value in self.values.items()}, "source_ref": self.source_ref, "evidence_ids": list(self.evidence_ids)}
+
+
+@dataclass(frozen=True)
 class Outbound:
     action_id: str
     turn_revision: int
@@ -69,6 +90,7 @@ class Outbound:
     provider_ref: str | None
     revision: int
     evidence_ids: tuple[str, ...]
+    turn_context: dict
 
 
 @dataclass(frozen=True)
@@ -87,6 +109,7 @@ class SocialSnapshot:
     receipt_state: str = "unknown"
     boundary_history: tuple[dict, ...] = ()
     followup: dict | None = None
+    effective_persona: EffectivePersona | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +130,9 @@ class BindingState:
 
     write_revision: int
     bindings: PersonaBindings
+    source_scope: ProfileScope | None
+    source_revision: int
+    source_effective_at: datetime | None
 
 
 class SocialConflictError(RuntimeError):
@@ -127,11 +153,13 @@ social_event = sa.Table(
     *_scope_columns(),
     sa.Column("person_ref", sa.String(128), primary_key=True),
     sa.Column("channel_thread_ref", sa.String(128), primary_key=True),
+    sa.Column("agent_instance_id", sa.String(128), primary_key=True),
     sa.Column("source_event_id", sa.String(128), primary_key=True),
     sa.Column("payload_digest", sa.String(64), nullable=False),
     sa.Column("source_kind", sa.String(32), nullable=False),
     sa.Column("body_json", sa.JSON, nullable=False),
     sa.Column("turn_digest", sa.String(64)),
+    sa.Column("turn_context_json", sa.JSON),
     sa.Column("action_id", sa.String(64)),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
@@ -156,11 +184,13 @@ social_persona_binding = sa.Table(
     sa.Column("agent_instance_id", sa.String(128)),
     sa.Column("relation_ref", sa.String(128)),
     sa.Column("revision", sa.Integer, primary_key=True),
+    sa.Column("generation", sa.Integer, nullable=False),
     sa.Column("profile_ref", sa.String(257)),
     sa.Column("reason", sa.String(512), nullable=False),
     sa.Column("evidence_refs_json", sa.JSON, nullable=False),
     sa.Column("status", sa.String(16), nullable=False),
     sa.Column("effective_at", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("owner_user_id", "account_id", "generation", name="uq_social_binding_generation"),
 )
 # NULLs compare unequal in a regular SQLite unique index. Canonical non-null
 # scope_key fences writes, while this index also protects direct SQL consumers.
@@ -179,6 +209,7 @@ social_outbound = sa.Table(
     *_scope_columns(),
     sa.Column("relation_ref", sa.String(128), nullable=False),
     sa.Column("channel_thread_ref", sa.String(128), nullable=False),
+    sa.Column("agent_instance_id", sa.String(128), nullable=False),
     sa.Column("action_id", sa.String(64), primary_key=True),
     sa.Column("turn_revision", sa.Integer, nullable=False),
     sa.Column("persona_fingerprint", sa.String(64), nullable=False),
@@ -188,8 +219,9 @@ social_outbound = sa.Table(
     sa.Column("revision", sa.Integer, nullable=False),
     sa.Column("evidence_ids_json", sa.JSON, nullable=False),
     sa.Column("history_json", sa.JSON, nullable=False),
+    sa.Column("turn_context_json", sa.JSON, nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     sa.CheckConstraint("state IN ('pending','accepted','delivered','unknown','failed')", name="ck_social_outbound_state"),
-    sa.UniqueConstraint("owner_user_id", "account_id", "relation_ref", "channel_thread_ref", "turn_revision", name="uq_social_outbound_turn"),
+    sa.UniqueConstraint("owner_user_id", "account_id", "relation_ref", "channel_thread_ref", "agent_instance_id", "turn_revision", name="uq_social_outbound_turn"),
 )

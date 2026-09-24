@@ -6,7 +6,7 @@ import hashlib
 import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, fields, replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -24,6 +24,7 @@ from deerflow.persistence.social.model import (
     SelfMemoryChange,
     SocialConflictError,
     SocialSnapshot,
+    TurnAdjustment,
     social_event,
     social_outbound,
     social_persona_binding,
@@ -32,6 +33,8 @@ from deerflow.persistence.social.model import (
 from deerflow.social.contracts import SocialScope, TurnResult, bounded_refs, bounded_text
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import PersonaBindings, PersonaProfile, ProfileScope
+from deerflow.social.persona.resolver import resolve_profile
+from deerflow.utils.file_io import run_file_io
 
 
 def _digest(value):
@@ -43,11 +46,15 @@ def _account(table, scope):
 
 
 def _event_scope(scope):
-    return (*_account(social_event, scope), social_event.c.person_ref == scope.person_ref, social_event.c.channel_thread_ref == scope.channel_thread_ref)
+    return (*_account(social_event, scope), social_event.c.person_ref == scope.person_ref, social_event.c.channel_thread_ref == scope.channel_thread_ref, social_event.c.agent_instance_id == scope.agent_instance_id)
 
 
 def _outbound_scope(scope):
-    return (*_account(social_outbound, scope), social_outbound.c.relation_ref == scope.person_ref, social_outbound.c.channel_thread_ref == scope.channel_thread_ref)
+    return (*_account(social_outbound, scope), social_outbound.c.relation_ref == scope.person_ref, social_outbound.c.channel_thread_ref == scope.channel_thread_ref, social_outbound.c.agent_instance_id == scope.agent_instance_id)
+
+
+def _projection_key(scope):
+    return _digest([scope.channel_thread_ref, scope.agent_instance_id])
 
 
 def _scope_key(scope):
@@ -62,7 +69,9 @@ def _check_revision(actual, expected, snapshot):
 
 
 def _outbound(row):
-    return Outbound(**{key: row[key] for key in ("action_id", "turn_revision", "persona_fingerprint", "reply_text", "state", "provider_ref", "revision")}, evidence_ids=tuple(row["evidence_ids_json"]))
+    return Outbound(
+        **{key: row[key] for key in ("action_id", "turn_revision", "persona_fingerprint", "reply_text", "state", "provider_ref", "revision")}, evidence_ids=tuple(row["evidence_ids_json"]), turn_context=deepcopy(row["turn_context_json"])
+    )
 
 
 async def _relationship(session, scope, *, create=False):
@@ -76,7 +85,7 @@ async def _relationship(session, scope, *, create=False):
 
 async def _restore(session, scope):
     row = await _relationship(session, scope)
-    projection = deepcopy((row.social_snapshots_json or {}).get(scope.channel_thread_ref, {})) if row else {}
+    projection = deepcopy((row.social_snapshots_json or {}).get(_projection_key(scope), {})) if row else {}
     # Phase 0 only had a person-wide stop flag. Preserve that conservative
     # boundary without importing its untyped claims or guessing channel events.
     if row is not None and row.do_not_contact:
@@ -92,13 +101,13 @@ async def _restore(session, scope):
 
 async def _save(session, scope, projection):
     row = await _relationship(session, scope, create=True)
-    row.social_snapshots_json = {**(row.social_snapshots_json or {}), scope.channel_thread_ref: projection}
+    row.social_snapshots_json = {**(row.social_snapshots_json or {}), _projection_key(scope): projection}
     row.updated_at = datetime.now(UTC)
     await session.flush()
 
 
 def _projection(snapshot):
-    return {key: value for key, value in asdict(snapshot).items() if key not in {"scope", "events", "outbound"}}
+    return {field.name: deepcopy(getattr(snapshot, field.name)) for field in fields(snapshot) if field.name not in {"scope", "events", "outbound", "effective_persona"}}
 
 
 def _evidence(snapshot, refs):
@@ -137,6 +146,14 @@ class SocialRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self.session_factory = session_factory
 
+    async def _snapshot(self, session, scope):
+        snapshot = await _restore(session, scope)
+        profile_scope = ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id, scope.person_ref)
+        bindings = await self._bindings(session, profile_scope)
+        profiles, _ = await self._profiles(session, profile_scope)
+        persona = resolve_profile(catalog=await run_file_io(load_persona_catalog), profiles=profiles, bindings=bindings, evidence_version=snapshot.revision)
+        return replace(snapshot, effective_persona=persona)
+
     @asynccontextmanager
     async def _read(self):
         async with self.session_factory.begin() as session:
@@ -168,7 +185,7 @@ class SocialRepository:
 
     async def restore(self, scope: SocialScope) -> SocialSnapshot:
         async with self._read() as session:
-            return await _restore(session, scope)
+            return await self._snapshot(session, scope)
 
     async def record_event(self, scope: SocialScope, event: ExternalEvent, *, expected_revision: int | None = None) -> SocialSnapshot:
         if not isinstance(event, ExternalEvent):
@@ -176,7 +193,7 @@ class SocialRepository:
         body = asdict(event)
         digest = _digest(body)
         async with self._write(scope) as session:
-            snapshot = await _restore(session, scope)
+            snapshot = await self._snapshot(session, scope)
             existing = (await session.execute(sa.select(social_event).where(*_event_scope(scope), social_event.c.source_event_id == event.source_event_id))).mappings().one_or_none()
             if existing:
                 if existing["payload_digest"] != digest:
@@ -190,6 +207,7 @@ class SocialRepository:
                     account_id=scope.account_id,
                     person_ref=scope.person_ref,
                     channel_thread_ref=scope.channel_thread_ref,
+                    agent_instance_id=scope.agent_instance_id,
                     source_event_id=event.source_event_id,
                     payload_digest=digest,
                     source_kind=event.source_kind,
@@ -198,22 +216,24 @@ class SocialRepository:
                 )
             )
             await _save(session, scope, {**_projection(snapshot), "revision": snapshot.revision + 1})
-            return await _restore(session, scope)
+            return await self._snapshot(session, scope)
 
     async def set_boundaries(self, scope: SocialScope, *, expected_revision: int, update: BoundaryUpdate) -> SocialSnapshot:
         """Host-authoritative mutation; callers must verify the evidence, never parse text into this DTO."""
         if not isinstance(update, BoundaryUpdate):
             raise ValueError("update must be BoundaryUpdate")
         async with self._write(scope) as session:
-            snapshot = await _restore(session, scope)
+            snapshot = await self._snapshot(session, scope)
             _check_revision(snapshot.revision, expected_revision, snapshot)
             _evidence(snapshot, update.evidence_ids)
             value = asdict(update)
             history = [*snapshot.boundary_history, {**value, "status": "applied", "revision": expected_revision + 1}]
             await _save(session, scope, {**_projection(snapshot), **{key: value[key] for key in ("identity_verified", "human_takeover", "do_not_contact")}, "revision": expected_revision + 1, "boundary_history": history})
-            return await _restore(session, scope)
+            return await self._snapshot(session, scope)
 
-    async def commit_turn(self, scope: SocialScope, *, expected_revision: int, event_id: str, result: TurnResult, persona_fingerprint: str, memory_changes: tuple[SelfMemoryChange, ...] = ()) -> CommitResult:
+    async def commit_turn(
+        self, scope: SocialScope, *, expected_revision: int, event_id: str, result: TurnResult, persona_fingerprint: str, memory_changes: tuple[SelfMemoryChange, ...] = (), turn_adjustment: TurnAdjustment | None = None
+    ) -> CommitResult:
         if not isinstance(result, TurnResult):
             raise ValueError("result must be TurnResult")
         if not isinstance(memory_changes, tuple) or len(memory_changes) > 16 or any(not isinstance(item, SelfMemoryChange) for item in memory_changes):
@@ -222,9 +242,12 @@ class SocialRepository:
             raise ValueError("duplicate memory ids")
         if len(persona_fingerprint) != 64 or any(c not in "0123456789abcdef" for c in persona_fingerprint):
             raise ValueError("persona_fingerprint must be a SHA-256 digest")
-        digest = _digest({"result": asdict(result), "memory_changes": [asdict(item) for item in memory_changes], "persona_fingerprint": persona_fingerprint})
+        if turn_adjustment is not None and not isinstance(turn_adjustment, TurnAdjustment):
+            raise ValueError("turn_adjustment must be a host-owned TurnAdjustment")
+        adjustment_payload = turn_adjustment.to_payload() if turn_adjustment else None
+        digest = _digest({"result": asdict(result), "memory_changes": [asdict(item) for item in memory_changes], "persona_fingerprint": persona_fingerprint, "turn_adjustment": adjustment_payload})
         async with self._write(scope) as session:
-            snapshot = await _restore(session, scope)
+            snapshot = await self._snapshot(session, scope)
             event_where = (*_event_scope(scope), social_event.c.source_event_id == event_id)
             event = (await session.execute(sa.select(social_event).where(*event_where))).mappings().one_or_none()
             if event is None:
@@ -234,6 +257,16 @@ class SocialRepository:
                     raise SocialConflictError(snapshot)
                 return CommitResult(snapshot, next((item for item in snapshot.outbound if item.action_id == event["action_id"]), None))
             _check_revision(snapshot.revision, expected_revision, snapshot)
+            profile_scope = ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id, scope.person_ref)
+            bindings = await self._bindings(session, profile_scope)
+            authoritative_persona = snapshot.effective_persona
+            if turn_adjustment:
+                _evidence(snapshot, turn_adjustment.evidence_ids)
+                profiles, _ = await self._profiles(session, profile_scope)
+                authoritative_persona = resolve_profile(catalog=await run_file_io(load_persona_catalog), profiles=profiles, bindings=bindings, evidence_version=snapshot.revision, turn_adjustment=turn_adjustment.values)
+            if authoritative_persona.fingerprint != persona_fingerprint:
+                raise SocialConflictError(snapshot)
+            turn_context = {"bindings": {**asdict(bindings), "effective_at": bindings.effective_at.isoformat()}, "evidence_version": snapshot.revision, "adjustment": adjustment_payload}
             projection = _projection(snapshot)
             for patch in result.state_delta:
                 _evidence(snapshot, patch.evidence_ids)
@@ -246,7 +279,7 @@ class SocialRepository:
             projection["followup"] = asdict(result.followup) if result.followup else None
             action_id = None
             if result.reply is not None:
-                action_id = _digest([scope.owner_user_id, scope.account_id, scope.person_ref, scope.channel_thread_ref, event_id])
+                action_id = _digest([scope.owner_user_id, scope.account_id, scope.person_ref, scope.channel_thread_ref, scope.agent_instance_id, event_id])
                 now = datetime.now(UTC)
                 await session.execute(
                     social_outbound.insert().values(
@@ -254,6 +287,7 @@ class SocialRepository:
                         account_id=scope.account_id,
                         relation_ref=scope.person_ref,
                         channel_thread_ref=scope.channel_thread_ref,
+                        agent_instance_id=scope.agent_instance_id,
                         action_id=action_id,
                         turn_revision=expected_revision + 1,
                         persona_fingerprint=persona_fingerprint,
@@ -263,13 +297,14 @@ class SocialRepository:
                         revision=0,
                         evidence_ids_json=[event["body_json"]["source_ref"]],
                         history_json=[],
+                        turn_context_json=turn_context,
                         created_at=now,
                         updated_at=now,
                     )
                 )
-            await session.execute(social_event.update().where(*event_where).values(turn_digest=digest, action_id=action_id))
+            await session.execute(social_event.update().where(*event_where).values(turn_digest=digest, action_id=action_id, turn_context_json=turn_context))
             await _save(session, scope, projection)
-            saved = await _restore(session, scope)
+            saved = await self._snapshot(session, scope)
             return CommitResult(saved, next((item for item in saved.outbound if item.action_id == action_id), None))
 
     async def _profiles(self, session, scope):
@@ -299,12 +334,15 @@ class SocialRepository:
                     raise ValueError("profile versions are immutable")
                 return profiles[ref]
             _check_revision(revision, expected_revision, {"revision": revision, "profiles": profiles})
-            if candidate.base_template_ref not in load_persona_catalog() or ref in load_persona_catalog():
+            catalog = await run_file_io(load_persona_catalog)
+            if candidate.base_template_ref not in catalog or ref in catalog:
                 raise ValueError("profile must extend a canonical template without replacing it")
             if candidate.basis_refs:
                 predicates = list(_account(social_event, scope))
                 if scope.relation_ref:
                     predicates.append(social_event.c.person_ref == scope.relation_ref)
+                if scope.agent_instance_id:
+                    predicates.append(social_event.c.agent_instance_id == scope.agent_instance_id)
                 bodies = (await session.execute(sa.select(social_event.c.body_json).where(*predicates))).scalars().all()
                 if not set(candidate.basis_refs) <= {body["source_ref"] for body in bodies}:
                     raise ValueError("profile evidence must belong to its scope")
@@ -338,15 +376,38 @@ class SocialRepository:
             .one_or_none()
         )
 
-    async def _bindings(self, session, scope):
+    async def _binding_state(self, session, scope):
         account = await self._binding_row(session, ProfileScope(scope.owner_user_id, scope.account_id))
         agent = await self._binding_row(session, ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id)) if scope.agent_instance_id else None
         relation = await self._binding_row(session, scope) if scope.relation_ref else None
-        selected = relation if scope.relation_ref else agent if scope.agent_instance_id else account
-        effective_at = selected["effective_at"] if selected else datetime(1970, 1, 1, tzinfo=UTC)
-        if effective_at.tzinfo is None:
-            effective_at = effective_at.replace(tzinfo=UTC)
-        return PersonaBindings(scope, account["profile_ref"] if account else "relaxed_wit@1.0.1", agent["profile_ref"] if agent else None, relation["profile_ref"] if relation else None, selected["revision"] if selected else 1, effective_at)
+        target = relation if scope.relation_ref else agent if scope.agent_instance_id else account
+        rows = [row for row in (account, agent, relation) if row is not None]
+        # Every contributing update, including clear tombstones, advances this
+        # resolution fence. Scope-local revisions alone allow cross-scope ABA.
+        latest = max(rows, key=lambda row: row["generation"]) if rows else None
+        source = next((row for row in (relation, agent, account) if row is not None and row["profile_ref"] is not None), None)
+
+        def aware(value):
+            return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+        bindings = PersonaBindings(
+            scope,
+            account["profile_ref"] if account else "relaxed_wit@1.0.1",
+            agent["profile_ref"] if agent else None,
+            relation["profile_ref"] if relation else None,
+            latest["generation"] if latest else 1,
+            aware(latest["effective_at"]) if latest else datetime(1970, 1, 1, tzinfo=UTC),
+        )
+        return BindingState(
+            target["revision"] if target else 0,
+            bindings,
+            ProfileScope(scope.owner_user_id, scope.account_id, source["agent_instance_id"], source["relation_ref"]) if source else None,
+            source["revision"] if source else 0,
+            aware(source["effective_at"]) if source else None,
+        )
+
+    async def _bindings(self, session, scope):
+        return (await self._binding_state(session, scope)).bindings
 
     async def get_bindings(self, scope: ProfileScope) -> PersonaBindings:
         """An unregistered scope resolves the canonical default; writes expect revision 0."""
@@ -355,8 +416,7 @@ class SocialRepository:
 
     async def get_binding_state(self, scope: ProfileScope) -> BindingState:
         async with self._read() as session:
-            row = await self._binding_row(session, scope)
-            return BindingState(row["revision"] if row else 0, await self._bindings(session, scope))
+            return await self._binding_state(session, scope)
 
     async def update_binding(
         self, scope: ProfileScope, profile_ref: str | None, *, expected_revision: int, reason: str, mode: Literal["administrative", "automatic"] = "administrative", evidence_ids: tuple[str, ...] = ()
@@ -373,7 +433,7 @@ class SocialRepository:
             _check_revision(row["revision"] if row else 0, expected_revision, bindings)
             if profile_ref is not None:
                 profiles, _ = await self._profiles(session, scope)
-                if profile_ref not in load_persona_catalog() and profile_ref not in profiles:
+                if profile_ref not in await run_file_io(load_persona_catalog) and profile_ref not in profiles:
                     raise ValueError("unknown profile reference")
             effective = bindings.relation_override_ref or bindings.agent_override_ref or bindings.account_default_ref
             if mode == "automatic" and profile_ref == effective:
@@ -384,9 +444,12 @@ class SocialRepository:
                 predicates = list(_account(social_event, scope))
                 if scope.relation_ref:
                     predicates.append(social_event.c.person_ref == scope.relation_ref)
+                if scope.agent_instance_id:
+                    predicates.append(social_event.c.agent_instance_id == scope.agent_instance_id)
                 bodies = (await session.execute(sa.select(social_event.c.body_json).where(*predicates))).scalars().all()
                 if not set(evidence_ids) <= {body["source_ref"] for body in bodies}:
                     raise ValueError("binding evidence must belong to its scope")
+            generation = (await session.execute(sa.select(sa.func.max(social_persona_binding.c.generation)).where(*_account(social_persona_binding, scope)))).scalar_one_or_none() or 1
             await session.execute(
                 social_persona_binding.insert().values(
                     owner_user_id=scope.owner_user_id,
@@ -395,6 +458,7 @@ class SocialRepository:
                     agent_instance_id=scope.agent_instance_id,
                     relation_ref=scope.relation_ref,
                     revision=expected_revision + 1,
+                    generation=generation + 1,
                     profile_ref=profile_ref,
                     reason=reason,
                     evidence_refs_json=list(evidence_ids),
@@ -415,7 +479,7 @@ class SocialRepository:
             row = await self._action(session, scope, action_id)
             if row["state"] != "pending":
                 return OutboundClaim(_outbound(row), False)
-            snapshot = await _restore(session, scope)
+            snapshot = await self._snapshot(session, scope)
             _check_revision(row["revision"], expected_revision, snapshot)
             await session.execute(
                 social_outbound.update()
@@ -437,7 +501,7 @@ class SocialRepository:
             row = await self._action(session, scope, action_id)
             if row["state"] == state and row["provider_ref"] == provider_ref and row["evidence_ids_json"] == list(evidence_ids):
                 return _outbound(row)
-            snapshot = await _restore(session, scope)
+            snapshot = await self._snapshot(session, scope)
             _check_revision(row["revision"], expected_revision, snapshot)
             allowed = {"pending": {"failed"}, "unknown": {"unknown", "accepted", "delivered", "failed"}, "accepted": {"delivered", "unknown", "failed"}, "delivered": set(), "failed": set()}
             if state not in allowed[row["state"]]:

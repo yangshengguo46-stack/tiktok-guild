@@ -12,24 +12,39 @@ persona bindings. Resolution, persistence, and Lead integration are separate.
 
 ### Native Social Persistence (`persistence/social/`)
 
-`SocialRepository` owns durable sourced events, channel-scoped relationship and
+`SocialRepository` owns durable sourced events, channel-and-agent-scoped relationship and
 self projections, immutable account profile versions, scoped binding history,
 and the outbox. Migration 0026 extends the Phase 0 relationship row without
 changing its primary key or legacy reads. It backfills only Phase 0 persona
 bindings; untyped legacy facts are never promoted. The legacy person-wide
 do-not-contact flag remains a conservative boundary across that person's
-channels; native boundary mutations are channel-scoped and evidence-linked.
+channels and agents; native boundary mutations are channel-and-agent-scoped
+and evidence-linked. Event primary keys, projection keys, and every outbox
+predicate include the agent; agents may share a profile without sharing memory.
 
 Every native write serializes before reading (SQLite `BEGIN IMMEDIATE`,
 PostgreSQL account advisory transaction lock) and checks its expected revision.
 Readers use a transaction snapshot. A CAS conflict carries the winning value
 and never invokes a model. `BindingState.write_revision` is the write token
-(zero for absent rows); `bindings.revision` is the canonical resolved view.
+(zero for absent rows); `bindings.revision` is the effective resolution
+generation, allocated monotonically per account (implicit fallback is 1).
+Cleared overrides also fence resolution, preventing cross-scope ABA.
+`source_scope/source_revision/source_effective_at` identify the actual inherited
+profile source, independently of the requested scope's write token.
 Automatic no-op selection requires explicit `mode="automatic"`; an actual
 automatic change requires scoped evidence. Administrative rollback can append
 a new revision even when the profile reference is unchanged.
 
 `SelfMemoryChange` is host-owned input, not an extension to model `TurnResult`.
+`restore().effective_persona` is resolved in the same read snapshot as memory.
+`commit_turn` re-resolves and compares its fingerprint under the write lock,
+including inherited binding changes. A stale fingerprint returns a conflict
+carrying the current snapshot, never a regenerated reply. Optional
+`turn_adjustment=TurnAdjustment(...)` is typed server-owned expression input,
+not a model field: approved expression keys and scoped evidence are validated
+before resolving. Exact binding values, evidence version, adjustment values
+and source reference are retained in the committed event and outbound's
+`turn_context` so a historical fingerprint remains reproducible.
 Outbox claim atomically changes pending to unknown before external I/O and
 returns `claimed=True` once. Every later claim returns `claimed=False`;
 unknown must never trigger a blind resend. Result recording accepts only

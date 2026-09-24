@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 from dataclasses import replace
+from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -14,10 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from deerflow.persistence.base import Base
 from deerflow.persistence.bootstrap import _get_alembic_config
 from deerflow.social.contracts import ClaimPatch, FollowUp, SocialScope, TurnResult
-from deerflow.social.persona.models import PersonaProfile, ProfileScope
+from deerflow.social.persona.catalog import load_persona_catalog
+from deerflow.social.persona.models import PersonaBindings, PersonaProfile, ProfileScope
+from deerflow.social.persona.resolver import resolve_profile
 
 SCOPE = SocialScope("owner", "account", "person", "channel")
-FINGERPRINT = "a" * 64
 
 
 def api():
@@ -65,7 +67,7 @@ async def test_event_idempotency_survives_restart_and_70_later_events(db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field", ["owner_user_id", "account_id", "person_ref", "channel_thread_ref"])
+@pytest.mark.parametrize("field", ["owner_user_id", "account_id", "person_ref", "channel_thread_ref", "agent_instance_id"])
 async def test_scopes_cannot_read_or_dedupe_each_others_events(db, field):
     social, repo, _ = db
     await repo.record_event(SCOPE, event(social))
@@ -73,7 +75,9 @@ async def test_scopes_cannot_read_or_dedupe_each_others_events(db, field):
     assert (await repo.restore(other)).revision == 0
     assert (await repo.record_event(other, replace(event(social), text="different scope"))).revision == 1
     with pytest.raises(ValueError, match="evidence"):
-        await repo.commit_turn(other, expected_revision=1, event_id="e1", result=TurnResult(None, (ClaimPatch("assert", "foreign", ("missing",), "x", "observed", "person"),)), persona_fingerprint=FINGERPRINT)
+        await repo.commit_turn(
+            other, expected_revision=1, event_id="e1", result=TurnResult(None, (ClaimPatch("assert", "foreign", ("missing",), "x", "observed", "person"),)), persona_fingerprint=(await resolved_persona(repo, other)).fingerprint
+        )
 
 
 @pytest.mark.asyncio
@@ -82,14 +86,14 @@ async def test_claim_types_retraction_self_and_commitment_remain_distinct(db):
     await repo.record_event(SCOPE, event(social))
     patches = tuple(ClaimPatch("assert", kind, ("ref1",), kind, kind, "person") for kind in ("reported", "observed", "hypothesis"))
     memory = tuple(social.SelfMemoryChange("assert", category, category, ("ref1",), text=category) for category in ("self_statement", "self_viewpoint", "commitment", "relationship"))
-    saved = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi", patches), persona_fingerprint=FINGERPRINT, memory_changes=memory)
+    saved = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi", patches), persona_fingerprint=(await resolved_persona(repo)).fingerprint, memory_changes=memory)
     assert {claim["kind"] for claim in saved.snapshot.claims} == {"reported", "observed", "hypothesis"}
     assert len(saved.snapshot.self_state) == 2
     assert len(saved.snapshot.commitments) == 1
     assert len(saved.snapshot.relationship) == 1
     assert all(value["status"] == "active" and value["evidence_ids"] == ["ref1"] for value in (*saved.snapshot.claims, *saved.snapshot.self_state, *saved.snapshot.commitments, *saved.snapshot.relationship))
     await repo.record_event(SCOPE, event(social, 2))
-    retracted = await repo.commit_turn(SCOPE, expected_revision=3, event_id="e2", result=TurnResult(None, (ClaimPatch("retract", "hypothesis", ("ref2",)),)), persona_fingerprint=FINGERPRINT)
+    retracted = await repo.commit_turn(SCOPE, expected_revision=3, event_id="e2", result=TurnResult(None, (ClaimPatch("retract", "hypothesis", ("ref2",)),)), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
     hypothesis = next(item for item in retracted.snapshot.claims if item["claim_id"] == "hypothesis")
     assert hypothesis["status"] == "retracted"
     assert hypothesis["evidence_ids"] == ["ref1"]
@@ -103,7 +107,11 @@ async def test_invalid_patch_rolls_back_whole_turn_and_outbound(db):
     original = await repo.record_event(SCOPE, event(social))
     with pytest.raises(ValueError, match="claim"):
         await repo.commit_turn(
-            SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi", (ClaimPatch("assert", "ok", ("ref1",), "ok", "reported", "person"), ClaimPatch("retract", "missing", ("ref1",)))), persona_fingerprint=FINGERPRINT
+            SCOPE,
+            expected_revision=1,
+            event_id="e1",
+            result=TurnResult("hi", (ClaimPatch("assert", "ok", ("ref1",), "ok", "reported", "person"), ClaimPatch("retract", "missing", ("ref1",)))),
+            persona_fingerprint=(await resolved_persona(repo)).fingerprint,
         )
     assert await repo.restore(SCOPE) == original
 
@@ -113,11 +121,12 @@ async def test_turn_cas_loser_carries_winner_and_duplicate_turn_has_one_outbound
     social, repo, _ = db
     await repo.record_event(SCOPE, event(social))
     barrier = asyncio.Barrier(2)
+    fingerprint = (await resolved_persona(repo)).fingerprint
 
     async def commit(reply):
         await barrier.wait()
         try:
-            return await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult(reply), persona_fingerprint=FINGERPRINT)
+            return await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult(reply), persona_fingerprint=fingerprint)
         except social.SocialConflictError as error:
             return error
 
@@ -127,7 +136,7 @@ async def test_turn_cas_loser_carries_winner_and_duplicate_turn_has_one_outbound
     saved = await repo.restore(SCOPE)
     assert conflicts[0].snapshot == saved
     assert saved.revision == 2 and len(saved.outbound) == 1
-    replay = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult(saved.outbound[0].reply_text), persona_fingerprint=FINGERPRINT)
+    replay = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult(saved.outbound[0].reply_text), persona_fingerprint=fingerprint)
     assert replay.snapshot == saved and replay.outbound == saved.outbound[0]
 
 
@@ -136,7 +145,7 @@ async def test_turn_cas_loser_carries_winner_and_duplicate_turn_has_one_outbound
 async def test_wait_and_no_reply_never_create_outbound(db, followup):
     social, repo, _ = db
     await repo.record_event(SCOPE, event(social))
-    saved = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult(None, followup=followup), persona_fingerprint=FINGERPRINT)
+    saved = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult(None, followup=followup), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
     assert saved.outbound is None and saved.snapshot.outbound == ()
 
 
@@ -161,7 +170,7 @@ async def test_authoritative_boundaries_restore_and_external_text_cannot_set_the
 async def test_outbound_claim_is_single_use_and_unknown_never_blind_resends(db):
     social, repo, engine = db
     await repo.record_event(SCOPE, event(social))
-    turn = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi"), persona_fingerprint=FINGERPRINT)
+    turn = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi"), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
     action = turn.outbound
     assert action.state == "pending" and action.revision == 0
     claim = await repo.claim_outbound(SCOPE, action.action_id, expected_revision=0)
@@ -231,11 +240,13 @@ async def test_nullable_binding_scopes_cas_automatic_noop_and_admin_rollback(db)
     social, repo, _ = db
     scope = ProfileScope("owner", "account")
     first = await repo.update_binding(scope, "clear_direct@1.0.1", expected_revision=0, reason="set account default")
-    assert first.account_default_ref == "clear_direct@1.0.1" and first.revision == 1
+    assert first.account_default_ref == "clear_direct@1.0.1" and first.revision == 2
+    assert (await repo.get_binding_state(scope)).write_revision == 1
     noop = await repo.update_binding(scope, "clear_direct@1.0.1", expected_revision=1, reason="automatic selection", mode="automatic")
     assert noop == first
     rollback = await repo.update_binding(scope, "clear_direct@1.0.1", expected_revision=1, reason="administrative rollback")
-    assert rollback.revision == 2
+    assert rollback.revision == 3
+    assert (await repo.get_binding_state(scope)).write_revision == 2
     with pytest.raises(social.SocialConflictError) as caught:
         await repo.update_binding(scope, "quiet_depth@1.0.1", expected_revision=1, reason="stale")
     assert caught.value.snapshot == rollback
@@ -243,7 +254,8 @@ async def test_nullable_binding_scopes_cas_automatic_noop_and_admin_rollback(db)
     selected = await repo.update_binding(relation, "quiet_depth@1.0.1", expected_revision=0, reason="relation selection")
     assert selected.account_default_ref == "clear_direct@1.0.1" and selected.relation_override_ref == "quiet_depth@1.0.1"
     cleared = await repo.update_binding(relation, None, expected_revision=1, reason="clear")
-    assert cleared.relation_override_ref is None and cleared.revision == 2
+    assert cleared.relation_override_ref is None and cleared.revision == 5
+    assert (await repo.get_binding_state(relation)).write_revision == 2
     with pytest.raises(ValueError):
         await repo.update_binding(scope, None, expected_revision=2, reason="cannot clear default")
     with pytest.raises(ValueError):
@@ -283,10 +295,10 @@ async def test_phase0_no_contact_is_conservative_person_wide_boundary_without_fa
 async def test_receipt_projection_preserves_other_unknown_actions(db):
     social, repo, _ = db
     await repo.record_event(SCOPE, event(social))
-    first = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("one"), persona_fingerprint=FINGERPRINT)
+    first = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("one"), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
     await repo.claim_outbound(SCOPE, first.outbound.action_id, expected_revision=0)
     await repo.record_event(SCOPE, event(social, 2))
-    second = await repo.commit_turn(SCOPE, expected_revision=4, event_id="e2", result=TurnResult("two"), persona_fingerprint=FINGERPRINT)
+    second = await repo.commit_turn(SCOPE, expected_revision=4, event_id="e2", result=TurnResult("two"), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
     await repo.claim_outbound(SCOPE, second.outbound.action_id, expected_revision=0)
     await repo.record_outbound_result(SCOPE, first.outbound.action_id, expected_revision=1, state="delivered", provider_ref="p1", evidence_ids=("receipt1",))
     assert (await repo.restore(SCOPE)).receipt_state == "unknown"
@@ -321,7 +333,7 @@ async def test_simultaneous_event_writers_and_explicit_stale_cas(db):
 async def test_two_claimers_receive_payload_authority_once(db):
     social, repo, _ = db
     await repo.record_event(SCOPE, event(social))
-    turn = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi"), persona_fingerprint=FINGERPRINT)
+    turn = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("hi"), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
     claims = await asyncio.gather(*(repo.claim_outbound(SCOPE, turn.outbound.action_id, expected_revision=0) for _ in range(2)))
     assert sum(claim.claimed for claim in claims) == 1
     assert all(claim.outbound.state == "unknown" for claim in claims)
@@ -334,7 +346,10 @@ async def test_direct_sql_cannot_duplicate_null_binding_revision(db):
     async with engine.begin() as conn:
         with pytest.raises(sa.exc.IntegrityError):
             await conn.execute(
-                sa.text("INSERT INTO social_persona_binding SELECT owner_user_id,account_id,'different-key',agent_instance_id,relation_ref,revision,profile_ref,reason,evidence_refs_json,status,effective_at FROM social_persona_binding")
+                sa.text(
+                    "INSERT INTO social_persona_binding SELECT owner_user_id,account_id,'different-key',agent_instance_id,relation_ref,revision,"
+                    "generation+100,profile_ref,reason,evidence_refs_json,status,effective_at FROM social_persona_binding"
+                )
             )
 
 
@@ -389,6 +404,162 @@ async def test_restore_reads_one_transaction_snapshot_during_a_concurrent_write(
     assert len(snapshot.events) == 1
 
 
+async def resolved_persona(repo, scope=SCOPE):
+    bindings = await repo.get_bindings(ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id, scope.person_ref))
+    profiles = await repo.get_profiles(bindings.scope)
+    snapshot = await repo.restore(scope)
+    return resolve_profile(catalog=load_persona_catalog(), profiles=profiles, bindings=bindings, evidence_version=snapshot.revision)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level", ["account", "agent", "relation"])
+async def test_commit_atomically_rejects_changed_effective_binding(db, level):
+    social, repo, _ = db
+    await repo.record_event(SCOPE, event(social))
+    original = await resolved_persona(repo)
+    binding_scope = ProfileScope("owner", "account", "lead_agent" if level != "account" else None, "person" if level == "relation" else None)
+    await repo.update_binding(binding_scope, "clear_direct@1.0.1", expected_revision=0, reason="changed while generation ran")
+    with pytest.raises(social.SocialConflictError) as caught:
+        await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("old generation"), persona_fingerprint=original.fingerprint)
+    assert caught.value.snapshot.revision == 1
+    assert caught.value.snapshot.outbound == ()
+    assert (await repo.restore(SCOPE)).outbound == ()
+
+
+@pytest.mark.asyncio
+async def test_agents_have_independent_events_memory_boundaries_and_outbox(db):
+    social, repo, _ = db
+    await repo.record_event(SCOPE, event(social))
+    other = replace(SCOPE, agent_instance_id="independent-agent")
+    assert (await repo.restore(other)).revision == 0
+    assert (await repo.restore(other)).events == ()
+    await repo.record_event(other, replace(event(social), text="agent two"))
+    first = await repo.commit_turn(
+        SCOPE,
+        expected_revision=1,
+        event_id="e1",
+        result=TurnResult("lead reply"),
+        persona_fingerprint=(await resolved_persona(repo)).fingerprint,
+        memory_changes=(social.SelfMemoryChange("assert", "self", "self_statement", ("ref1",), "lead self"),),
+    )
+    second = await repo.commit_turn(
+        other,
+        expected_revision=1,
+        event_id="e1",
+        result=TurnResult("other reply"),
+        persona_fingerprint=(await resolved_persona(repo, other)).fingerprint,
+        memory_changes=(social.SelfMemoryChange("assert", "self", "self_statement", ("ref1",), "other self"),),
+    )
+    assert first.outbound.action_id != second.outbound.action_id
+    assert (await repo.restore(SCOPE)).self_state[0]["text"] == "lead self"
+    assert (await repo.restore(other)).self_state[0]["text"] == "other self"
+    assert len((await repo.restore(other)).outbound) == 1
+    with pytest.raises(ValueError):
+        await repo.claim_outbound(other, first.outbound.action_id, expected_revision=0)
+    assert (await repo.claim_outbound(other, second.outbound.action_id, expected_revision=0)).claimed
+    assert (await repo.restore(SCOPE)).outbound[0].state == "pending"
+    await repo.set_boundaries(SCOPE, expected_revision=2, update=social.BoundaryUpdate(True, True, True, ("ref1",)))
+    assert not (await repo.restore(other)).do_not_contact
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level", ["account", "agent"])
+async def test_inherited_rollback_preserves_real_provenance_and_fences_old_turn(db, level):
+    social, repo, _ = db
+    source = ProfileScope("owner", "account", "lead_agent" if level == "agent" else None)
+    target = ProfileScope("owner", "account", "lead_agent", "person")
+    inherited = await repo.update_binding(source, "relaxed_wit@1.0.1", expected_revision=0, reason="initial inherited")
+    before = await repo.get_binding_state(target)
+    assert before.write_revision == 0
+    assert before.bindings.effective_at == inherited.effective_at
+    assert before.source_scope == source
+    assert before.source_revision == 1
+    assert before.source_effective_at == inherited.effective_at
+    await repo.record_event(SCOPE, event(social))
+    original = await resolved_persona(repo)
+    rollback = await repo.update_binding(source, "relaxed_wit@1.0.1", expected_revision=1, reason="same-profile administrative rollback")
+    after = await repo.get_binding_state(target)
+    assert after.write_revision == 0
+    assert after.source_scope == source and after.source_revision == 2
+    assert after.bindings.revision == rollback.revision > before.bindings.revision
+    assert after.bindings.effective_at == rollback.effective_at > before.bindings.effective_at
+    assert (await resolved_persona(repo)).fingerprint != original.fingerprint
+    with pytest.raises(social.SocialConflictError):
+        await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("stale"), persona_fingerprint=original.fingerprint)
+
+
+@pytest.mark.asyncio
+async def test_authoritative_fingerprint_restore_keeps_catalog_io_off_event_loop(db):
+    _, repo, _ = db
+    from support.detectors.blocking_io_runtime import detect_blocking_io_strict
+
+    with detect_blocking_io_strict():
+        snapshot = await repo.restore(SCOPE)
+    assert snapshot.effective_persona.profile_ref == "relaxed_wit@1.0.1"
+
+
+@pytest.mark.asyncio
+async def test_initial_same_profile_administration_and_override_clear_do_not_allow_aba(db):
+    social, repo, _ = db
+    await repo.record_event(SCOPE, event(social))
+    implicit = await resolved_persona(repo)
+    source = ProfileScope("owner", "account")
+    target = ProfileScope("owner", "account", "lead_agent", "person")
+    await repo.update_binding(source, "relaxed_wit@1.0.1", expected_revision=0, reason="explicit default")
+    original = await resolved_persona(repo)
+    assert original.fingerprint != implicit.fingerprint
+    await repo.update_binding(target, "clear_direct@1.0.1", expected_revision=0, reason="override")
+    await repo.update_binding(target, None, expected_revision=1, reason="clear override")
+    assert (await resolved_persona(repo)).fingerprint != original.fingerprint
+    with pytest.raises(social.SocialConflictError):
+        await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("stale"), persona_fingerprint=original.fingerprint)
+
+
+@pytest.mark.asyncio
+async def test_host_adjustment_commits_with_reproducible_durable_provenance(db):
+    social, repo, engine = db
+    await repo.record_event(SCOPE, event(social))
+    profile_scope = ProfileScope("owner", "account", "lead_agent", "person")
+    adjustment = social.TurnAdjustment(values={"voice": "brief", "interests": ("music",)}, source_ref="server:turn-policy", evidence_ids=("ref1",))
+    bindings = await repo.get_bindings(profile_scope)
+    adjusted = resolve_profile(catalog=load_persona_catalog(), profiles={}, bindings=bindings, evidence_version=1, turn_adjustment=adjustment.values)
+    assert adjusted.fingerprint != (await resolved_persona(repo)).fingerprint
+    saved = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("brief response"), persona_fingerprint=adjusted.fingerprint, turn_adjustment=adjustment)
+    await repo.update_binding(profile_scope, "clear_direct@1.0.1", expected_revision=0, reason="later change")
+    await engine.dispose()
+    outbound = (await repo.restore(SCOPE)).outbound[0]
+    context = outbound.turn_context
+    assert context["adjustment"] == {"values": {"voice": "brief", "interests": ["music"]}, "source_ref": "server:turn-policy", "evidence_ids": ["ref1"]}
+    basis = dict(context["bindings"])
+    basis["scope"] = ProfileScope(**basis["scope"])
+    basis["effective_at"] = datetime.fromisoformat(basis["effective_at"])
+    values = dict(context["adjustment"]["values"])
+    values["interests"] = tuple(values["interests"])
+    reproduced = resolve_profile(catalog=load_persona_catalog(), profiles={}, bindings=PersonaBindings(**basis), evidence_version=context["evidence_version"], turn_adjustment=values)
+    assert reproduced.fingerprint == outbound.persona_fingerprint == saved.outbound.persona_fingerprint
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["missing", "different", "unapproved", "changed_binding", "foreign_evidence"])
+async def test_adjusted_fingerprint_needs_exact_approved_host_input(db, mode):
+    social, repo, _ = db
+    before = await repo.record_event(SCOPE, event(social))
+    scope = ProfileScope("owner", "account", "lead_agent", "person")
+    bindings = await repo.get_bindings(scope)
+    adjusted = resolve_profile(catalog=load_persona_catalog(), profiles={}, bindings=bindings, evidence_version=1, turn_adjustment={"voice": "brief"})
+    if mode == "unapproved":
+        with pytest.raises(ValueError):
+            social.TurnAdjustment(values={"identity_verified": "true"}, source_ref="server:turn-policy")
+    else:
+        adjustment = None if mode == "missing" else social.TurnAdjustment(values={"voice": "different" if mode == "different" else "brief"}, source_ref="server:turn-policy", evidence_ids=("foreign",) if mode == "foreign_evidence" else ())
+        if mode == "changed_binding":
+            await repo.update_binding(scope, "clear_direct@1.0.1", expected_revision=0, reason="changed during model call")
+        with pytest.raises((ValueError, social.SocialConflictError)):
+            await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("reply"), persona_fingerprint=adjusted.fingerprint, turn_adjustment=adjustment)
+    after = await repo.restore(SCOPE)
+    assert after.revision == before.revision and after.outbound == () and after.claims == ()
+
+
 @pytest.mark.asyncio
 async def test_0026_roundtrip_preserves_0025_rows_and_backfills_only_phase0(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'migration-roundtrip.db'}")
@@ -410,6 +581,8 @@ async def test_0026_roundtrip_preserves_0025_rows_and_backfills_only_phase0(tmp_
         async with engine.connect() as conn:
             tables = await conn.run_sync(lambda sync: set(sa.inspect(sync).get_table_names()))
             assert {"social_event", "social_persona_profile", "social_persona_binding", "social_outbound"} <= tables
+            event_pk = await conn.run_sync(lambda sync: sa.inspect(sync).get_pk_constraint("social_event")["constrained_columns"])
+            assert "agent_instance_id" in event_pk
             row = (await conn.execute(sa.text("SELECT identity_verified,human_takeover,receipt_state,social_snapshots_json FROM creator_agent_relationship"))).one()
             assert row[:3] == (0, 0, "unknown")
             assert "legacy fact" not in str(row[3])
@@ -431,7 +604,7 @@ async def test_0026_roundtrip_preserves_0025_rows_and_backfills_only_phase0(tmp_
         assert restored_binding.bindings.relation_override_ref == "clear_direct@1.0.1"
         saved = await repo.record_event(SCOPE, event(social))
         assert saved.do_not_contact and saved.revision == 1
-        committed = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("draft"), persona_fingerprint=FINGERPRINT)
+        committed = await repo.commit_turn(SCOPE, expected_revision=1, event_id="e1", result=TurnResult("draft"), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
         assert committed.outbound.state == "pending"
         candidate = PersonaProfile("migrated", "1", "clear_direct@1.0.1", {}, "operator", ())
         assert await repo.register_profile(ProfileScope("owner", "account"), candidate, expected_revision=0) == candidate
