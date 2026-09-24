@@ -52,6 +52,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Host-only model-call boundary. Unlike TAG_NOSTREAM, this also excludes raw
+# prompts, outputs and provider errors from durable event/history consumers.
+TAG_PRIVATE_OUTPUT = "deerflow:private_output"
+
 _LEGACY_SUMMARY_MESSAGE_NAME = "summary"
 _PERSISTED_HIDDEN_HUMAN_INPUT_RESPONSE_SOURCES = frozenset({"ask_clarification", "sandbox_network"})
 
@@ -247,6 +251,8 @@ class RunJournal(BaseCallbackHandler):
         self.thread_id = thread_id
         self._store: RunEventStore | None = event_store
         self._closed = False
+        self._private_output_runs: set[str] = set()
+        self._private_lead_output = False
         self._track_tokens = track_token_usage
         self._flush_threshold = flush_threshold
         self._progress_reporter = progress_reporter
@@ -319,6 +325,12 @@ class RunJournal(BaseCallbackHandler):
 
     # -- Lifecycle callbacks --
 
+    def _private_output(self, run_id, tags=None) -> bool:
+        rid = str(run_id)
+        if TAG_PRIVATE_OUTPUT in (tags or []):
+            self._private_output_runs.add(rid)
+        return rid in self._private_output_runs
+
     @staticmethod
     def _message_text(message: BaseMessage) -> str:
         """Extract displayable text from a message's mixed content shape."""
@@ -354,6 +366,8 @@ class RunJournal(BaseCallbackHandler):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
+        if self._private_output(run_id, tags):
+            return
         caller = self._identify_caller(tags)
         if parent_run_id is None:
             # Root graph invocation — emit a single trace event for the run start.
@@ -373,11 +387,22 @@ class RunJournal(BaseCallbackHandler):
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
+        if self._private_output(run_id, kwargs.get("tags")):
+            return
         # Nested chain ends fire for internal graph nodes; only the root chain
         # represents the user-visible run lifecycle.
         if parent_run_id is not None:
             return
         self._reconcile_final_tool_messages(outputs)
+        # Private Lead calls never journal raw responses. The native graph's
+        # final social message is the post-commit projection, not model output.
+        if self._private_lead_output and isinstance(outputs, Mapping) and "social" in outputs:
+            messages = self._final_output_messages(outputs)
+            message = messages[-1] if messages else None
+            if isinstance(message, AIMessage) and isinstance(message.content, str) and message.content and not message.tool_calls:
+                self._put(event_type=LLM_AI_RESPONSE_EVENT.event_type, category=LLM_AI_RESPONSE_EVENT.category, content=message.model_dump(), metadata={"caller": "lead_agent"})
+                self._record_message_summary(message, caller="lead_agent")
+            self._private_lead_output = False
         self._put(
             event_type=RUN_END_EVENT.event_type,
             category=RUN_END_EVENT.category,
@@ -387,6 +412,8 @@ class RunJournal(BaseCallbackHandler):
         self._flush_sync()
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        if self._private_output(run_id, kwargs.get("tags")):
+            return
         self._put(
             event_type=RUN_ERROR_EVENT.event_type,
             category=RUN_ERROR_EVENT.category,
@@ -416,6 +443,8 @@ class RunJournal(BaseCallbackHandler):
         self._llm_start_times[rid] = time.monotonic()
         self._llm_call_index += 1
         self._seen_llm_starts.add(rid)
+        if self._private_output(run_id, tags):
+            return
 
         logger.debug(
             "on_chat_model_start %s: tags=%s num_batches=%d message_counts=%s",
@@ -447,6 +476,7 @@ class RunJournal(BaseCallbackHandler):
     def on_llm_start(self, serialized: dict, prompts: list[str], *, run_id: UUID, parent_run_id: UUID | None = None, tags: list[str] | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None:
         # Fallback: on_chat_model_start is preferred. This just tracks latency.
         self._llm_start_times[str(run_id)] = time.monotonic()
+        self._private_output(run_id, tags)
 
     def on_llm_end(
         self,
@@ -467,16 +497,20 @@ class RunJournal(BaseCallbackHandler):
         callback_caller = self._identify_caller(tags)
         is_canonical_callback = rid not in self._counted_message_llm_run_ids
         caller = self._llm_response_callers.get(rid, callback_caller)
+        private = self._private_output(run_id, tags)
+        if private and caller == "lead_agent":
+            self._private_lead_output = True
         logger.debug("on_llm_end %s: tags=%s", run_id, tags)
         for generation in response.generations:
             for gen in generation:
                 if hasattr(gen, "message"):
                     messages.append(gen.message)
                 else:
-                    logger.warning(f"on_llm_end {run_id}: generation has no message attribute: {gen}")
+                    if not private:
+                        logger.warning(f"on_llm_end {run_id}: generation has no message attribute: {gen}")
 
         for message in messages:
-            if is_canonical_callback:
+            if is_canonical_callback and not private:
                 self._remember_current_run_tool_calls(message, caller=caller)
 
             # Latency
@@ -489,7 +523,7 @@ class RunJournal(BaseCallbackHandler):
             # callback returns, including nested token-detail mappings.
             usage_dict = deepcopy(dict(usage)) if usage else {}
             additional_kwargs = getattr(message, "additional_kwargs", None) or {}
-            if is_canonical_callback and isinstance(additional_kwargs, dict) and additional_kwargs.get("deerflow_error_fallback"):
+            if is_canonical_callback and not private and isinstance(additional_kwargs, dict) and additional_kwargs.get("deerflow_error_fallback"):
                 self._had_llm_error_fallback = True
                 detail = additional_kwargs.get("error_detail")
                 reason = additional_kwargs.get("error_reason")
@@ -509,19 +543,27 @@ class RunJournal(BaseCallbackHandler):
                 call_index = self._llm_call_index
                 self._seen_llm_starts.add(rid)
 
-            response_events.append(
-                self._make_event(
-                    event_type=LLM_AI_RESPONSE_EVENT.event_type,
-                    category=LLM_AI_RESPONSE_EVENT.category,
-                    content=message.model_dump(),
-                    metadata={
-                        "caller": caller,
-                        "usage": usage_dict,
-                        "latency_ms": latency_ms,
-                        "llm_call_index": call_index,
-                    },
+            if private and is_canonical_callback:
+                self._put(
+                    event_type=MIDDLEWARE_EVENT_PATTERN.event_type("private_model_usage"),
+                    category=MIDDLEWARE_EVENT_PATTERN.category,
+                    content={},
+                    metadata={"caller": caller, "usage": usage_dict, "latency_ms": latency_ms, "llm_call_index": call_index},
                 )
-            )
+            if not private:
+                response_events.append(
+                    self._make_event(
+                        event_type=LLM_AI_RESPONSE_EVENT.event_type,
+                        category=LLM_AI_RESPONSE_EVENT.category,
+                        content=message.model_dump(),
+                        metadata={
+                            "caller": caller,
+                            "usage": usage_dict,
+                            "latency_ms": latency_ms,
+                            "llm_call_index": call_index,
+                        },
+                    )
+                )
 
             # Token accumulation (dedup by langchain run_id to avoid double-counting
             # when the callback fires more than once for the same response)
@@ -554,7 +596,10 @@ class RunJournal(BaseCallbackHandler):
 
                     should_schedule_progress = True
 
-        if messages:
+        if private:
+            self._counted_message_llm_run_ids.add(rid)
+            self._llm_response_callers[rid] = caller
+        elif messages:
             self._queue_llm_response_events(
                 str(run_id),
                 response_events,
@@ -567,6 +612,8 @@ class RunJournal(BaseCallbackHandler):
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._llm_start_times.pop(str(run_id), None)
+        if self._private_output(run_id, kwargs.get("tags")):
+            return
         self._put(
             event_type=LLM_ERROR_EVENT.event_type,
             category=LLM_ERROR_EVENT.category,
@@ -1170,6 +1217,8 @@ class RunJournal(BaseCallbackHandler):
         self._counted_external_source_ids.clear()
         self._counted_message_llm_run_ids.clear()
         self._llm_response_callers.clear()
+        self._private_output_runs.clear()
+        self._private_lead_output = False
         self._llm_start_times.clear()
         self._seen_llm_starts.clear()
         self._current_run_tool_call_names.clear()

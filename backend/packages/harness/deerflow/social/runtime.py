@@ -11,13 +11,14 @@ from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import Command
 
 from deerflow.persistence.social import SocialConflictError, SocialRepository
+from deerflow.runtime.journal import TAG_PRIVATE_OUTPUT
 from deerflow.social.context import RelationshipMemoryItem, RelationshipSnapshot, SelfMemoryItem, SocialContextSnapshot, TurnContext
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_text
 from deerflow.social.middleware import SocialContextMiddleware
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
 from deerflow.social.persona.selector import AutomaticPersonaSelector
-from deerflow.social.turns import commit_turn, contact_blocked, parse_turn_result, receipt_status
+from deerflow.social.turns import commit_turn, contact_blocked, parse_turn_result, private_output_text, receipt_status
 from deerflow.utils.file_io import run_file_io
 
 TURN_OUTPUT_PROMPT = (
@@ -186,8 +187,14 @@ class SocialTurnMiddleware(SocialContextMiddleware):
         request = self._inject(request)
         # The normal create_agent handler still binds tools and invokes the same
         # model. Suppress its callbacks, including nonstreaming on_llm_end frames.
-        model = request.model.model_copy(update={"tags": [*(request.model.tags or []), TAG_NOSTREAM], "disable_streaming": True})
-        response = await handler(request.override(model=model, model_settings={**request.model_settings, "stream": False}))
+        model = request.model.model_copy(update={"tags": [*(request.model.tags or []), TAG_NOSTREAM, TAG_PRIVATE_OUTPUT], "disable_streaming": True})
+        try:
+            response = await handler(request.override(model=model, model_settings={**request.model_settings, "stream": False}))
+        except Exception:
+            # Provider exceptions may embed raw model content. Do not propagate
+            # it through root chain-error/history callbacks or retry generation.
+            runtime.finished = True
+            return ModelResponse(result=[AIMessage(content="")])
         message = response.result[-1]
         if not isinstance(message, AIMessage):
             raise ValueError("social model must return an assistant message")
@@ -198,7 +205,7 @@ class SocialTurnMiddleware(SocialContextMiddleware):
             return ModelResponse(result=[AIMessage(content="", tool_calls=message.tool_calls, id=message.id)])
         runtime.finished = True
         try:
-            result = parse_turn_result(message.content)
+            result = parse_turn_result(private_output_text(message.content))
             saved = await commit_turn(runtime.repository, runtime.snapshot, event_id=runtime.binding.event_id, result=result)
         except (ValueError, TypeError, SocialConflictError):
             runtime.snapshot = await runtime.repository.restore(runtime.binding.scope)

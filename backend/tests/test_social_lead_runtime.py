@@ -716,3 +716,147 @@ async def test_crashed_old_attempt_cannot_reply_after_a_new_creator_event(monkey
     result = await graph.ainvoke({"messages": [HumanMessage(content="hi")]}, config)
     assert not main.seen and result["messages"][-1].content == ""
     assert await repo.restore(SCOPE) == winner
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "parse", "cas", "boundary"])
+async def test_private_model_calls_never_enter_actual_journal_or_history(monkeypatch, repo, failure):
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from deerflow.runtime.events.store.memory import MemoryRunEventStore
+    from deerflow.runtime.journal import RunJournal, build_branch_history_seed_events
+
+    store = MemoryRunEventStore()
+    journal = RunJournal("private-run", "private-thread", store, flush_threshold=1)
+    selector = ScriptedModel(
+        responses=[AIMessage(content='{"action":"stay","persona_id":"relaxed_wit","confidence":1,"evidence_refs":["ref1"],"reason":"PRIVATE_SELECTOR"}', usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})]
+    )
+    payload = '{"reply":"hello","decision_note":"PRIVATE_DECISION","state_delta":[]}' if failure != "parse" else "PRIVATE_MALFORMED"
+    main = ScriptedModel(responses=[AIMessage(content=payload, usage_metadata={"input_tokens": 7, "output_tokens": 4, "total_tokens": 11})])
+    graph, config = await assembly(monkeypatch, repo, main, binding_changes={"selector": AutomaticPersonaSelector(selector)})
+    config["callbacks"] = [journal]
+    graph.checkpointer = InMemorySaver()
+    config["configurable"] = {**config.get("configurable", {}), "thread_id": "private-thread"}
+    original_commit = repo.commit_turn
+    precommit_events = []
+
+    async def inspect_before_commit(*args, **kwargs):
+        await journal.flush()
+        precommit_events.extend(await store.list_events("private-thread", "private-run"))
+        if failure == "cas":
+            await repo.record_event(SCOPE, ExternalEvent("new", "ref-new", "creator_message", "newer"))
+        if failure == "boundary":
+            await repo.set_boundaries(SCOPE, expected_revision=2, update=BoundaryUpdate(True, True, False, ("ref1",)))
+        return await original_commit(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "commit_turn", inspect_before_commit)
+    result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+    await journal.flush()
+    events = await store.list_events("private-thread", "private-run")
+    history = build_branch_history_seed_events(result["messages"], thread_id="branch", run_id_prefix="seed", parent_thread_id="private-thread")
+    saved = await repo.restore(SCOPE)
+    checkpoints = [checkpoint.values async for checkpoint in graph.aget_state_history(config)]
+    serialized = repr((precommit_events, events, history, checkpoints, journal.get_completion_data()))
+    for secret in ("PRIVATE_DECISION", "state_delta", "PRIVATE_SELECTOR", "PRIVATE_MALFORMED", saved.persona_evaluation["token"]):
+        assert secret not in serialized
+    assert not any(event["event_type"] == "llm.ai.response" for event in precommit_events)
+    replies = [event["content"]["content"] for event in events if event["event_type"] == "llm.ai.response"]
+    assert replies == (["hello"] if failure is None else [])
+    assert len(saved.outbound) == (1 if failure is None else 0)
+    assert journal.get_completion_data()["total_tokens"] == 16
+    await journal.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        ([{"type": "text", "text": '{"reply":"hello"}'}], "hello"),
+        ([{"type": "thinking", "thinking": "PRIVATE_REASONING", "signature": "PRIVATE_SIGNATURE"}, {"type": "text", "text": '{"reply":"hello"}'}], "hello"),
+        ([{"type": "reasoning", "reasoning": "PRIVATE_REASONING"}, {"type": "text", "text": '{"reply":'}, {"type": "text", "text": '"hello"}'}], "hello"),
+        ([{"type": "text", "text": '{"reply":"hello"}', "citations": [{"source": "PRIVATE_CITATION"}]}], "hello"),
+        ([{"type": "text", "text": '{"reply":"hello"}'}, {"type": "image", "source": "PRIVATE_IMAGE"}], ""),
+        ([{"type": "text", "text": '{"reply":"hello"}', "image": "PRIVATE_IMAGE"}], ""),
+        ([{"type": "text", "text": 42}], ""),
+        ([{"type": "text", "text": '{"reply":"hello"}'}, {"type": "text", "text": "{}"}], ""),
+        ([{"type": "thinking", "thinking": '{"reply":"PRIVATE_REASONING"}'}], ""),
+    ],
+)
+async def test_native_content_blocks_are_parsed_privately(monkeypatch, repo, content, expected):
+    from deerflow.runtime.events.store.memory import MemoryRunEventStore
+    from deerflow.runtime.journal import RunJournal
+
+    store = MemoryRunEventStore()
+    journal = RunJournal("blocks", "blocks", store, flush_threshold=1)
+    main = ScriptedModel(responses=[AIMessage(content=content, additional_kwargs={"reasoning": "PRIVATE_REASONING"}, response_metadata={"signature": "PRIVATE_SIGNATURE"})])
+    graph, config = await assembly(monkeypatch, repo, main)
+    config["callbacks"] = [journal]
+    result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+    await journal.flush()
+    assert result["messages"][-1].content == expected
+    assert len(main.seen) == 1 and len((await repo.restore(SCOPE)).outbound) == bool(expected)
+    assert "PRIVATE_" not in repr((result, await store.list_events("blocks", "blocks"), journal.get_completion_data()))
+    await journal.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_private_provider_error_never_enters_graph_or_journal(monkeypatch, repo, cancelled):
+    from deerflow.runtime.events.store.memory import MemoryRunEventStore
+    from deerflow.runtime.journal import RunJournal
+
+    class BrokenModel(ScriptedModel):
+        def _generate(self, messages, **kwargs):
+            self.seen.append(messages)
+            if cancelled:
+                raise asyncio.CancelledError("PRIVATE_PROVIDER_CANCELLATION")
+            raise ValueError("PRIVATE_PROVIDER_ERROR with raw JSON")
+
+    store = MemoryRunEventStore()
+    journal = RunJournal("error", "error", store, flush_threshold=1)
+    main = BrokenModel(responses=[])
+    graph, config = await assembly(monkeypatch, repo, main)
+    config["callbacks"] = [journal]
+    result = await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+    assert result["messages"][-1].content == ""
+    await journal.flush()
+    assert len(main.seen) == 1
+    assert "PRIVATE_" not in repr(await store.list_events("error", "error"))
+    assert not (await repo.restore(SCOPE)).outbound
+    await journal.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dialect_name", ["postgresql", "sqlite"])
+async def test_native_write_locks_existing_legacy_relationship_before_boundary_read(dialect_name):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    statements = []
+    dialect = postgresql.dialect() if dialect_name == "postgresql" else sqlite.dialect()
+
+    class Session:
+        def get_bind(self):
+            return SimpleNamespace(dialect=dialect)
+
+        async def execute(self, statement, parameters=None):
+            statements.append((str(statement.compile(dialect=dialect, compile_kwargs={"literal_binds": True})), parameters))
+
+    @asynccontextmanager
+    async def transaction():
+        yield Session()
+
+    repository = SocialRepository(SimpleNamespace(begin=transaction))
+    async with repository._write(SCOPE):
+        statements.append(("boundary-read-and-outbox-write", None))
+    if dialect_name == "postgresql":
+        assert "pg_advisory_xact_lock" in statements[0][0]
+        assert len(statements) == 3
+        sql = statements[1][0]
+        assert "FOR UPDATE" in sql and "creator_agent_relationship" in sql
+        assert "'owner'" in sql and "'account'" in sql and "'creator'" in sql
+        assert statements[2][0] == "boundary-read-and-outbox-write"
+    else:
+        assert statements == [("BEGIN IMMEDIATE", None), ("boundary-read-and-outbox-write", None)]

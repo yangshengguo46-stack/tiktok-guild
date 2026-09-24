@@ -66,6 +66,13 @@ title/memory/skill/sandbox-lifecycle and fallback/retry middleware do not run
 in social mode; unsupported middleware fails assembly rather than silently
 discarding an unknown policy. Ordinary operator Chat is unchanged.
 
+Social main-model and selector calls also carry the native private-output tag:
+`nostream` alone does not prevent RunJournal persistence. Only post-commit reply
+text enters ordinary graph/journal history; private calls retain token/latency
+accounting without prompt/output/error payloads. Native text blocks are normalized
+privately before strict JSON parsing. Thinking/reasoning/signatures are discarded;
+unknown non-text modalities or malformed blocks reject the whole turn.
+
 Automatic selection uses durable `claim_persona_evaluation` and
 `finish_persona_evaluation` calls. A host-only random token identifies one
 attempt per scoped creator event, with conversational revision and effective
@@ -85,6 +92,10 @@ and NO_REPLY may be persisted without outbound; the runtime itself short
 circuits blocked turns before generation. Receipt context is projected from
 action history: none/only-pending -> none; any unknown -> unknown; otherwise
 accepted/delivered/failed -> known. Persisted raw receipt values are not rewritten.
+PostgreSQL scoped writes take the account advisory lock and then `FOR UPDATE` on
+the existing owner/account/person relationship row before reading any snapshot.
+This serializes legacy DNC UPDATE writers through the native outbox transaction;
+those legacy writers do not share the advisory lock. SQLite keeps BEGIN IMMEDIATE.
 Generic relationship notes remain typed sourced notes in bounded data context;
 they are never relabeled as claims, topics or preferences. `TurnContext.source_ref`
 is optional for legacy constructors and comes only from the restored scoped

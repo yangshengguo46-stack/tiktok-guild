@@ -181,6 +181,20 @@ class SocialRepository:
                 if key >= 2**63:
                     key -= 2**64
                 await session.execute(sa.text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+                if isinstance(scope, SocialScope):
+                    # Legacy DNC updates do not take the native advisory lock.
+                    # Lock their exact row before any snapshot read; PostgreSQL
+                    # UPDATE writers then serialize through the outbox commit.
+                    # A valid creator turn already has this relationship row.
+                    await session.execute(
+                        sa.select(CreatorAgentRelationshipRow.owner_user_id)
+                        .where(
+                            CreatorAgentRelationshipRow.owner_user_id == scope.owner_user_id,
+                            CreatorAgentRelationshipRow.account_id == scope.account_id,
+                            CreatorAgentRelationshipRow.creator_uid == scope.person_ref,
+                        )
+                        .with_for_update()
+                    )
             else:
                 raise ValueError("social persistence supports SQLite and PostgreSQL")
             yield session

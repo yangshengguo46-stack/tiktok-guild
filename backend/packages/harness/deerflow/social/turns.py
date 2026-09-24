@@ -16,6 +16,33 @@ def _unique(pairs):
     return result
 
 
+def private_output_text(content: object) -> str:
+    """Normalize only native text blocks; reasoning and signatures stay private.
+
+    Unknown modalities are not silently discarded: their presence makes the
+    final answer ambiguous and invalidates the whole turn.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list) or len(content) > 128:
+        raise ValueError("unsupported social output content")
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+            if set(block) - {"type", "text", "id", "index", "annotations", "citations", "extras", "signature"}:
+                raise ValueError("ambiguous social text block")
+            parts.append(block["text"])
+        elif isinstance(block, dict) and isinstance(block.get("type"), str) and block["type"] in {"thinking", "reasoning", "redacted_thinking"}:
+            continue
+        else:
+            raise ValueError("unsupported social output block")
+    if sum(map(len, parts)) > 65536:
+        raise ValueError("turn must be bounded JSON text")
+    return "".join(parts)
+
+
 def parse_turn_result(content: object) -> TurnResult:
     """Accept one bounded JSON object, never markdown, extensions or coercion."""
     if not isinstance(content, str) or len(content) > 65536:

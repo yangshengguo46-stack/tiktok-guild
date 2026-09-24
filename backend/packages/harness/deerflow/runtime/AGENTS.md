@@ -1,3 +1,20 @@
+### Private native model output
+
+Host-tagged `deerflow:private_output` model calls are accounting-only in
+`RunJournal`: no prompt, raw response, provider-error text, message summary or
+tool-call bookkeeping enters event/history storage. Their existing token
+accumulation remains active, and `middleware:private_model_usage` records only
+usage, latency and call attribution. The run id retains privacy when a provider
+replays a callback without tags. Tagged chain starts/ends/errors are also private.
+The tag is distinct from LangGraph `nostream`; ordinary operator and existing
+nostream journaling are unchanged. A native social graph returns only a committed
+reply (or empty silence), and root chain-end reconciles that sanitized final reply
+into `llm.ai.response`. Raw private output must never be placed in graph state:
+checkpoint reads and branch-history seeding consume that state independently of
+the journal. Social provider exceptions are contained before reaching root chain
+error callbacks. No message text or arbitrary response metadata belongs in private
+usage events.
+
 ### Stream Bridge Heartbeats
 
 Memory and Redis bridges take their default idle heartbeat cadence from the startup-only `stream_bridge.heartbeat_interval_seconds` setting. Keep the default on the bridge instance so SSE, `/wait`, and internal subscribers stay aligned; an explicit `subscribe(..., heartbeat_interval=...)` remains a per-subscription override.

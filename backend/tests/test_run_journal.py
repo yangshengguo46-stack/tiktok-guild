@@ -20,6 +20,31 @@ from deerflow.runtime.journal import RunJournal
 from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("tags, visible", [(["lead_agent"], True), (["lead_agent", "nostream"], True), (["lead_agent", "deerflow:private_output"], False)])
+async def test_private_output_tag_hides_messages_but_keeps_usage_and_latency(tags, visible):
+    store = MemoryRunEventStore()
+    journal = RunJournal("private", "private", store, flush_threshold=1)
+    run_id = uuid4()
+    journal.on_chat_model_start({}, [[HumanMessage(content="PRIVATE_PROMPT")]], run_id=run_id, tags=tags)
+    response = LLMResult(generations=[[ChatGeneration(message=AIMessage(content="PRIVATE_OUTPUT", usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}))]])
+    journal.on_llm_end(response, run_id=run_id, tags=tags)
+    # Providers may omit tags on a duplicate usage callback.
+    if not visible:
+        journal.on_llm_end(response, run_id=run_id)
+        journal.on_llm_error(ValueError("PRIVATE_ERROR"), run_id=run_id)
+        journal.on_chain_end({"messages": [AIMessage(content="PRIVATE_CHAIN")]}, run_id=uuid4(), tags=tags)
+        journal.on_chain_error(ValueError("PRIVATE_CHAIN_ERROR"), run_id=uuid4(), tags=tags)
+    await journal.flush()
+    events = await store.list_events("private", "private")
+    assert ("PRIVATE_OUTPUT" in repr(events)) is visible
+    assert ("PRIVATE_PROMPT" in repr(events)) is visible
+    assert "PRIVATE_ERROR" not in repr(events) and "PRIVATE_CHAIN" not in repr(events)
+    assert journal.get_completion_data()["total_tokens"] == 5
+    assert any(event["metadata"].get("latency_ms") is not None for event in events)
+    await journal.close()
+
+
 def test_run_journal_is_marked_as_loop_bound():
     assert RunJournal.deerflow_loop_bound is True
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
 
+from deerflow.runtime.journal import TAG_PRIVATE_OUTPUT
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
 from deerflow.utils.file_io import run_file_io
@@ -82,6 +83,7 @@ class AutomaticPersonaSelector:
             if TAG_NOSTREAM not in tags:
                 tags.append(TAG_NOSTREAM)
             tags.append("middleware:social_persona_selector")
+            tags.append(TAG_PRIVATE_OUTPUT)
             self._bound_model = self._model.with_config(tags=tags) if hasattr(self._model, "with_config") else self._model
         return self._bound_model
 
