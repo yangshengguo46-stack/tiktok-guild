@@ -13,11 +13,20 @@ from langgraph.constants import TAG_NOSTREAM
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import PersonaProfile, ProfileScope
 
+_DEFAULT_TIMEOUT_SECONDS = 45.0
+
 _SYSTEM = (
     "Generate an expression-only persona profile candidate. Identity, self memory, role, relationship, "
     "facts, commitments and permissions are immutable and must not be changed or inferred. "
-    "Return only JSON with overrides, diff_summary, examples. Examples must be synthetic and "
-    "must not represent actual conversation history. Provide two or three examples."
+    "Return exactly one JSON object with exactly these top-level JSON keys: overrides, diff_summary, examples. "
+    "overrides must be a flat JSON object containing expression-only changes and must not rewrite immutable fields. "
+    "Its keys must be a subset of exactly: core, attention, voice, humor, disagreement, care, initiative, interests, length, questions, language. "
+    "Every value must be a string, except interests which must be an array of strings. "
+    "Do not use nested objects such as style or response_format. "
+    "diff_summary must be a non-empty string of 1..512 characters. "
+    "examples must be a JSON array of exactly 2 or 3 non-empty strings, each 1..512 characters. "
+    "Examples must be synthetic and must not represent actual conversation history. "
+    "Do not include markdown, code fences, or commentary."
 )
 
 
@@ -39,7 +48,7 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
 
 
 class PersonaProfileGenerator:
-    def __init__(self, model=None, *, model_name: str | None = None, app_config=None, timeout_seconds: float = 15.0):
+    def __init__(self, model=None, *, model_name: str | None = None, app_config=None, timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS):
         self._model = model
         self._bound_model = None
         self._model_name = model_name

@@ -1,19 +1,108 @@
 {
-  "task": 8,
-  "status": "blocked_no_worktree_model_configuration",
-  "baseline_commit": "8202b685d7bc53d090a008b242aed412696a9ad5",
-  "worktree_root_config_exists": false,
-  "worktree_backend_config_exists": false,
-  "config_override_present": false,
-  "error_type": "FileNotFoundError",
-  "sanitized_error": "Config file specified by param config_path not found at <task-worktree>/config.yaml",
-  "checked_with": "From backend: AppConfig.from_file(str(Path.cwd().parent / 'config.yaml'))",
-  "template_observation": "ops/guild-runtime/config/config.yaml is a tracked deployment template, not an active worktree config. It selects CodexChatModel/gpt-5.4; no deployment bootstrap, credential discovery, or live configuration was performed.",
-  "model_calls": 0,
-  "model": null,
-  "duration_seconds": null,
+  "task": 10,
+  "status": "blocked_model_timeout_after_contract",
+  "date": "2026-09-24",
+  "config_path": "ops/guild-runtime/config/config.yaml",
+  "config_loaded": true,
+  "configured_name": "codex",
+  "provider_class": "CodexChatModel",
+  "model": "gpt-6-sol",
+  "config_change": {
+    "old_model": "gpt-5.4",
+    "old_sha256": "7e1a78e3c758e28cf3a6b51a71e1e8fa865b83478a160f8ba2c6274f69b21fce",
+    "new_model": "gpt-6-sol",
+    "new_sha256": "930020f8d924c0d4c4a94616ae1025a34f81d97c616664f30756b04e0f0001b5"
+  },
+  "credential_loaded": true,
+  "probe": "non-sensitive PersonaProfileGenerator.generate with an operator expression requirement and no creator facts",
+  "model_calls": 7,
+  "attempts": [
+    {
+      "number": 1,
+      "reasoning_effort": "none",
+      "duration_seconds": 1.739,
+      "http_status": 400,
+      "bounded_error": null
+    },
+    {
+      "number": 2,
+      "reasoning_effort": "none",
+      "duration_seconds": 1.288,
+      "http_status": 400,
+      "bounded_error": {
+        "type": null,
+        "code": null,
+        "message": null,
+        "param": null
+      }
+    },
+    {
+      "number": 3,
+      "reasoning_effort": "low",
+      "duration_seconds": null,
+      "http_status": 400,
+      "bounded_error": null,
+      "note": "Authorized verification after a TDD hypothesis; the hypothesis did not resolve the failure and the code change was reverted."
+    },
+    {
+      "number": 4,
+      "reasoning_effort": "none",
+      "duration_seconds": 1.384,
+      "http_status": 400,
+      "content_type": "application/json",
+      "body_byte_length": 90,
+      "body_sha256": "c9c572447408d4d70db3d3084ee56fea6f4f7cc2aac425919b86fb2acb222b12",
+      "redacted_body": "{\"detail\":\"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.\"}"
+    },
+    {
+      "number": 5,
+      "model": "gpt-6-sol",
+      "duration_seconds": null,
+      "provider_http_error": false,
+      "error_type": "ValueError",
+      "sanitized_error": "invalid generator explanation",
+      "raw_output": null,
+      "usage_metadata": null,
+      "note": "The provider/model call returned and entered PersonaProfileGenerator validation, but the old probe harness printed recorder data only on full success. Raw output, usage and exact duration remain unavailable for this attempt; later authorized attempts captured the bounded result."
+    },
+    {
+      "number": 6,
+      "model": "gpt-6-sol",
+      "duration_seconds": 20.532,
+      "provider_http_error": false,
+      "error_type": "ValueError",
+      "sanitized_error": "persona behavior contains non-expression fields",
+      "raw_output": "{\"overrides\":{\"style\":{\"verbosity\":\"short\",\"directness\":\"high\",\"warmth\":\"preserved\",\"language\":\"zh-CN\"},\"response_format\":{\"prefer_concise_sentences\":true,\"omit_unneeded_preambles\":true,\"prioritize_actionable_wording\":true}},\"diff_summary\":\"仅调整表达层：更短、更直接，同时保留自然、友好的温度；不改动身份、记忆、角色、关系、事实、承诺或权限。\",\"examples\":[\"可以。重点是：先做这一步。\",\"我明白。建议直接选方案A，最省事。\",\"这部分暂时不确定，我会明确标注。\"]}",
+      "usage_metadata": {
+        "input_tokens": 221,
+        "output_tokens": 147,
+        "total_tokens": 368,
+        "reasoning_tokens": 0
+      },
+      "note": "After the initial top-level/length/no-fence contract repair, the model returned a valid top-level explanation, but the strict PersonaProfile parser rejected nested style/response_format overrides as non-expression fields. The flat override whitelist was added only before attempt 7."
+    },
+    {
+      "number": 7,
+      "model": "gpt-6-sol",
+      "duration_seconds": 30.003,
+      "provider_http_error": null,
+      "error_type": "ValueError",
+      "sanitized_error": "invalid generator response",
+      "raw_output": null,
+      "usage_metadata": null,
+      "note": "With the flat override whitelist added to the system prompt, the final authorized probe reached the 30-second PersonaProfileGenerator timeout without a recorder reply. No raw output or usage was available and no further call was sent."
+    }
+  ],
+  "error_type": "ValueError",
+  "sanitized_error": "invalid generator response",
+  "raw_output": null,
+  "usage_metadata": null,
+  "duration_seconds": 30.003,
   "tokens": null,
   "cost": null,
-  "identity_boundary": "Identity registry is not connected to operator admission. The host-only immutable_identity_facts map is empty when no trusted resolver is configured. No claim is made that identity facts were supplied for model verification; profile schema cannot mutate identity/facts/permissions.",
-  "evidence_boundary": "Passing generation tests use deterministic fake model transport only. They do not demonstrate real model quality, provider access, TikTok sending, invitation, or receipt. No live config, credentials, or DB was accessed."
+  "candidate": null,
+  "activated": false,
+  "platform_writes": 0,
+  "identity_boundary": "No creator identity, relationship, commitment, permission, TikTok data, or platform channel was supplied. The requirement changed expression only.",
+  "evidence_boundary": "The actual start config and credential loaded. Four calls proved that gpt-5.4 was unsupported for Codex with this ChatGPT account. The ignored start config was changed to the supported gpt-6-sol model. The sixth call returned a valid top-level JSON explanation with usage, then strict PersonaProfile validation rejected nested style/response_format overrides as non-expression fields. After the prompt was repaired with a flat whitelist and scalar/array value contract, the seventh and final authorized call timed out at 30.003 seconds before a recorder reply. No candidate was activated and no platform write occurred. Model transport is verified, but profile generation quality and WP1 multi-turn semantics remain blocked."
 }

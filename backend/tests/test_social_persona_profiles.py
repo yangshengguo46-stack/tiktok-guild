@@ -203,6 +203,38 @@ async def test_generator_returns_immutable_unactivated_candidate_with_synthetic_
 
 
 @pytest.mark.asyncio
+async def test_generator_prompt_states_exact_json_contract_and_no_commentary():
+    model = FakeModel('{"overrides":{"voice":"brief and warm"},"diff_summary":"Shorter replies","examples":["Synthetic: Hello briefly.","Synthetic: Thanks for sharing."]}')
+    generator = PersonaProfileGenerator(model=model)
+    base = PersonaProfile(profile_id="base", version="1", base_template_ref="relaxed_wit@1.0.1", overrides={}, created_by="operator", basis_refs=())
+
+    await generator.generate(
+        base_profile=base,
+        profile_id="brief",
+        version="1",
+        requirement="Keep replies short",
+        creator_preferences=(),
+        immutable_identity_facts={"name": "Guild AI"},
+        basis_refs=("operator:req-1",),
+        valid_basis_refs=("operator:req-1",),
+    )
+
+    system_prompt = model.calls[0][0][0].content
+    assert "exactly these top-level JSON keys: overrides, diff_summary, examples" in system_prompt
+    assert "overrides must be a flat JSON object" in system_prompt
+    assert "keys must be a subset of exactly: core, attention, voice, humor, disagreement, care, initiative, interests, length, questions, language" in system_prompt
+    assert "Every value must be a string, except interests which must be an array of strings" in system_prompt
+    assert "Do not use nested objects such as style or response_format" in system_prompt
+    assert "diff_summary must be a non-empty string of 1..512 characters" in system_prompt
+    assert "examples must be a JSON array of exactly 2 or 3 non-empty strings, each 1..512 characters" in system_prompt
+    assert "Do not include markdown, code fences, or commentary" in system_prompt
+
+
+def test_generator_default_timeout_covers_configured_model_latency():
+    assert PersonaProfileGenerator()._timeout_seconds >= 30
+
+
+@pytest.mark.asyncio
 async def test_generator_rejects_unknown_basis_and_identity_rewrite():
     model = FakeModel('{"overrides":{"identity":"human"},"diff_summary":"identity changed","examples":["Synthetic: one","Synthetic: two"]}')
     generator = PersonaProfileGenerator(model=model)

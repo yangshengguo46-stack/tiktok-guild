@@ -2,6 +2,25 @@
 
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
+## TikTok 公会项目边界（2026-09-24）
+
+本仓库是公会 Agent 的独立开发入口。产品唯一生效规格为用户提供的
+`CreatorAgent_FINAL_PERSONA_REV1_20260924.zip` 以及
+[`docs/superpowers/specs/2026-09-24-deerflow-auto-persona-design.md`](docs/superpowers/specs/2026-09-24-deerflow-auto-persona-design.md)
+中的“AI 自动切换人格”修订。当前事实以运行代码和现场验证为准。
+2026-09-23 及更早的审计、方案、招募运行时、关系摘要、方法卡和计划只是历史资料，
+不得当作当前实现或待执行台账。
+
+DeerFlow 默认 Lead 是唯一 Agent 运行入口。优先复用原生 Gateway、Channel、checkpoint、
+权限与前端；TKDesk 和 Guild Operator 各自拥有候选人与公会后台事实。旧后端改造
+全部作废，只保留原工作台 UI 的路由、导航、翻译和诚实占位。不得重新引入旧
+Rust bridge、Worker、独立业务账本或后台投影来替代原生改造。人格是有版本的表达资产，
+由 AI 根据有来源的主播信息自动选择；人格与子 Agent 不强制绑定。
+
+真实 TikTok 来信、发信、正式邀约和回执尚未验证。任何平台写入必须先取得
+可核验的通道、身份、授权、去重与回执证据；不得把草稿、MCP 连通或离线测试
+称为已发送或已完成公会运营。
+
 It is the **monorepo orientation layer**: it maps the whole repo and points to the
 module guides that own the depth. For anything inside a module, read that module's
 guide rather than expecting full detail here:

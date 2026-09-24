@@ -75,6 +75,31 @@ _SCRIPT_REFERENCE = re.compile(r"\S*[\w.-]+\.sh\b")
 # A script name inside a usage string or hint is prose, not an invocation.
 _MESSAGE_COMMAND = re.compile(r"\b(echo|printf|cat)\b")
 
+# A sibling script is independent of its executable bit only when an
+# interpreter/builtin is the actual shell command.  Text such as
+# ``mode=source`` or ``runner-source`` must not earn that exemption.
+_INTERPRETED_SCRIPT_COMMAND = re.compile(
+    r"(?:^|.*(?:&&|\|\||;)\s*)"
+    r"(?:if\s+)?(?:!\s+)?(?:exec\s+)?"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*"
+    r"(?:bash|source|\.)\s+$"
+)
+
+
+def _is_bare_script_reference(line: str, *, current_script: str) -> bool:
+    for match in _SCRIPT_REFERENCE.finditer(line):
+        reference = match.group(0)
+        before = line[: match.start()]
+        if "://" in reference:  # a download URL, not a local script
+            continue
+        if reference.endswith(current_script):  # usage string / log prefix
+            continue
+        if _MESSAGE_COMMAND.search(before):  # a hint printed to the user
+            continue
+        if not _INTERPRETED_SCRIPT_COMMAND.search(before):
+            return True
+    return False
+
 
 def _sibling_script_invocations() -> list[tuple[str, int, str]]:
     """Every line in scripts/*.sh that actually runs another shell script."""
@@ -84,19 +109,17 @@ def _sibling_script_invocations() -> list[tuple[str, int, str]]:
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            for match in _SCRIPT_REFERENCE.finditer(line):
-                reference = match.group(0)
-                before = line[: match.start()]
-                if "://" in reference:  # a download URL, not a local script
-                    continue
-                if reference.endswith(script.name):  # usage string / log prefix
-                    continue
-                if _MESSAGE_COMMAND.search(before):  # a hint printed to the user
-                    continue
-                if not re.search(r"\bbash\s+$", before):
-                    found.append((script.name, number, line))
-                    break
+            if _is_bare_script_reference(line, current_script=script.name):
+                found.append((script.name, number, line))
     return found
+
+
+def test_interpreter_words_only_exempt_real_shell_command_positions() -> None:
+    assert not _is_bare_script_reference('source "$SCRIPT_DIR/child.sh"', current_script="parent.sh")
+    assert not _is_bare_script_reference('. "$SCRIPT_DIR/child.sh"', current_script="parent.sh")
+    assert not _is_bare_script_reference('mode=dev source "$SCRIPT_DIR/child.sh"', current_script="parent.sh")
+    assert _is_bare_script_reference('mode=source "$SCRIPT_DIR/child.sh"', current_script="parent.sh")
+    assert _is_bare_script_reference('runner-source "$SCRIPT_DIR/child.sh"', current_script="parent.sh")
 
 
 def test_scripts_never_invoke_sibling_scripts_bare() -> None:

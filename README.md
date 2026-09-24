@@ -16,6 +16,22 @@ https://github.com/user-attachments/assets/a8bcadc4-e040-4cf2-8fda-dd768b999c18
 > [!NOTE]
 > **DeerFlow 2.0 is a ground-up rewrite.** It shares no code with v1. If you're looking for the original Deep Research framework, it's maintained on the [`1.x` branch](https://github.com/bytedance/deer-flow/tree/main-1.x) — contributions there are still welcome. Active development has moved to 2.0.
 
+## TikTok 公会 Social Runtime
+
+本 fork 已将公会社交闭环收入 DeerFlow 本体：有来源的外部事件通过原生
+Gateway/Channel 进入默认 Lead，在同一 checkpoint、权限和工具授权路径内恢复
+Identity、Self、Role、Relationship、EffectivePersona 与 TurnContext，然后产生
+`reply | tool | wait | no_reply` 并在披露结果前持久化。AI 依据当前主播的有来源
+证据自动选择表达人格，运营者无需在工作台手动切换；人格也不与子 Agent
+强制绑定。
+
+`/workspace/guild` 的旧工作台 UI 已原样保留，仍是诚实的未接入占位，不代表
+已连接 TikTok。当前确定性证据只覆盖本地合同、持久化、竞争冲突、重启、禁联、
+人工接管、未知回执与零部分流泄漏。真实 TikTok 收信、发信、正式邀约、
+送达/已读回执仍是 `unverified-external`；没有获得通道、身份、授权、去重和回执证据前，
+不得进行或宣称任何真实平台写入。完整验收见
+[`docs/verification/creator-agent/final-verification.md`](docs/verification/creator-agent/final-verification.md)。
+
 ## Official Website
 
 This fork provides native social profile management in authenticated session
@@ -28,7 +44,7 @@ are rejected rather than silently resolving to different profile content.
 Generation needs a configured model and a current operator message or explicitly
 selected scoped creator evidence. External channels, custom agents, subagents,
 bootstrap, PAT and auth-disabled runs do not receive management capabilities.
-The Task 8 worktree model probe is [blocked by missing active configuration](docs/verification/creator-agent/2026-09-24-task8-configured-model-probe.json);
+The configured-model probe [verified transport after the local start config moved to `gpt-6-sol`, but strict profile generation remains blocked by a parser rejection followed by the bounded final-call timeout](docs/verification/creator-agent/2026-09-24-task8-configured-model-probe.json);
 offline tests do not demonstrate real model quality or TikTok delivery.
 
 Learn more and see **real demos** on our [**official website**](https://deerflow.tech).
@@ -65,6 +81,7 @@ DeerFlow has newly integrated the intelligent search and crawling toolset indepe
 ## Table of Contents
 
 - [🦌 DeerFlow - 2.0](#-deerflow---20)
+  - [TikTok 公会 Social Runtime](#tiktok-公会-social-runtime)
   - [Official Website](#official-website)
   - [Coding Plan from ByteDance Volcengine](#coding-plan-from-bytedance-volcengine)
   - [InfoQuest](#infoquest)

@@ -782,6 +782,8 @@ def operator_management_for_request(request, config, *, thread_id, graph_input):
     if not all(_safe_surface(config.get(key, {})) for key in ("context", "configurable")):
         return None
     messages = graph_input.get("messages", []) if isinstance(graph_input, dict) else []
+    if messages is None:
+        messages = []
     admitted = {}
     for index, message in enumerate(messages):
         if is_genuine_user_message(message) and not message.additional_kwargs.get("hide_from_ui") and isinstance(message.content, str):
