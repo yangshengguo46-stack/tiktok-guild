@@ -47,6 +47,19 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def _normalize_expression_overrides(overrides: object) -> Mapping[str, object]:
+    """Convert JSON's interests array to the immutable profile representation."""
+    if not isinstance(overrides, Mapping):
+        raise ValueError("invalid generator overrides")
+    normalized = dict(overrides)
+    if "interests" in normalized:
+        interests = normalized["interests"]
+        if not isinstance(interests, (list, tuple)) or any(not isinstance(item, str) for item in interests):
+            raise ValueError("invalid generator interests")
+        normalized["interests"] = tuple(interests)
+    return normalized
+
+
 class PersonaProfileGenerator:
     def __init__(self, model=None, *, model_name: str | None = None, app_config=None, timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS):
         self._model = model
@@ -132,7 +145,8 @@ class PersonaProfileGenerator:
         summary, examples = raw["diff_summary"], raw["examples"]
         if not isinstance(summary, str) or not 0 < len(summary) <= 512 or not isinstance(examples, list) or not 2 <= len(examples) <= 3 or any(not isinstance(item, str) or not 0 < len(item) <= 512 for item in examples):
             raise ValueError("invalid generator explanation")
-        patch = PersonaProfile(profile_id=profile_id, version=version, base_template_ref=base_profile.base_template_ref, overrides=raw["overrides"], created_by="generated", basis_refs=basis_refs)
+        normalized_overrides = _normalize_expression_overrides(raw["overrides"])
+        patch = PersonaProfile(profile_id=profile_id, version=version, base_template_ref=base_profile.base_template_ref, overrides=normalized_overrides, created_by="generated", basis_refs=basis_refs)
         candidate = PersonaProfile(
             profile_id=profile_id,
             version=version,

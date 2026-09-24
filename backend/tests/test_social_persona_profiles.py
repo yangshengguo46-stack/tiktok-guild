@@ -203,6 +203,26 @@ async def test_generator_returns_immutable_unactivated_candidate_with_synthetic_
 
 
 @pytest.mark.asyncio
+async def test_generator_normalizes_json_interests_array_to_immutable_tuple():
+    model = FakeModel('{"overrides":{"interests":["tea"],"voice":"brief"},"diff_summary":"Shorter replies","examples":["Synthetic: Hello briefly.","Synthetic: Thanks for sharing."]}')
+    generator = PersonaProfileGenerator(model=model)
+    base = PersonaProfile(profile_id="base", version="1", base_template_ref="relaxed_wit@1.0.1", overrides={}, created_by="operator", basis_refs=())
+
+    result = await generator.generate(
+        base_profile=base,
+        profile_id="brief",
+        version="1",
+        requirement="Keep replies short",
+        creator_preferences=(),
+        immutable_identity_facts={"name": "Guild AI"},
+        basis_refs=("operator:req-1",),
+        valid_basis_refs=("operator:req-1",),
+    )
+
+    assert result.candidate.overrides["interests"] == ("tea",)
+
+
+@pytest.mark.asyncio
 async def test_generator_prompt_states_exact_json_contract_and_no_commentary():
     model = FakeModel('{"overrides":{"voice":"brief and warm"},"diff_summary":"Shorter replies","examples":["Synthetic: Hello briefly.","Synthetic: Thanks for sharing."]}')
     generator = PersonaProfileGenerator(model=model)
