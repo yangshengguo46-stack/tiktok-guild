@@ -1,0 +1,64 @@
+{
+  "mcpServers": {
+    "guild_operator": {
+      "enabled": true,
+      "required": true,
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/yangyucheng/plugins/tiktok-live-guild-operator/src/server.mjs"
+      ],
+      "cwd": "/Users/yangyucheng/plugins/tiktok-live-guild-operator",
+      "tool_name_prefix": false,
+      "enabled_tools": [
+        "guild_workspace",
+        "guild_creators",
+        "guild_recruitment",
+        "guild_messaging",
+        "guild_operations",
+        "guild_revenue",
+        "guild_governance",
+        "guild_intelligence"
+      ]
+    },
+    "tkdesk": {
+      "enabled": true,
+      "required": true,
+      "type": "stdio",
+      "command": "/Users/yangyucheng/plugins/tkdesk-agent/scripts/launch_mcp",
+      "args": [],
+      "cwd": "/Users/yangyucheng/plugins/tkdesk-agent",
+      "tool_name_prefix": false,
+      "enabled_tools": [
+        "status",
+        "core_configuration_status",
+        "original_country_catalog",
+        "mobile_authorization_status",
+        "clear_mobile_authorization",
+        "session_status",
+        "start_login",
+        "check_login",
+        "reset_session",
+        "create_discovery_run",
+        "configure_collection_route",
+        "verify_collection_route",
+        "collection_route_status",
+        "collection_backstage_preflight",
+        "start_run",
+        "pause_run",
+        "resume_run",
+        "cancel_run",
+        "get_run",
+        "list_runs",
+        "preview_collection_cleanup",
+        "commit_collection_cleanup",
+        "preview_candidates",
+        "query_candidates",
+        "check_candidate_qualifications",
+        "prepare_handoff",
+        "commit_handoff",
+        "audit_events"
+      ]
+    }
+  }
+}

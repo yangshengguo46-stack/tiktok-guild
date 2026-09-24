@@ -9,6 +9,10 @@ from deerflow.mcp.headers import illegal_header_value_reason
 logger = logging.getLogger(__name__)
 
 
+class McpServerConfigurationError(RuntimeError):
+    """An enabled required MCP server could not be configured or discovered."""
+
+
 def build_server_params(server_name: str, config: McpServerConfig) -> dict[str, Any]:
     """Build server parameters for MultiServerMCPClient.
 
@@ -30,6 +34,8 @@ def build_server_params(server_name: str, config: McpServerConfig) -> dict[str, 
         # Add environment variables if present
         if config.env:
             params["env"] = config.env
+        if config.cwd:
+            params["cwd"] = config.cwd
     elif transport_type in ("sse", "http"):
         if not config.url:
             raise ValueError(f"MCP server '{server_name}' with {transport_type} transport requires 'url' field")
@@ -75,6 +81,8 @@ def build_servers_config(extensions_config: ExtensionsConfig) -> dict[str, dict[
             servers_config[server_name] = build_server_params(server_name, server_config)
             logger.info(f"Configured MCP server: {server_name}")
         except Exception as e:
+            if server_config.required:
+                raise McpServerConfigurationError(f"Required MCP server '{server_name}' could not be configured: {e}") from e
             logger.error(f"Failed to configure MCP server '{server_name}': {e}")
 
     return servers_config

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { spawnForeground } from '../src/process.mjs';
+import { GUILD_EXTENSIONS_CONFIG } from '../src/constants.mjs';
 import { ensureGuildSoul } from '../src/guild-soul.mjs';
 import { formatDoctorReport, runDoctor } from './doctor.mjs';
 
@@ -28,7 +29,7 @@ export async function startRuntime({
       CI: 'true',
       PATH: `${pnpmBinRoot}${path.delimiter}${process.env.PATH ?? ''}`,
       DEER_FLOW_CONFIG_PATH: path.join(opsRoot, 'config', 'config.yaml'),
-      DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(opsRoot, 'config', 'extensions_config.json'),
+      DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG),
       DEER_FLOW_SKILLS_PATH: path.join(root, 'skills'),
       DEER_FLOW_HOME: path.join(root, 'backend', '.deer-flow'),
       DEER_FLOW_SOCIAL_ASSETS_PATH: path.join(

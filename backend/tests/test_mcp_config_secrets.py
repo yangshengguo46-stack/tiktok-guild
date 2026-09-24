@@ -177,7 +177,7 @@ def test_mask_scrubs_sensitive_extra_fields_but_preserves_safe_extra_fields():
 
     masked = _mask_server_config(server)
 
-    assert masked.model_extra["cwd"] == "/srv/mcp-workdir"
+    assert masked.cwd == "/srv/mcp-workdir"
     assert masked.model_extra["customFlag"] == "keep-me"
     assert masked.model_extra["api_key"] == "***"
     assert masked.model_extra["nested"] == {"refreshToken": "***", "safe": "visible"}
@@ -468,7 +468,7 @@ def test_merge_preserves_masked_sensitive_extra_values():
 
     merged = _merge_preserving_secrets(incoming, existing)
 
-    assert merged.model_extra["cwd"] == "/srv/new-workdir"
+    assert merged.cwd == "/srv/new-workdir"
     assert merged.model_extra["api_key"] == "real-extra-secret"
     assert merged.model_extra["nested"] == {"refreshToken": "real-refresh", "safe": "updated"}
     assert merged.model_extra["endpoints"] == [{"access_key": "real-access", "name": "prod"}]
@@ -912,7 +912,7 @@ async def test_update_mcp_configuration_preserves_server_extra_fields(monkeypatc
     assert playwright["cwd"] == "/srv/mcp-workdir"
     assert playwright["customFlag"] == "keep-me"
     assert playwright["api_key"] == "real-extra-secret"
-    assert response.mcp_servers["playwright"].model_extra["cwd"] == "/srv/mcp-workdir"
+    assert response.mcp_servers["playwright"].cwd == "/srv/mcp-workdir"
     assert response.mcp_servers["playwright"].model_extra["api_key"] == "***"
 
 

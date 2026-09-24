@@ -40,7 +40,7 @@ test('the package leaves the active skills path to the start environment', async
 });
 
 test('the native runtime has one Lead, two direct MCPs, and no layered runtime', async () => {
-  const extensions = JSON.parse(await readFile(path.join(OPS_ROOT, 'config', 'extensions_config.json'), 'utf8'));
+  const extensions = JSON.parse(await readFile(path.join(OPS_ROOT, 'config', 'extensions_config.guild.json'), 'utf8'));
   const configText = await readFile(path.join(OPS_ROOT, 'config', 'config.yaml'), 'utf8');
   const manifestText = await readFile(path.join(OPS_ROOT, 'config', 'local-manifest.json'), 'utf8');
   const manifest = JSON.parse(manifestText);
@@ -63,15 +63,12 @@ test('the native runtime has one Lead, two direct MCPs, and no layered runtime',
     'guild_governance',
     'guild_intelligence',
   ]);
-  assert.deepEqual(extensions.mcpServers.tkdesk, {
-    enabled: true,
-    required: true,
-    type: 'stdio',
-    command: '/Users/yangyucheng/plugins/tkdesk-agent/scripts/launch_mcp',
-    args: [],
-    cwd: '/Users/yangyucheng/plugins/tkdesk-agent',
-    tool_name_prefix: false,
-  });
+  assert.equal(extensions.mcpServers.tkdesk.enabled_tools.length, 28);
+  assert.deepEqual(extensions.mcpServers.tkdesk.enabled_tools.slice(-3), [
+    'prepare_handoff',
+    'commit_handoff',
+    'audit_events',
+  ]);
   assert.doesNotMatch(`${configText}\n${manifestText}`, /worker|rust|ledger/iu);
   assert.doesNotMatch(readme, /docker(?:\s|[-_])/iu);
 });

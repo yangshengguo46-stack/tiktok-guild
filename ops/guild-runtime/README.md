@@ -28,6 +28,8 @@ npm start
 
 `bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
+原生运行时只读受 Git 跟踪的 `config/extensions_config.guild.json`；它固定两个 MCP server 及它们的精确有序工具 allowlist。本机被 `.gitignore` 忽略的 `extensions_config.json` 不是这个公会运行时的配置来源。
+
 `doctor` 是只读的：它验证 fork 祖先、原生 social 模块和 0026 migration、附件 manifest/六份 `1.0.1` 人格、数据库 revision，以及两份固定 MCP schema-digest catalog。它不启动 MCP server，不创建或迁移数据库，也不调用 TikTok 业务写工具。Task 10 完成本机状态迁移前，缺失或旧版本数据库会被诚实报告为失败。
 
 ## 第一个安全提示

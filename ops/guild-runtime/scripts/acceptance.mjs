@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { runCommand } from '../src/process.mjs';
+import { GUILD_EXTENSIONS_CONFIG } from '../src/constants.mjs';
 import { inspectApprovedCatalogs, runDoctor } from './doctor.mjs';
 
 export async function runAcceptance({
@@ -20,7 +21,7 @@ export async function runAcceptance({
   const runtimeMission = await readFile(path.join(root, 'backend', '.deer-flow', 'SOUL.md'), 'utf8');
   assert.ok(runtimeMission.trim().length > 0, 'runtime guild mission is empty');
   assert.equal(existsSync(path.join(root, 'skills/public/guild-recruitment-lead/SKILL.md')), false);
-  const extensions = JSON.parse(await readFile(path.join(opsRoot, 'config', 'extensions_config.json'), 'utf8'));
+  const extensions = JSON.parse(await readFile(path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG), 'utf8'));
   assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'tkdesk']);
 
   const testResult = await runTests(process.execPath, ['--test'], { cwd: opsRoot });

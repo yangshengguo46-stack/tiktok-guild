@@ -18,7 +18,7 @@ from langgraph.config import get_config
 from deerflow.config.extensions_config import ExtensionsConfig, McpServerConfig, resolve_effective_mcp_routing
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX, Paths, get_paths
 from deerflow.constants import DEFAULT_MCP_SESSION_INIT_TIMEOUT, MCP_TMP_SUBDIR
-from deerflow.mcp.client import build_servers_config
+from deerflow.mcp.client import McpServerConfigurationError, build_servers_config
 from deerflow.mcp.headers import apply_header_overrides
 from deerflow.mcp.interceptors import build_mcp_tool_interceptors, compose_tool_interceptors
 from deerflow.mcp.oauth import build_oauth_tool_interceptor, get_initial_oauth_headers
@@ -655,6 +655,42 @@ def _raw_mcp_tool_name(
     return tool.name
 
 
+def _apply_enabled_tools_allowlist(
+    tools: list[BaseTool],
+    *,
+    server_name: str,
+    server_config: McpServerConfig,
+    tool_name_prefix: bool,
+) -> list[BaseTool]:
+    """Apply one server's exact raw-name allowlist before tools reach the Agent."""
+    approved = server_config.enabled_tools
+    if approved is None:
+        return tools
+
+    discovered: dict[str, BaseTool] = {}
+    for tool in tools:
+        raw_name = _raw_mcp_tool_name(
+            tool,
+            server_name=server_name,
+            tool_name_prefix=tool_name_prefix,
+        )
+        if raw_name in discovered:
+            raise McpServerConfigurationError(f"MCP server {server_name!r} discovered duplicate raw tool {raw_name!r}")
+        discovered[raw_name] = tool
+
+    missing = [name for name in approved if name not in discovered]
+    if missing:
+        qualifier = "Required " if server_config.required else ""
+        raise McpServerConfigurationError(f"{qualifier}MCP server {server_name!r} enabled_tools missing discovered tool(s): {', '.join(missing)}")
+    return [discovered[name] for name in approved]
+
+
+def _server_config_or_none(extensions_config: ExtensionsConfig, server_name: str) -> McpServerConfig | None:
+    """Return only a parsed server config, tolerating legacy test doubles."""
+    server_config = extensions_config.mcp_servers.get(server_name)
+    return server_config if isinstance(server_config, McpServerConfig) else None
+
+
 def _make_background_submit_tool(
     tool: BaseTool,
     *,
@@ -830,8 +866,9 @@ async def get_mcp_tools() -> list[BaseTool]:
         )
 
         async def load_server_tools(server_name: str) -> list[BaseTool]:
+            server_cfg: McpServerConfig | None = None
             try:
-                server_cfg = extensions_config.mcp_servers.get(server_name)
+                server_cfg = _server_config_or_none(extensions_config, server_name)
                 tool_name_prefix = server_cfg.tool_name_prefix if server_cfg is not None else True
                 session_init_timeout = _resolve_session_init_timeout(server_cfg)
                 if tool_name_prefix:
@@ -862,7 +899,7 @@ async def get_mcp_tools() -> list[BaseTool]:
                     # subprocess and any children it spawned are reaped — no
                     # orphan processes accumulate across repeated timeouts.
                     try:
-                        return await asyncio.wait_for(discovery, timeout=session_init_timeout)
+                        discovered_tools = await asyncio.wait_for(discovery, timeout=session_init_timeout)
                     except TimeoutError:
                         # Only our own bound is logged as "timed out": the
                         # branch condition guarantees the value is not None, so
@@ -870,14 +907,28 @@ async def get_mcp_tools() -> list[BaseTool]:
                         # discovery itself (e.g. an internal SDK timeout on the
                         # opted-out path) falls through to the generic failure
                         # handler below instead.
-                        logger.warning(
-                            "Skipping MCP server '%s' after tool discovery timed out (%.1fs)",
-                            server_name,
-                            session_init_timeout,
-                        )
+                        if server_cfg is not None and server_cfg.required:
+                            raise McpServerConfigurationError(f"Required MCP server {server_name!r} discovery timed out after {session_init_timeout:.1f}s") from None
+                        logger.warning("Skipping MCP server '%s' after tool discovery timed out (%.1fs)", server_name, session_init_timeout)
                         return []
-                return await discovery
+                else:
+                    discovered_tools = await discovery
+                if server_cfg is None:
+                    return discovered_tools
+                return _apply_enabled_tools_allowlist(
+                    discovered_tools,
+                    server_name=server_name,
+                    server_config=server_cfg,
+                    tool_name_prefix=tool_name_prefix,
+                )
             except Exception as e:
+                if isinstance(e, McpServerConfigurationError):
+                    if server_cfg is not None and server_cfg.required:
+                        raise
+                    logger.warning("Skipping MCP server '%s' after approval validation failed: %s", server_name, e)
+                    return []
+                if server_cfg is not None and server_cfg.required:
+                    raise McpServerConfigurationError(f"Required MCP server {server_name!r} discovery failed: {e}") from e
                 logger.warning(
                     f"Skipping MCP server '{server_name}' after tool discovery failed: {e}",
                     exc_info=True,
@@ -903,7 +954,7 @@ async def get_mcp_tools() -> list[BaseTool]:
         # source grouping makes routing exact even when a server opts out of name prefixing.
         for source_name, server_tools in zip(servers_config.keys(), tools_by_server, strict=True):
             transport = servers_config[source_name].get("transport", "stdio")
-            server_cfg = extensions_config.mcp_servers.get(source_name)
+            server_cfg = _server_config_or_none(extensions_config, source_name)
             tool_name_prefix = server_cfg.tool_name_prefix if server_cfg is not None else True
             current_server_tools: list[BaseTool] = []
             for tool in server_tools:
@@ -960,7 +1011,7 @@ async def get_mcp_tools() -> list[BaseTool]:
 
         return wrapped_tools
 
-    except McpTaskConfigurationError:
+    except (McpServerConfigurationError, McpTaskConfigurationError):
         raise
     except Exception as e:
         logger.error(f"Failed to load MCP tools: {e}", exc_info=True)

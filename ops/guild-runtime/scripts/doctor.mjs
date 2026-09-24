@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, existsSync } from 'node:fs';
-import { access, lstat, readFile, readdir, stat } from 'node:fs/promises';
+import { access, copyFile, lstat, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -9,8 +10,10 @@ import {
   DEERFLOW_COMMIT,
   DEERFLOW_PNPM_VERSION,
   GUILD_OPERATOR_ROOT,
+  GUILD_EXTENSIONS_CONFIG,
   GUILD_TOOL_NAMES,
   TKDESK_ROOT,
+  TKDESK_TOOL_NAMES,
 } from '../src/constants.mjs';
 import { runCommand } from '../src/process.mjs';
 import { loadRuntimeConfig, validateRuntimeConfig } from '../src/runtime-config.mjs';
@@ -54,6 +57,7 @@ const APPROVED_CATALOG_SHA256 = Object.freeze({
   guild: 'c5311d17e659729e5cf9f8096a6b84120c09b2d2f367a6a78420d98e9f194f0b',
   tkdesk: '7073e1a6587f3a9da962fb3a9e0a98d9a01f917ca9c8b2728b623cea1ffe0056',
 });
+const APPROVED_ASSET_MANIFEST_SHA256 = 'cb1246bdc1a8c2c68dcf3d1df89d0d67e727a60ef1e2db8fe823998d55d69b24';
 const FORBIDDEN_OUTREACH = /send_message|send_invitation|follow|comment|gift|publish/iu;
 
 async function requireSuccess(command, args, options, run = runCommand) {
@@ -134,7 +138,11 @@ async function collectAssetFiles(root, current = root, result = []) {
 export async function inspectAssetManifest({ assetsRoot }) {
   const rootInfo = await lstat(assetsRoot);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('asset root must be a real directory');
-  const manifest = JSON.parse(await readFile(path.join(assetsRoot, 'MANIFEST.json'), 'utf8'));
+  const manifestBytes = await readFile(path.join(assetsRoot, 'MANIFEST.json'));
+  if (createHash('sha256').update(manifestBytes).digest('hex') !== APPROVED_ASSET_MANIFEST_SHA256) {
+    throw new Error('CreatorAgent approved manifest hash changed');
+  }
+  const manifest = JSON.parse(manifestBytes.toString('utf8'));
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error('asset manifest files are missing');
   const declared = new Map();
   for (const entry of manifest.files) {
@@ -189,18 +197,67 @@ export async function inspectPersonaCatalog({ assetsRoot }) {
   return { detail: '6 CreatorAgent personas at version 1.0.1' };
 }
 
+async function sqliteSourceState(databasePath) {
+  const state = [];
+  for (const suffix of ['', '-wal']) {
+    const source = `${databasePath}${suffix}`;
+    try {
+      const info = await lstat(source, { bigint: true });
+      if (!info.isFile() || info.isSymbolicLink()) {
+        throw new Error(`DeerFlow database file must be a real file: ${path.basename(source)}`);
+      }
+      const digest = createHash('sha256').update(await readFile(source)).digest('hex');
+      state.push({
+        suffix,
+        size: info.size.toString(),
+        mtimeNs: info.mtimeNs.toString(),
+        ino: info.ino.toString(),
+        digest,
+      });
+    } catch (error) {
+      if (suffix && error?.code === 'ENOENT') state.push({ suffix, missing: true });
+      else throw error;
+    }
+  }
+  return state;
+}
+
+async function copyStableSqliteSnapshot(databasePath, snapshotPath) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const before = await sqliteSourceState(databasePath);
+    await Promise.all(['', '-wal', '-shm'].map((suffix) => rm(`${snapshotPath}${suffix}`, { force: true })));
+    try {
+      for (const entry of before) {
+        if (!entry.missing) await copyFile(`${databasePath}${entry.suffix}`, `${snapshotPath}${entry.suffix}`);
+      }
+    } catch (error) {
+      if (attempt === 3) throw error;
+      continue;
+    }
+    const after = await sqliteSourceState(databasePath);
+    if (JSON.stringify(after) === JSON.stringify(before)) return;
+  }
+  throw new Error('DeerFlow database changed while creating a read-only doctor snapshot');
+}
+
 export async function inspectDatabaseRevision({ databasePath, statPath = lstat, run = runCommand }) {
   const info = await statPath(databasePath);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('DeerFlow database must be a real SQLite file');
-  const forkRoot = path.resolve(path.dirname(databasePath), '../../..');
-  const revision = await requireSuccess(
-    'sqlite3',
-    [`${pathToFileURL(databasePath).href}?mode=ro`, 'SELECT version_num FROM alembic_version;'],
-    { cwd: forkRoot },
-    run,
-  );
-  if (revision !== '0026_social_runtime') {
-    throw new Error(`DeerFlow database is ${revision || 'unversioned'}, expected 0026_social_runtime`);
+  const snapshotRoot = await mkdtemp(path.join(os.tmpdir(), 'deerflow-doctor-sqlite-'));
+  const snapshotPath = path.join(snapshotRoot, 'deerflow.db');
+  try {
+    await copyStableSqliteSnapshot(databasePath, snapshotPath);
+    const revision = await requireSuccess(
+      'sqlite3',
+      [`${pathToFileURL(snapshotPath).href}?mode=ro`, 'SELECT version_num FROM alembic_version;'],
+      { cwd: snapshotRoot },
+      run,
+    );
+    if (revision !== '0026_social_runtime') {
+      throw new Error(`DeerFlow database is ${revision || 'unversioned'}, expected 0026_social_runtime`);
+    }
+  } finally {
+    await rm(snapshotRoot, { recursive: true, force: true });
   }
   return { detail: 'database at 0026_social_runtime' };
 }
@@ -240,7 +297,7 @@ async function loadApprovedCatalog(file, expectedHash, expectedCount, label) {
 }
 
 export async function inspectApprovedCatalogs({ opsRoot }) {
-  const config = JSON.parse(await readFile(path.join(opsRoot, 'config', 'extensions_config.json'), 'utf8'));
+  const config = JSON.parse(await readFile(path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG), 'utf8'));
   const guildNames = await loadApprovedCatalog(
     path.join(opsRoot, 'fixtures', 'mcp', 'guild-tools.json'),
     APPROVED_CATALOG_SHA256.guild,
@@ -255,6 +312,8 @@ export async function inspectApprovedCatalogs({ opsRoot }) {
   );
   exactValues(guildNames, GUILD_TOOL_NAMES, 'Guild Operator catalog');
   exactValues(config.mcpServers.guild_operator.enabled_tools, guildNames, 'Guild Operator allowlist');
+  exactValues(tkdeskNames, TKDESK_TOOL_NAMES, 'TKDesk catalog');
+  exactValues(config.mcpServers.tkdesk.enabled_tools, tkdeskNames, 'TKDesk allowlist');
   for (const required of ['prepare_handoff', 'commit_handoff']) {
     if (!tkdeskNames.includes(required)) throw new Error(`TKDesk is missing ${required}`);
   }

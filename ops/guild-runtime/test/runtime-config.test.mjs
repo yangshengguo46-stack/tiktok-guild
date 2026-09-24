@@ -19,7 +19,7 @@ test('runtime config resolves the DeerFlow fork root and ops-owned state', async
   assert.equal(config.packageRoot, FORK_ROOT);
   assert.equal(config.opsRoot, OPS_ROOT);
   assert.equal(config.configPath, path.join(OPS_ROOT, 'config', 'config.yaml'));
-  assert.equal(config.extensionsPath, path.join(OPS_ROOT, 'config', 'extensions_config.json'));
+  assert.equal(config.extensionsPath, path.join(OPS_ROOT, 'config', 'extensions_config.guild.json'));
   assert.equal(config.runtimeHome, path.join(FORK_ROOT, 'backend', '.deer-flow'));
   assert.equal(
     config.personaAssetsRoot,
@@ -64,6 +64,13 @@ test('rejects an extra MCP server or an approved-server write tool', async () =>
   assert.throws(
     () => validateRuntimeConfig(writeTool, { exists: validExists, nodeVersion: '22.16.0' }),
     /Guild tools/u,
+  );
+
+  const missingTkdeskAllowlist = await loadRuntimeConfig({ packageRoot: FORK_ROOT });
+  delete missingTkdeskAllowlist.extensions.mcpServers.tkdesk.enabled_tools;
+  assert.throws(
+    () => validateRuntimeConfig(missingTkdeskAllowlist, { exists: validExists, nodeVersion: '22.16.0' }),
+    /TKDesk tools/u,
   );
 });
 

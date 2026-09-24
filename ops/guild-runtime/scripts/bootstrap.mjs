@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DEERFLOW_PNPM_VERSION, DEERFLOW_REPOSITORY } from '../src/constants.mjs';
+import { DEERFLOW_COMMIT, DEERFLOW_PNPM_VERSION, DEERFLOW_REPOSITORY } from '../src/constants.mjs';
 import { ensureGuildSoul } from '../src/guild-soul.mjs';
 import { runCommand } from '../src/process.mjs';
 import { loadRuntimeConfig } from '../src/runtime-config.mjs';
@@ -36,6 +36,9 @@ export async function bootstrapRuntime({
   }
   if (!isFullCommit(commit)) {
     throw new Error('DeerFlow requires a full 40-character commit; floating refs are forbidden.');
+  }
+  if (commit !== DEERFLOW_COMMIT) {
+    throw new Error('DeerFlow commit must match the approved pinned commit.');
   }
 
   const root = path.resolve(loaded.packageRoot);

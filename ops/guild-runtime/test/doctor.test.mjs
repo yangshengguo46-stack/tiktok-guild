@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -78,6 +80,25 @@ test('doctor validates the immutable imported package and its six native persona
   });
 });
 
+test('asset inspection rejects a modified package even when its manifest is re-signed', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'deerflow-resigned-assets-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await cp(ASSETS_ROOT, root, { recursive: true });
+  const relative = 'personas/quiet_depth.json';
+  const target = path.join(root, relative);
+  const changed = Buffer.concat([await readFile(target), Buffer.from(' ')]);
+  await writeFile(target, changed);
+  const manifestPath = path.join(root, 'MANIFEST.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const entry = manifest.files.find(({ path: name }) => name === relative);
+  entry.bytes = changed.byteLength;
+  const { createHash } = await import('node:crypto');
+  entry.sha256 = createHash('sha256').update(changed).digest('hex');
+  await writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+
+  await assert.rejects(inspectAssetManifest({ assetsRoot: root }), /approved manifest/i);
+});
+
 test('approved MCP catalogs are checked statically without starting either server', async () => {
   assert.deepEqual(await inspectApprovedCatalogs({ opsRoot: OPS_ROOT }), {
     guild: '8 approved read-only tools',
@@ -115,22 +136,47 @@ test('native social source inspection finds the runtime, channel gate, persisten
   });
 });
 
-test('database revision inspection opens SQLite read-only and requires 0026', async () => {
-  const databasePath = path.join(FORK_ROOT, 'backend', '.deer-flow', 'data', 'deerflow.db');
+test('database revision inspection queries a disposable snapshot without changing the source directory', async (t) => {
+  const databaseRoot = await mkdtemp(path.join(os.tmpdir(), 'deerflow-doctor-source-db-'));
+  t.after(() => rm(databaseRoot, { recursive: true, force: true }));
+  const databasePath = path.join(databaseRoot, 'deerflow.db');
+  await writeFile(databasePath, 'source database bytes');
+  await writeFile(`${databasePath}-wal`, 'source wal bytes');
+  await writeFile(`${databasePath}-shm`, 'source shm bytes');
+  const snapshotState = async () => {
+    const names = (await readdir(databaseRoot)).sort();
+    return Promise.all(names.map(async (name) => {
+      const file = path.join(databaseRoot, name);
+      const info = await stat(file, { bigint: true });
+      return {
+        name,
+        size: info.size.toString(),
+        mtimeNs: info.mtimeNs.toString(),
+        sha256: createHash('sha256').update(await readFile(file)).digest('hex'),
+      };
+    }));
+  };
+  const before = await snapshotState();
   const calls = [];
   assert.deepEqual(await inspectDatabaseRevision({
     databasePath,
-    statPath: async () => ({ isFile: () => true, isSymbolicLink: () => false }),
     run: async (command, args, options) => {
       calls.push({ command, args, options });
+      const uri = new URL(args[0]);
+      uri.search = '';
+      const snapshotPath = fileURLToPath(uri);
+      assert.equal(await readFile(`${snapshotPath}-wal`, 'utf8'), 'source wal bytes');
+      assert.equal(existsSync(`${snapshotPath}-shm`), false);
+      await writeFile(`${snapshotPath}-shm`, 'sqlite side effect');
       return { code: 0, stdout: '0026_social_runtime\n', stderr: '' };
     },
   }), { detail: 'database at 0026_social_runtime' });
-  assert.deepEqual(calls, [{
-    command: 'sqlite3',
-    args: [`${pathToFileURL(databasePath).href}?mode=ro`, 'SELECT version_num FROM alembic_version;'],
-    options: { cwd: FORK_ROOT },
-  }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'sqlite3');
+  assert.equal(calls[0].args[1], 'SELECT version_num FROM alembic_version;');
+  assert.notEqual(calls[0].args[0], `${pathToFileURL(databasePath).href}?mode=ro`);
+  const after = await snapshotState();
+  assert.deepEqual(after, before);
 });
 
 test('pnpm inspection reads the fork frontend package-manager pin without executing pnpm', async () => {
@@ -176,7 +222,7 @@ test('start preserves ops-owned SOUL and launches make start at the fork root', 
   assert.equal(calls[0].options.env.DEER_FLOW_CONFIG_PATH, path.join(OPS_ROOT, 'config', 'config.yaml'));
   assert.equal(
     calls[0].options.env.DEER_FLOW_EXTENSIONS_CONFIG_PATH,
-    path.join(OPS_ROOT, 'config', 'extensions_config.json'),
+    path.join(OPS_ROOT, 'config', 'extensions_config.guild.json'),
   );
   assert.equal(calls[0].options.env.DEER_FLOW_SKILLS_PATH, path.join(FORK_ROOT, 'skills'));
   assert.equal(calls[0].options.env.DEER_FLOW_HOME, path.join(FORK_ROOT, 'backend', '.deer-flow'));

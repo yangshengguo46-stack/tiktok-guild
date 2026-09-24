@@ -211,6 +211,12 @@ class McpServerConfig(BaseModel):
     command: str | None = Field(default=None, description="Command to execute to start the MCP server (for stdio type)")
     args: list[str] = Field(default_factory=list, description="Arguments to pass to the command (for stdio type)")
     env: dict[str, str] = Field(default_factory=dict, description="Environment variables for the MCP server")
+    cwd: str | None = Field(default=None, description="Working directory for the MCP server process (for stdio type)")
+    required: bool = Field(default=False, description="Fail MCP initialization when this enabled server cannot be configured or discovered")
+    enabled_tools: list[str] | None = Field(
+        default=None,
+        description="Exact ordered raw tool-name allowlist; unlisted discovered tools are hidden and missing listed tools fail closed",
+    )
     url: str | None = Field(default=None, description="URL of the MCP server (for sse or http type)")
     headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers to send (for sse or http type)")
     oauth: McpOAuthConfig | None = Field(default=None, description="OAuth configuration (for sse or http type)")
@@ -263,6 +269,17 @@ class McpServerConfig(BaseModel):
             if lowered in seen:
                 raise ValueError(f"headers maps the same HTTP header under two spellings ({seen[lowered]!r} and {header_name!r}); header names are case-insensitive, so keep only one")
             seen[lowered] = header_name
+        return value
+
+    @field_validator("enabled_tools")
+    @classmethod
+    def _validate_enabled_tools(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if any(not isinstance(name, str) or not name or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for character in name) for name in value):
+            raise ValueError("enabled_tools entries must be nonempty MCP tool names containing only letters, digits, underscores, or hyphens")
+        if len(set(value)) != len(value):
+            raise ValueError("enabled_tools entries must be unique")
         return value
 
     @model_validator(mode="before")

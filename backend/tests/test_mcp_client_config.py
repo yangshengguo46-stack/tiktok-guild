@@ -4,6 +4,7 @@ import logging
 
 import pytest
 
+from app.gateway.routers.mcp import McpServerConfigResponse
 from deerflow.config.extensions_config import ExtensionsConfig, McpServerConfig
 from deerflow.mcp.client import build_server_params, build_servers_config
 
@@ -24,6 +25,42 @@ def test_build_server_params_stdio_success():
         "args": ["-y", "my-mcp-server"],
         "env": {"API_KEY": "secret"},
     }
+
+
+def test_build_server_params_stdio_preserves_explicit_working_directory():
+    config = McpServerConfig(
+        type="stdio",
+        command="node",
+        args=["server.mjs"],
+        cwd="/opt/approved-mcp",
+    )
+
+    assert build_server_params("approved", config)["cwd"] == "/opt/approved-mcp"
+
+
+def test_mcp_server_approval_fields_are_explicit_and_round_trip():
+    config = McpServerConfig.model_validate(
+        {
+            "required": True,
+            "enabled_tools": ["inspect", "prepare_handoff"],
+        }
+    )
+
+    assert config.required is True
+    assert config.enabled_tools == ["inspect", "prepare_handoff"]
+    assert config.model_dump()["required"] is True
+    assert config.model_dump()["enabled_tools"] == ["inspect", "prepare_handoff"]
+    response = McpServerConfigResponse.model_validate(config.model_dump())
+    assert response.required is True
+    assert response.cwd is None
+    assert response.enabled_tools == ["inspect", "prepare_handoff"]
+
+
+def test_mcp_server_approval_allowlist_rejects_duplicates_and_invalid_names():
+    with pytest.raises(ValueError, match="unique"):
+        McpServerConfig(enabled_tools=["inspect", "inspect"])
+    with pytest.raises(ValueError, match="tool names"):
+        McpServerConfigResponse(enabled_tools=["send message"])
 
 
 def test_extensions_config_resolves_env_variables_inside_nested_collections(monkeypatch):
