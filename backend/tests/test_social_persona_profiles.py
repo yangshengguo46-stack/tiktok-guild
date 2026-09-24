@@ -223,6 +223,25 @@ async def test_generator_normalizes_json_interests_array_to_immutable_tuple():
 
 
 @pytest.mark.asyncio
+async def test_generator_rejects_non_string_json_interest_items():
+    model = FakeModel('{"overrides":{"interests":["tea",1],"voice":"brief"},"diff_summary":"Shorter replies","examples":["Synthetic: Hello briefly.","Synthetic: Thanks for sharing."]}')
+    generator = PersonaProfileGenerator(model=model)
+    base = PersonaProfile(profile_id="base", version="1", base_template_ref="relaxed_wit@1.0.1", overrides={}, created_by="operator", basis_refs=())
+
+    with pytest.raises(ValueError, match="invalid generator interests"):
+        await generator.generate(
+            base_profile=base,
+            profile_id="brief",
+            version="1",
+            requirement="Keep replies short",
+            creator_preferences=(),
+            immutable_identity_facts={"name": "Guild AI"},
+            basis_refs=("operator:req-1",),
+            valid_basis_refs=("operator:req-1",),
+        )
+
+
+@pytest.mark.asyncio
 async def test_generator_prompt_states_exact_json_contract_and_no_commentary():
     model = FakeModel('{"overrides":{"voice":"brief and warm"},"diff_summary":"Shorter replies","examples":["Synthetic: Hello briefly.","Synthetic: Thanks for sharing."]}')
     generator = PersonaProfileGenerator(model=model)
