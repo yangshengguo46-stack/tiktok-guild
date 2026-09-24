@@ -11,6 +11,20 @@
 状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；现场试运行第一批完成，本地 auth gate 已暂时停用
 当前写入者：`/root`
 
+## 本地运行时初始化（2026-09-24 19:08 CST）
+
+- 已按唯一入口顺序重新执行 `npm run bootstrap -> npm run doctor -> npm run acceptance`；bootstrap
+  幂等完成，固定上游仍为 `769589e8daee14c2587a634b6b43bd96471a41a1`，固定 pnpm 为 `10.26.2`。
+- `doctor`：15/15；`acceptance`：`ok: true`，2 个 MCP、Guild 8 tools、TKDesk 28 tools，
+  `nativeGuildLead: true`。
+- 原生数据库当前为 `0026_social_runtime`；关系、事件、人格 profile、绑定和出站表均为 0 行，
+  这是首次初始化的空状态，不代表任何主播事实或平台动作。
+- 原生 `SOUL.md` 保持已核对的 Social Kernel（SHA-256：
+  `3cd8a4d11d8d3cdbeb8df21f305d654926145e97f57b750316a42c9cb5798b02`）；真实用户表仍为 0 行，
+  当前访问来自本地 synthetic admin，不创建真实账号。
+- 三个本机服务继续运行；`/setup` 307 到 `/workspace`，`/workspace/guild` 和
+  `/api/v1/auth/me` 均为 200，Gateway `/health` 为 200。
+
 ## 现场试运行阶段（DSR-LIVE-20260924-01）
 
 目标：在不声称 TikTok 外部能力已完成的前提下，验证当前唯一版本能在本机启动，
@@ -127,3 +141,4 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 - 2026-09-24 15:xx CST：Task 10 完成隔离状态 bootstrap、全产品验证和证据收口；独立复审通过并完成本地 fast-forward。
 - 2026-09-24 18:xx CST：现场试运行第一批完成；本机三服务启动成功，真实模型生成候选成功，
   本地 auth gate 暂停，工作台无需注册即可进入；出厂前恢复正常认证。
+- 2026-09-24 19:08 CST：按计划完成本地运行时初始化复核；空关系状态保持不变，未创建账号、主播事实或平台动作。

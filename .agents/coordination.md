@@ -1,12 +1,12 @@
 # TikTok 公会 DeerFlow 协作入口
 
-最后更新：2026-09-24 18:54 CST
+最后更新：2026-09-24 19:08 CST
 台账写入者：根 Agent（`/root`）
 
 ## 当前主线
 
 DeerFlow 原生 Social Runtime 已在 `master@a08ff2f0` 完成合并。当前进入
-**现场试运行阶段**：本地工作台暂时跳过账号密码初始化，先验证本机启动与真实模型自动人格闭环，再在取得明确授权后
+**现场试运行阶段**：本地工作台暂时跳过账号密码初始化，已完成本地运行时初始化；继续验证真实模型自动人格闭环，再在取得明确授权后
 推进真实 TikTok 只读通道；不重复执行 Task 1–10，也不把旧 runtime 重新接回活动路径。
 
 当前详细台账：[2026-09-24-deerflow-social-runtime.md](ledger/2026-09-24-deerflow-social-runtime.md)
