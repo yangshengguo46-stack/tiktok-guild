@@ -12,6 +12,34 @@ persona bindings. Resolution, persistence, and Lead integration are separate.
 
 ### Native Social Persistence (`persistence/social/`)
 
+`social/tools.py` owns the six `social_*` management Chat tools. They require a
+live typed `OperatorManagementCapability` from Gateway session admission, the
+same runtime owner/thread, an explicit `ProfileScope`, and the default Lead
+surface. No JSON flag or direct assembly authenticates an operator. The old
+`creator_agent` runtime/tools are no longer registered on default Lead; their
+compatibility modules are retained only for historical consumers. There is no
+legacy focus/brief projection registered in the new management path.
+
+`management_view` returns registry and binding CAS tokens from one native read
+snapshot. `manage_profile` registers an immutable candidate and optionally binds
+in one existing SQL transaction; failure rolls both back. Provenance stores the
+optional management scope in profile JSON, preserving earlier rows and schema.
+Scoped generated profiles cannot be read/bound outside their originating agent
+or relation. Clearing writes a tombstone, and rollback reads an exact historical
+scope/revision and appends a new revision with `rollback:<revision>` provenance.
+
+Generation uses `PersonaProfileGenerator` and the resolved configured model.
+`source_message_id` must identify a genuine current operator HumanMessage,
+matching the admission snapshot and requirement (only outer whitespace may
+normalize). `record_management_note` uses deterministic scoped Chat IDs and the
+registry CAS; duplicate equal notes are no-ops, different text conflicts. These
+notes use a reserved management thread and never update relationship projections
+or become creator messages. Model failure may leave this truthful request audit,
+but cannot leave a partly activated profile. Extra basis refs are selected exact
+scope events; only creator_message sources become creator preference inputs.
+Unknown identity facts remain empty host facts rather than invented identity.
+Resolve remains deterministic host assembly, never a seventh model tool.
+
 `SocialRepository` owns durable sourced events, channel-and-agent-scoped relationship and
 self projections, immutable account profile versions, scoped binding history,
 and the outbox. Migration 0026 extends the Phase 0 relationship row without

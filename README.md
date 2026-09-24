@@ -18,6 +18,17 @@ https://github.com/user-attachments/assets/a8bcadc4-e040-4cf2-8fda-dd768b999c18
 
 ## Official Website
 
+This fork provides native social profile management in authenticated session
+Chat on the default Lead: list, generate, preview, bind, clear overrides and
+rollback (`social_*` tools). Generation produces a candidate unless the operator
+explicitly requests activation with the target binding revision. Clear restores
+inheritance; rollback appends a new revision and preserves facts and commitments.
+Generation needs a configured model and a current operator message or explicitly
+selected scoped creator evidence. External channels, custom agents, subagents,
+bootstrap, PAT and auth-disabled runs do not receive management capabilities.
+The Task 8 worktree model probe is [blocked by missing active configuration](docs/verification/creator-agent/2026-09-24-task8-configured-model-probe.json);
+offline tests do not demonstrate real model quality or TikTok delivery.
+
 Learn more and see **real demos** on our [**official website**](https://deerflow.tech).
 The landing-page case studies open as allowlisted, read-only showcases without requiring a sign-in.
 

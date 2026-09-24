@@ -1,0 +1,19 @@
+{
+  "task": 8,
+  "status": "blocked_no_worktree_model_configuration",
+  "baseline_commit": "8202b685d7bc53d090a008b242aed412696a9ad5",
+  "worktree_root_config_exists": false,
+  "worktree_backend_config_exists": false,
+  "config_override_present": false,
+  "error_type": "FileNotFoundError",
+  "sanitized_error": "Config file specified by param config_path not found at <task-worktree>/config.yaml",
+  "checked_with": "From backend: AppConfig.from_file(str(Path.cwd().parent / 'config.yaml'))",
+  "template_observation": "ops/guild-runtime/config/config.yaml is a tracked deployment template, not an active worktree config. It selects CodexChatModel/gpt-5.4; no deployment bootstrap, credential discovery, or live configuration was performed.",
+  "model_calls": 0,
+  "model": null,
+  "duration_seconds": null,
+  "tokens": null,
+  "cost": null,
+  "identity_boundary": "Identity registry is not connected to operator admission. The host-only immutable_identity_facts map is empty when no trusted resolver is configured. No claim is made that identity facts were supplied for model verification; profile schema cannot mutate identity/facts/permissions.",
+  "evidence_boundary": "Passing generation tests use deterministic fake model transport only. They do not demonstrate real model quality, provider access, TikTok sending, invitation, or receipt. No live config, credentials, or DB was accessed."
+}

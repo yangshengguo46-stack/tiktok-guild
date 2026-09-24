@@ -1,5 +1,13 @@
 ### Private native model output
 
+`RunContext.social_management` carries Gateway's session-only typed management
+capability. The worker discards caller copies, injects only its host value in
+runtime context, stamps its owner and removes configurable copies. Every tool
+rechecks capability, owner, thread and surface, including after model I/O.
+Terminal cleanup revokes the capability even when preflight failed before
+runtime injection. Observable context redaction drops `__social_management`.
+This is separate from channel `social_binding`; they cannot coexist.
+
 `RunContext.social_binding` carries the typed host social capability through the
 native worker. Caller-carried social_mode/binding keys are scrubbed; the worker
 installs only its host value in runtime context before normal Lead assembly,

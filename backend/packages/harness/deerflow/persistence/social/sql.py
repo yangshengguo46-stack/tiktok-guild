@@ -427,6 +427,9 @@ class SocialRepository:
         profiles = {}
         for row in rows:
             value = deepcopy(row["profile_json"])
+            origin = value.pop("management_scope", None)
+            if origin and any(origin[key] is not None and origin[key] != getattr(scope, key) for key in ("agent_instance_id", "relation_ref")):
+                continue
             value["basis_refs"] = tuple(value["basis_refs"])
             if "interests" in value["overrides"]:
                 value["overrides"]["interests"] = tuple(value["overrides"]["interests"])
@@ -436,6 +439,173 @@ class SocialRepository:
     async def get_profiles(self, scope: ProfileScope) -> dict[str, PersonaProfile]:
         async with self._read() as session:
             return (await self._profiles(session, scope))[0]
+
+    async def management_view(self, scope: ProfileScope):
+        """One snapshot for listing, previews and deterministic resolution."""
+        async with self._read() as session:
+            profiles, revision = await self._profiles(session, scope)
+            return profiles, revision, await self._binding_state(session, scope)
+
+    async def management_basis(self, scope: ProfileScope, refs: tuple[str, ...]):
+        """Exact optional dimensions; never broaden a missing agent/relation."""
+        bounded_refs(refs, "basis_refs", minimum=1, maximum=8)
+        async with self._read() as session:
+            return await self._management_basis(session, scope, refs)
+
+    async def record_management_note(self, scope, *, thread_id, message_id, text, expected_revision):
+        """Idempotent admitted Chat provenance; never a creator event/projection."""
+        bounded_text(thread_id, "thread_id", 128)
+        bounded_text(message_id, "message_id", 128)
+        bounded_text(text, "requirement", 1024)
+        event_id = _digest([asdict(scope), thread_id, message_id])
+        source_ref = "chat:" + event_id
+        body = {"source_event_id": event_id, "source_ref": source_ref, "source_kind": "operator_note", "text": text, "management_scope": asdict(scope), "chat_thread_ref": thread_id, "source_message_id": message_id}
+        key = dict(
+            owner_user_id=scope.owner_user_id,
+            account_id=scope.account_id,
+            person_ref=scope.relation_ref or "__management__",
+            channel_thread_ref="management:" + _digest(thread_id),
+            agent_instance_id=scope.agent_instance_id or "__management__",
+            source_event_id=event_id,
+        )
+        async with self._write(scope) as session:
+            _, revision = await self._profiles(session, scope)
+            _check_revision(revision, expected_revision, {"revision": revision})
+            existing = (await session.execute(sa.select(social_event.c.body_json).where(*(social_event.c[name] == value for name, value in key.items())))).scalar_one_or_none()
+            if existing is not None:
+                if existing != body:
+                    raise ValueError("management message id content conflict")
+            else:
+                await session.execute(social_event.insert().values(**key, body_json=body, source_kind="operator_note", payload_digest=_digest(body), created_at=datetime.now(UTC)))
+        return source_ref
+
+    async def _management_basis(self, session, scope, refs):
+        bodies = (
+            (
+                await session.execute(
+                    sa.select(social_event.c.body_json).where(
+                        *_account(social_event, scope),
+                        social_event.c.person_ref == (scope.relation_ref or "__management__"),
+                        social_event.c.agent_instance_id == (scope.agent_instance_id or "__management__"),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_ref = {}
+        for body in bodies:
+            origin = body.get("management_scope")
+            # Optional dimensions are not string sentinels: preserve their
+            # exact typed scope so a literal reserved name cannot alias None.
+            if (origin is not None or scope.agent_instance_id is None or scope.relation_ref is None) and origin != asdict(scope):
+                continue
+            if body["source_ref"] in refs:
+                if body["source_ref"] in by_ref and by_ref[body["source_ref"]] != body:
+                    raise ValueError("ambiguous scoped basis reference")
+                by_ref[body["source_ref"]] = body
+        if set(refs) != set(by_ref):
+            raise ValueError("generation basis must belong to exact scope")
+        return tuple(by_ref[ref] for ref in refs)
+
+    async def manage_profile(self, scope, *, candidate=None, expected_registry_revision=None, profile_ref=None, expected_revision=None, reason, activate=True, rollback_revision=None):
+        """Register a candidate and optionally bind in ONE account transaction.
+
+        Management provenance is stored alongside the immutable profile JSON;
+        historical rows without this optional metadata remain compatible.
+        """
+        bounded_text(reason, "reason", 512)
+        if type(activate) is not bool:
+            raise ValueError("activation intent must be boolean")
+        if not activate and candidate is None:
+            raise ValueError("candidate is required")
+        async with self._write(scope) as session:
+            before = await self._binding_state(session, scope)
+            profiles, registry_revision = await self._profiles(session, scope)
+            if activate:
+                _check_revision(before.write_revision, expected_revision, before)
+            if candidate is not None:
+                _check_revision(registry_revision, expected_registry_revision, {"revision": registry_revision})
+                profile_ref = f"{candidate.profile_id}@{candidate.version}"
+                bounded_text(profile_ref, "profile_ref", 128)
+                catalog = await run_file_io(load_persona_catalog)
+                if candidate.base_template_ref not in catalog or profile_ref in catalog:
+                    raise ValueError("profile must extend a canonical template")
+                await self._management_basis(session, scope, candidate.basis_refs)
+                row = (
+                    (
+                        await session.execute(
+                            sa.select(social_persona_profile).where(*_account(social_persona_profile, scope), social_persona_profile.c.profile_id == candidate.profile_id, social_persona_profile.c.version == candidate.version)
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is not None:
+                    if profiles.get(profile_ref) != candidate or row["profile_json"].get("management_scope") != asdict(scope):
+                        raise ValueError("profile versions and provenance are immutable")
+                else:
+                    value = {
+                        "profile_id": candidate.profile_id,
+                        "version": candidate.version,
+                        "base_template_ref": candidate.base_template_ref,
+                        "overrides": dict(candidate.overrides),
+                        "created_by": candidate.created_by,
+                        "basis_refs": list(candidate.basis_refs),
+                        "management_scope": asdict(scope),
+                    }
+                    registry_revision += 1
+                    await session.execute(
+                        social_persona_profile.insert().values(
+                            owner_user_id=scope.owner_user_id,
+                            account_id=scope.account_id,
+                            profile_id=candidate.profile_id,
+                            version=candidate.version,
+                            revision=registry_revision,
+                            profile_json=value,
+                            basis_refs_json=list(candidate.basis_refs),
+                            status="candidate",
+                            created_at=datetime.now(UTC),
+                        )
+                    )
+                    profiles[profile_ref] = candidate
+            if rollback_revision is not None:
+                if type(rollback_revision) is not int or rollback_revision < 1:
+                    raise ValueError("rollback target must be a persisted revision")
+                historic = (
+                    (await session.execute(sa.select(social_persona_binding).where(*_account(social_persona_binding, scope), social_persona_binding.c.scope_key == _scope_key(scope), social_persona_binding.c.revision == rollback_revision)))
+                    .mappings()
+                    .one_or_none()
+                )
+                if historic is None:
+                    raise ValueError("no binding history at target scope/revision")
+                profile_ref = historic["profile_ref"]
+                reason = f"rollback:{rollback_revision}: {reason}"
+                bounded_text(reason, "reason", 512)
+            if activate:
+                if profile_ref is None and scope.agent_instance_id is None and scope.relation_ref is None:
+                    raise ValueError("account default cannot be cleared")
+                if profile_ref is not None and profile_ref not in profiles and profile_ref not in await run_file_io(load_persona_catalog):
+                    raise ValueError("unknown or cross-scope profile reference")
+                await self._insert_binding(session, scope, profile_ref, expected_revision=expected_revision, reason=reason, evidence_ids=candidate.basis_refs if candidate else ())
+            after = await self._binding_state(session, scope)
+
+            def effective(state):
+                binding = state.bindings
+                return binding.relation_override_ref or binding.agent_override_ref or binding.account_default_ref
+
+            return {
+                "scope": asdict(scope),
+                "old_profile_ref": effective(before),
+                "new_profile_ref": effective(after) if activate else profile_ref,
+                "write_revision": after.write_revision,
+                "effective_revision": after.bindings.revision,
+                "registry_revision": registry_revision,
+                "effective_at": after.bindings.effective_at.isoformat() if activate else None,
+                "status": "active" if activate else "candidate",
+                "reason": reason,
+                "rollback_of_revision": rollback_revision,
+            }
 
     async def register_profile(self, scope: ProfileScope, candidate: PersonaProfile, *, expected_revision: int) -> PersonaProfile:
         if not isinstance(candidate, PersonaProfile):

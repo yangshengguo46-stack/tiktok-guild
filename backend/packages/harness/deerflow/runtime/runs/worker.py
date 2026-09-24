@@ -198,9 +198,16 @@ def _release_run_scoped_references(
     journal: Any | None,
 ) -> None:
     """Remove worker-owned graph references once durable finalization is done."""
+    from deerflow.social.tools import OperatorManagementCapability
+
+    for carrier in [runtime_context, *(config.get("context") for config in configs if isinstance(config, dict))]:
+        capability = carrier.get("__social_management") if isinstance(carrier, dict) else None
+        if isinstance(capability, OperatorManagementCapability):
+            capability.release()
     internal_context_keys = {
         "__run_journal",
         "__social_binding",
+        "__social_management",
         CURRENT_RUN_PRE_EXISTING_MESSAGE_IDS_KEY,
         CONVERSATION_READER_CONTEXT_KEY,
     }
@@ -228,6 +235,7 @@ def _release_run_scoped_references(
             configurable.pop("__pregel_runtime", None)
             configurable.pop(CONVERSATION_READER_CONTEXT_KEY, None)
             configurable.pop("__social_binding", None)
+            configurable.pop("__social_management", None)
         context = runnable_config.get("context")
         if isinstance(context, dict):
             for key in internal_context_keys:
@@ -525,6 +533,7 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: Final[frozenset[str]] = (
             DEERFLOW_TRACE_METADATA_KEY,
             CONVERSATION_READER_CONTEXT_KEY,
             "__social_binding",
+            "__social_management",
             "social_mode",
             "is_subagent",
             "agent_id",
@@ -550,6 +559,7 @@ def _build_runtime_context(
     extensions: Any | None = None,
     conversation_reader: Any | None = None,
     social_binding: Any | None = None,
+    social_management: Any | None = None,
 ) -> dict[str, Any]:
     """Build the dict that becomes ``ToolRuntime.context`` for the run.
 
@@ -573,6 +583,13 @@ def _build_runtime_context(
         runtime_ctx["app_config"] = app_config
     if conversation_reader is not None:
         runtime_ctx[CONVERSATION_READER_CONTEXT_KEY] = conversation_reader
+    if social_management is not None:
+        from deerflow.social.tools import OperatorManagementCapability
+
+        if not isinstance(social_management, OperatorManagementCapability) or not social_management.active or social_binding is not None:
+            raise ValueError("social management requires active operator admission")
+        runtime_ctx["__social_management"] = social_management
+        runtime_ctx["user_id"] = social_management.owner_user_id
     if social_binding is not None:
         from deerflow.social.runtime import SocialRuntimeBinding
 
@@ -641,6 +658,7 @@ class RunContext:
     # The host binds this capability to one run's authenticated reader and references.
     conversation_reader: Any | None = field(default=None)
     social_binding: Any | None = field(default=None)
+    social_management: Any | None = field(default=None)
 
 
 def _install_runtime_context(config: dict, runtime_context: dict[str, Any]) -> None:
@@ -650,6 +668,7 @@ def _install_runtime_context(config: dict, runtime_context: dict[str, Any]) -> N
     if isinstance(configurable, dict):
         configurable.pop(CONVERSATION_READER_CONTEXT_KEY, None)
         configurable.pop("__social_binding", None)
+        configurable.pop("__social_management", None)
         configurable.pop("social_mode", None)
     existing_context = config.get("context")
     if isinstance(existing_context, dict):
@@ -1097,6 +1116,7 @@ async def run_agent(
             extensions,
             ctx.conversation_reader,
             ctx.social_binding,
+            ctx.social_management,
         )
         # Bind every checkpoint produced by this run to the effective agent
         # identity that produced its state. Manual compaction uses only this
@@ -1736,6 +1756,11 @@ async def run_agent(
                         run_id,
                     )
                 finally:
+                    if ctx.social_management is not None:
+                        from deerflow.social.tools import OperatorManagementCapability
+
+                        if isinstance(ctx.social_management, OperatorManagementCapability):
+                            ctx.social_management.release()
                     _release_run_scoped_references(
                         runnable_configs,
                         runtime_ctx,

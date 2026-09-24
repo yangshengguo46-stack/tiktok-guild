@@ -768,6 +768,32 @@ def resolve_agent_factory(assistant_id: str | None):
     return assemble_lead_agent
 
 
+def operator_management_for_request(request, config, *, thread_id, graph_input):
+    """Mint only from authenticated operator admission, never HTTP JSON flags."""
+    from uuid import uuid4
+
+    from deerflow.agents.middlewares.message_utils import is_genuine_user_message
+    from deerflow.social.tools import OperatorManagementCapability, _safe_surface
+
+    state = getattr(request, "state", None)
+    user = getattr(state, "user", None)
+    if getattr(state, "auth_source", None) != "session" or getattr(user, "id", None) is None or getattr(user, "system_role", None) == INTERNAL_SYSTEM_ROLE:
+        return None
+    if not all(_safe_surface(config.get(key, {})) for key in ("context", "configurable")):
+        return None
+    messages = graph_input.get("messages", []) if isinstance(graph_input, dict) else []
+    admitted = {}
+    for index, message in enumerate(messages):
+        if is_genuine_user_message(message) and not message.additional_kwargs.get("hide_from_ui") and isinstance(message.content, str):
+            if not message.id:
+                message = message.model_copy(update={"id": str(uuid4())})
+                messages[index] = message
+            if message.id in admitted:
+                return None
+            admitted[message.id] = message.content.strip()
+    return OperatorManagementCapability(str(user.id), thread_id, operator_messages=admitted)
+
+
 # Lead-agent recursion budget bounds. The Gateway must NOT trust a
 # client-supplied ``recursion_limit`` verbatim: an arbitrarily large value lets
 # a single run execute unbounded LangGraph super-steps (each at least one LLM
@@ -1487,6 +1513,8 @@ async def start_run(
         social_carriers.extend(body.config.get(key) for key in ("context", "configurable"))
     if any(isinstance(value, dict) and (value.get("social_mode") is not None or "__social_binding" in value) for value in social_carriers):
         raise HTTPException(status_code=403, detail="Social mode requires an authenticated server connection")
+    if any(isinstance(value, dict) and "__social_management" in value for value in social_carriers):
+        raise HTTPException(status_code=403, detail="Social management requires server operator admission")
     # Cancel-capability gate. interrupt/rollback strategies terminate an already
     # active run — runs:cancel capability, not runs:create — so a create-only
     # PAT must not reach them. Enforced here, the single choke point every
@@ -1623,6 +1651,7 @@ async def start_run(
             internal_owner_user=internal_owner_user,
             request_context=getattr(body, "context", None),
         )
+        run_ctx = replace(run_ctx, social_management=operator_management_for_request(request, config, thread_id=thread_id, graph_input=graph_input) if social_binding is None else None)
 
         conversation_references = list(getattr(body, "conversation_references", None) or [])
         if conversation_references:

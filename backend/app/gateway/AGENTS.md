@@ -1,5 +1,14 @@
 ### Gateway API (`app/gateway/`)
 
+Social profile management admits only an authenticated session user on default
+operator Chat. `operator_management_for_request` freezes owner, Chat thread and
+genuine current message IDs/text in a typed runtime capability. PAT, internal,
+auth-disabled, channel, custom-agent, bootstrap and subagent requests fail closed.
+Both public and internal HTTP body/config carriers reject `__social_management`.
+The capability travels only through `RunContext.social_management`, never
+request kwargs or checkpoint/configurable. Model-selected scope/text cannot
+replace the admitted owner or current operator source message.
+
 `launch_social_channel_turn` is an in-process ChannelManager adapter to the same
 `start_run`/RunManager/run_agent path. It requires an existing owned thread and
 hashes scope/event/thread into the durable run idempotency key; it waits through

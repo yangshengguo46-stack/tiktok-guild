@@ -1195,19 +1195,13 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
     configured_tools = raw_tools + extra_tools
     creator_agent_runtime = None
     if agent_name is None and social_runtime is None:
-        from deerflow.creator_agent.middleware import is_operator_surface
+        from deerflow.social.tools import tools_for_lead
 
-        if is_operator_surface(cfg):
-            from deerflow.creator_agent.runtime import runtime_for_lead
-            from deerflow.creator_agent.tools import make_creator_agent_tools
-
-            creator_agent_runtime = runtime_for_lead(resolved_app_config, model_name)
-            if creator_agent_runtime is not None:
-                _append_named_tools_without_conflicts(
-                    configured_tools,
-                    make_creator_agent_tools(creator_agent_runtime.repository, creator_agent_runtime),
-                    kind="CreatorAgent",
-                )
+        _append_named_tools_without_conflicts(
+            configured_tools,
+            tools_for_lead(config, app_config=resolved_app_config, model_name=model_name),
+            kind="Social management",
+        )
     if non_interactive:
         configured_tools = [tool for tool in configured_tools if tool.name not in _NON_INTERACTIVE_DISABLED_TOOL_NAMES]
     authorization_candidates = [*configured_tools]
