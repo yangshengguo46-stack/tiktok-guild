@@ -90,8 +90,10 @@ export function validateRuntimeConfig(config, { exists, nodeVersion }) {
     throw new Error('TKDesk command must point directly to the existing plugin launcher.');
   }
   exactValues(tkdesk.enabled_tools, TKDESK_TOOL_NAMES, 'TKDesk tools');
-  if (!guild.required || !tkdesk.required || guild.tool_name_prefix !== false || tkdesk.tool_name_prefix !== false) {
-    throw new Error('Approved MCP servers must be required and expose stable unprefixed tool names.');
+  if (guild.enabled !== true || tkdesk.enabled !== true
+    || !guild.required || !tkdesk.required
+    || guild.tool_name_prefix !== false || tkdesk.tool_name_prefix !== false) {
+    throw new Error('Approved MCP servers must be enabled, required, and expose stable unprefixed tool names.');
   }
   const forbidden = [...guild.enabled_tools, ...tkdesk.enabled_tools].filter((name) => FORBIDDEN_OUTREACH.test(name));
   if (forbidden.length > 0) {

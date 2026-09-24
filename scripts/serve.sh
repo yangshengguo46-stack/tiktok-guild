@@ -33,11 +33,8 @@ cd "$REPO_ROOT"
 
 # ── Load .env ────────────────────────────────────────────────────────────────
 
-if [ -f "$REPO_ROOT/.env" ]; then
-    set -a
-    source "$REPO_ROOT/.env"
-    set +a
-fi
+source "$REPO_ROOT/scripts/serve-env.sh"
+load_deerflow_env_preserving_runtime_paths "$REPO_ROOT/.env"
 
 _pick_python() {
     local candidate

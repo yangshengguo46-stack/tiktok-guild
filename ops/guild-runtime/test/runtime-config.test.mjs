@@ -74,6 +74,17 @@ test('rejects an extra MCP server or an approved-server write tool', async () =>
   );
 });
 
+test('rejects either approved MCP server when it is disabled', async () => {
+  for (const serverName of ['guild_operator', 'tkdesk']) {
+    const config = await loadRuntimeConfig({ packageRoot: FORK_ROOT });
+    config.extensions.mcpServers[serverName].enabled = false;
+    assert.throws(
+      () => validateRuntimeConfig(config, { exists: validExists, nodeVersion: '22.16.0' }),
+      /enabled/u,
+    );
+  }
+});
+
 test('rejects missing plugin executables, old Node, and a changed upstream pin', async () => {
   const missing = await loadRuntimeConfig({ packageRoot: FORK_ROOT });
   assert.throws(
