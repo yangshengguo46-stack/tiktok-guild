@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -30,7 +31,14 @@ def load_social_assets(root: Path | None = None) -> Mapping[str, Mapping[str, ob
     ``scripts/verify_creator_agent_assets.py`` before packaging. This loader
     accepts only the expression subset for downstream persona resolution.
     """
-    source = Path(root) if root is not None else _DEFAULT_ROOT
+    if root is not None:
+        source = Path(root)
+    elif configured := os.environ.get("DEER_FLOW_SOCIAL_ASSETS_PATH"):
+        source = Path(configured)
+        if not source.is_absolute():
+            raise ValueError("DEER_FLOW_SOCIAL_ASSETS_PATH must be absolute")
+    else:
+        source = _DEFAULT_ROOT
     catalog: dict[str, Mapping[str, object]] = {}
     for persona_id in sorted(_PERSONA_IDS):
         path = source / "personas" / f"{persona_id}.json"

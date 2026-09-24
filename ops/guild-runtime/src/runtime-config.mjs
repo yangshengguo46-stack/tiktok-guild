@@ -38,13 +38,17 @@ async function readJson(file) {
 
 export async function loadRuntimeConfig({ packageRoot }) {
   const root = path.resolve(packageRoot);
-  const configRoot = path.join(root, 'config');
+  const opsRoot = path.join(root, 'ops', 'guild-runtime');
+  const configRoot = path.join(opsRoot, 'config');
   return {
     packageRoot: root,
+    opsRoot,
     manifest: await readJson(path.join(configRoot, 'local-manifest.json')),
     extensions: await readJson(path.join(configRoot, 'extensions_config.json')),
     configPath: path.join(configRoot, 'config.yaml'),
     extensionsPath: path.join(configRoot, 'extensions_config.json'),
+    runtimeHome: path.join(root, 'backend', '.deer-flow'),
+    personaAssetsRoot: path.join(root, 'docs', 'product', 'creator-agent-final-persona-rev1'),
   };
 }
 
@@ -55,6 +59,9 @@ export function validateRuntimeConfig(config, { exists, nodeVersion }) {
   }
   if (manifest.deerflow.commit !== DEERFLOW_COMMIT) {
     throw new Error('DeerFlow commit must match the approved pinned commit.');
+  }
+  if (Object.hasOwn(manifest, 'product_patches') || Object.hasOwn(manifest, 'runtime_root')) {
+    throw new Error('The fork root must not declare an obsolete product patch or nested runtime.');
   }
 
   const actualNode = parseNodeVersion(nodeVersion);

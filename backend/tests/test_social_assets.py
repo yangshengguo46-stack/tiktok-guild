@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -61,3 +62,15 @@ def test_runtime_loader_exposes_only_six_immutable_expression_assets():
     assert catalog["clear_direct"]["behavior"]["voice"] == "直接、利落，不居高临下，不机械给清单"
     with pytest.raises(TypeError):
         catalog["relaxed_wit"]["behavior"]["voice"] = "changed"
+
+
+def test_runtime_loader_uses_the_explicit_native_asset_root(monkeypatch, tmp_path):
+    candidate = tmp_path / "package"
+    shutil.copytree(ASSETS, candidate)
+    target = candidate / "personas" / "clear_direct.json"
+    document = json.loads(target.read_text(encoding="utf-8"))
+    document["behavior"]["voice"] = "explicit native asset root"
+    target.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("DEER_FLOW_SOCIAL_ASSETS_PATH", str(candidate))
+
+    assert load_social_assets()["clear_direct"]["behavior"]["voice"] == "explicit native asset root"

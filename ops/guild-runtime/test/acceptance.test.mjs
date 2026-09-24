@@ -9,15 +9,17 @@ import YAML from 'yaml';
 
 import { runAcceptance } from '../scripts/acceptance.mjs';
 
-const PACKAGE_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const OPS_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const FORK_ROOT = path.resolve(OPS_ROOT, '../..');
 
 async function offlinePackage(t, runtimeSoul) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'deerflow-native-acceptance-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await cp(path.join(PACKAGE_ROOT, 'config'), path.join(root, 'config'), { recursive: true });
-  await cp(path.join(PACKAGE_ROOT, 'fixtures', 'mcp'), path.join(root, 'fixtures', 'mcp'), { recursive: true });
+  const opsRoot = path.join(root, 'ops', 'guild-runtime');
+  await cp(path.join(OPS_ROOT, 'config'), path.join(opsRoot, 'config'), { recursive: true });
+  await cp(path.join(OPS_ROOT, 'fixtures', 'mcp'), path.join(opsRoot, 'fixtures', 'mcp'), { recursive: true });
   if (runtimeSoul !== undefined) {
-    const target = path.join(root, '.runtime', 'deerflow-home', 'SOUL.md');
+    const target = path.join(root, 'backend', '.deer-flow', 'SOUL.md');
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, runtimeSoul);
   }
@@ -25,32 +27,31 @@ async function offlinePackage(t, runtimeSoul) {
 }
 
 async function runOfflineAcceptance(packageRoot) {
-  const guild = JSON.parse(await readFile(path.join(packageRoot, 'fixtures', 'mcp', 'guild-tools.json'), 'utf8'));
-  const tkdesk = JSON.parse(await readFile(path.join(packageRoot, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
   return runAcceptance({
     packageRoot,
     doctor: async () => ({ ok: true, checks: [{ name: 'fixture', ok: true, detail: 'ok' }] }),
-    probeCatalogs: async () => ({ guild, tkdesk }),
     runTests: async () => ({ code: 0, stdout: '', stderr: '' }),
   });
 }
 
 test('the package leaves the active skills path to the start environment', async () => {
-  const config = YAML.parse(await readFile(path.join(PACKAGE_ROOT, 'config', 'config.yaml'), 'utf8'));
+  const config = YAML.parse(await readFile(path.join(OPS_ROOT, 'config', 'config.yaml'), 'utf8'));
   assert.equal(Object.hasOwn(config.skills, 'path'), false);
 });
 
 test('the native runtime has one Lead, two direct MCPs, and no layered runtime', async () => {
-  const extensions = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'config', 'extensions_config.json'), 'utf8'));
-  const configText = await readFile(path.join(PACKAGE_ROOT, 'config', 'config.yaml'), 'utf8');
-  const manifestText = await readFile(path.join(PACKAGE_ROOT, 'config', 'local-manifest.json'), 'utf8');
+  const extensions = JSON.parse(await readFile(path.join(OPS_ROOT, 'config', 'extensions_config.json'), 'utf8'));
+  const configText = await readFile(path.join(OPS_ROOT, 'config', 'config.yaml'), 'utf8');
+  const manifestText = await readFile(path.join(OPS_ROOT, 'config', 'local-manifest.json'), 'utf8');
   const manifest = JSON.parse(manifestText);
-  const readme = await readFile(path.join(PACKAGE_ROOT, 'README.md'), 'utf8');
+  const readme = await readFile(path.join(OPS_ROOT, 'README.md'), 'utf8');
 
-  assert.equal(existsSync(path.join(PACKAGE_ROOT, 'skills/public/guild-recruitment-lead/SKILL.md')), false);
+  assert.equal(existsSync(path.join(FORK_ROOT, 'skills/public/guild-recruitment-lead/SKILL.md')), false);
   assert.equal(extensions.skills?.['guild-recruitment-lead']?.enabled, undefined);
   assert.doesNotMatch(configText, /\/mnt\/guild-cases/u);
   assert.equal('cases_path' in manifest, false);
+  assert.equal('product_patches' in manifest, false);
+  assert.equal('runtime_root' in manifest, false);
   assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'tkdesk']);
   assert.deepEqual(extensions.mcpServers.guild_operator.enabled_tools, [
     'guild_workspace',
@@ -76,8 +77,8 @@ test('the native runtime has one Lead, two direct MCPs, and no layered runtime',
 });
 
 test('catalog snapshots preserve handoff and forbid outreach tools', async () => {
-  const guild = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'fixtures', 'mcp', 'guild-tools.json'), 'utf8'));
-  const tkdesk = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
+  const guild = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'guild-tools.json'), 'utf8'));
+  const tkdesk = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
 
   assert.equal(guild.tools.length, 8);
   assert.equal(tkdesk.tools.some(({ name }) => name === 'prepare_handoff'), true);
@@ -104,7 +105,7 @@ test('offline acceptance rejects a blank installed Lead mission', async (t) => {
 test('offline acceptance composes config, doctor, and catalog evidence with a customized mission', async (t) => {
   const customMission = 'Use my customized guild Lead mission.\n';
   const root = await offlinePackage(t, customMission);
-  const tkdesk = JSON.parse(await readFile(path.join(root, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
+  const tkdesk = JSON.parse(await readFile(path.join(root, 'ops', 'guild-runtime', 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
   const report = await runOfflineAcceptance(root);
 
   assert.deepEqual(report, {
@@ -114,15 +115,13 @@ test('offline acceptance composes config, doctor, and catalog evidence with a cu
     tkdeskTools: tkdesk.tools.length,
     nativeGuildLead: true,
   });
-  assert.equal(await readFile(path.join(root, '.runtime', 'deerflow-home', 'SOUL.md'), 'utf8'), customMission);
+  assert.equal(await readFile(path.join(root, 'backend', '.deer-flow', 'SOUL.md'), 'utf8'), customMission);
 });
 
-test('standalone project points to the unique CreatorAgent design and current audit', async () => {
-  const readme = await readFile(path.join(PACKAGE_ROOT, 'README.md'), 'utf8');
-  const design = await readFile(path.join(PACKAGE_ROOT, 'docs', 'superpowers', 'specs', '2026-09-24-deerflow-auto-persona-design.md'), 'utf8');
-  const audit = await readFile(path.join(PACKAGE_ROOT, 'docs', 'audits', '2026-09-23-deerflow-guild-migration-audit.md'), 'utf8');
+test('standalone operations point to the unique CreatorAgent design', async () => {
+  const readme = await readFile(path.join(OPS_ROOT, 'README.md'), 'utf8');
+  const design = await readFile(path.join(FORK_ROOT, 'docs', 'superpowers', 'specs', '2026-09-24-deerflow-auto-persona-design.md'), 'utf8');
   assert.match(readme, /CreatorAgent_FINAL_PERSONA_REV1_20260924\.zip/u);
   assert.match(readme, /AI 自动切换/u);
   assert.match(design, /本轮唯一产品规格/u);
-  assert.match(audit, /唯一生效规格/u);
 });

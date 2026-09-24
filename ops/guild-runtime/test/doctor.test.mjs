@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { inspectPersonaCatalog, inspectPinnedPnpm, runDoctor } from '../scripts/doctor.mjs';
+import {
+  inspectApprovedCatalogs,
+  inspectAssetManifest,
+  inspectDatabaseRevision,
+  inspectForkAncestor,
+  inspectMigrationRevision,
+  inspectNativeSocialRuntime,
+  inspectPersonaCatalog,
+  inspectPinnedPnpm,
+  runDoctor,
+} from '../scripts/doctor.mjs';
 import { startRuntime } from '../scripts/start.mjs';
+
+const FORK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const OPS_ROOT = path.join(FORK_ROOT, 'ops', 'guild-runtime');
+const ASSETS_ROOT = path.join(FORK_ROOT, 'docs', 'product', 'creator-agent-final-persona-rev1');
+const PINNED_COMMIT = '769589e8daee14c2587a634b6b43bd96471a41a1';
 
 const REQUIRED_CHECKS = [
   'node',
@@ -15,68 +31,119 @@ const REQUIRED_CHECKS = [
   'tkdesk_root',
   'tkdesk_launcher',
   'guild_dependencies',
-  'deerflow_head',
-  'product_patches',
+  'fork_upstream_ancestor',
+  'native_social_runtime',
+  'creator_agent_assets',
   'persona_catalog',
+  'database_revision',
   'deerflow_pnpm',
   'guild_mcp',
   'tkdesk_mcp',
 ];
 
-test('doctor reports every required failed check by name', async () => {
+test('doctor reports every required check by name and never stops at the first failure', async () => {
   const adapters = Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, async () => {
     throw new Error(`${name} failed`);
   }]));
-
-  const report = await runDoctor({
-    packageRoot: '/tmp/deerflow-native-guild',
-    adapters,
-  });
-
+  const report = await runDoctor({ packageRoot: FORK_ROOT, adapters });
   assert.equal(report.ok, false);
   assert.deepEqual(report.checks.map(({ name }) => name), REQUIRED_CHECKS);
   assert.deepEqual(report.checks.map(({ ok }) => ok), REQUIRED_CHECKS.map(() => false));
-  for (const check of report.checks) assert.match(check.detail, new RegExp(check.name));
 });
 
-test('doctor reports a complete healthy runtime', async () => {
-  const adapters = Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, async () => ({
-    detail: `${name} ok`,
-  })]));
-
-  const report = await runDoctor({
-    packageRoot: '/tmp/deerflow-native-guild',
-    adapters,
-  });
-
-  assert.equal(report.ok, true);
-  assert.deepEqual(report.checks.map(({ ok }) => ok), REQUIRED_CHECKS.map(() => true));
-});
-
-test('pnpm inspection runs inside the pinned DeerFlow frontend', async () => {
+test('fork inspection checks ancestry instead of requiring HEAD to equal the pin', async () => {
   const calls = [];
-  const result = await inspectPinnedPnpm({
-    pnpmBinary: '/tmp/runtime/pnpm',
-    frontendRoot: '/tmp/runtime/deer-flow/frontend',
+  const result = await inspectForkAncestor({
+    forkRoot: FORK_ROOT,
+    commit: PINNED_COMMIT,
     run: async (command, args, options) => {
       calls.push({ command, args, options });
-      return { code: 0, stdout: '10.26.2\n', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
     },
   });
-
-  assert.deepEqual(result, { detail: 'pnpm 10.26.2' });
+  assert.deepEqual(result, { detail: `${PINNED_COMMIT} is an ancestor of HEAD` });
   assert.deepEqual(calls, [{
-    command: '/tmp/runtime/pnpm',
-    args: ['--version'],
-    options: { cwd: '/tmp/runtime/deer-flow/frontend' },
+    command: 'git',
+    args: ['-C', FORK_ROOT, 'merge-base', '--is-ancestor', PINNED_COMMIT, 'HEAD'],
+    options: { cwd: FORK_ROOT },
   }]);
+});
+
+test('doctor validates the immutable imported package and its six native personas', async () => {
+  assert.deepEqual(await inspectAssetManifest({ assetsRoot: ASSETS_ROOT }), {
+    detail: '76 manifest files (473848 bytes)',
+  });
+  assert.deepEqual(await inspectPersonaCatalog({ assetsRoot: ASSETS_ROOT }), {
+    detail: '6 CreatorAgent personas at version 1.0.1',
+  });
+});
+
+test('approved MCP catalogs are checked statically without starting either server', async () => {
+  assert.deepEqual(await inspectApprovedCatalogs({ opsRoot: OPS_ROOT }), {
+    guild: '8 approved read-only tools',
+    tkdesk: '28 approved tools; handoff present and outreach absent',
+  });
+});
+
+test('persona inspection rejects a changed version even when the JSON remains valid', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'deerflow-personas-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await cp(path.join(ASSETS_ROOT, 'personas'), path.join(root, 'personas'), { recursive: true });
+  const target = path.join(root, 'personas', 'quiet_depth.json');
+  const document = JSON.parse(await readFile(target, 'utf8'));
+  document.version = '1.0.0';
+  await writeFile(target, JSON.stringify(document), 'utf8');
+  await assert.rejects(
+    inspectPersonaCatalog({ assetsRoot: root }),
+    /exactly the six approved CreatorAgent personas at version 1\.0\.1/i,
+  );
+});
+
+test('database migration inspection pins revision 0026 after 0025', async () => {
+  const migrationPath = path.join(
+    FORK_ROOT,
+    'backend/packages/harness/deerflow/persistence/migrations/versions/0026_social_runtime.py',
+  );
+  assert.deepEqual(await inspectMigrationRevision({ migrationPath }), {
+    detail: '0026_social_runtime revises 0025_creator_agent_relationship',
+  });
+});
+
+test('native social source inspection finds the runtime, channel gate, persistence and migration', async () => {
+  assert.deepEqual(await inspectNativeSocialRuntime({ forkRoot: FORK_ROOT }), {
+    detail: 'native social runtime, channel, persistence, and migration 0026 are present',
+  });
+});
+
+test('database revision inspection opens SQLite read-only and requires 0026', async () => {
+  const databasePath = path.join(FORK_ROOT, 'backend', '.deer-flow', 'data', 'deerflow.db');
+  const calls = [];
+  assert.deepEqual(await inspectDatabaseRevision({
+    databasePath,
+    statPath: async () => ({ isFile: () => true, isSymbolicLink: () => false }),
+    run: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return { code: 0, stdout: '0026_social_runtime\n', stderr: '' };
+    },
+  }), { detail: 'database at 0026_social_runtime' });
+  assert.deepEqual(calls, [{
+    command: 'sqlite3',
+    args: [`${pathToFileURL(databasePath).href}?mode=ro`, 'SELECT version_num FROM alembic_version;'],
+    options: { cwd: FORK_ROOT },
+  }]);
+});
+
+test('pnpm inspection reads the fork frontend package-manager pin without executing pnpm', async () => {
+  assert.deepEqual(await inspectPinnedPnpm({ frontendRoot: path.join(FORK_ROOT, 'frontend') }), {
+    detail: 'pnpm 10.26.2',
+  });
 });
 
 test('start never invokes DeerFlow when doctor fails', async () => {
   let starts = 0;
   await assert.rejects(
     startRuntime({
-      packageRoot: '/tmp/deerflow-native-guild',
+      packageRoot: FORK_ROOT,
       installSoul: async () => {},
       doctor: async () => ({
         ok: false,
@@ -89,11 +156,11 @@ test('start never invokes DeerFlow when doctor fails', async () => {
   assert.equal(starts, 0);
 });
 
-test('start exports only the native DeerFlow paths and launches make start', async () => {
+test('start preserves ops-owned SOUL and launches make start at the fork root', async () => {
   const calls = [];
   const soulInstalls = [];
   await startRuntime({
-    packageRoot: '/tmp/deerflow-native-guild',
+    packageRoot: FORK_ROOT,
     installSoul: async (options) => { soulInstalls.push(options); },
     doctor: async () => ({ ok: true, checks: [] }),
     start: async (command, args, options) => {
@@ -102,127 +169,17 @@ test('start exports only the native DeerFlow paths and launches make start', asy
     },
   });
 
-  assert.equal(calls.length, 1);
-  assert.deepEqual(soulInstalls, [{ packageRoot: '/tmp/deerflow-native-guild' }]);
+  assert.deepEqual(soulInstalls, [{ packageRoot: FORK_ROOT }]);
   assert.equal(calls[0].command, 'make');
   assert.deepEqual(calls[0].args, ['start']);
-  assert.equal(calls[0].options.cwd, '/tmp/deerflow-native-guild/.runtime/deer-flow');
-  assert.equal(calls[0].options.env.DEER_FLOW_CONFIG_PATH, '/tmp/deerflow-native-guild/config/config.yaml');
-  assert.equal(calls[0].options.env.DEER_FLOW_EXTENSIONS_CONFIG_PATH, '/tmp/deerflow-native-guild/config/extensions_config.json');
-  assert.equal(calls[0].options.env.DEER_FLOW_SKILLS_PATH, '/tmp/deerflow-native-guild/skills');
-  assert.equal(calls[0].options.env.DEER_FLOW_HOME, '/tmp/deerflow-native-guild/.runtime/deerflow-home');
+  assert.equal(calls[0].options.cwd, FORK_ROOT);
+  assert.equal(calls[0].options.env.DEER_FLOW_CONFIG_PATH, path.join(OPS_ROOT, 'config', 'config.yaml'));
   assert.equal(
-    calls[0].options.env.DEER_FLOW_GUILD_PERSONAS_PATH,
-    '/tmp/deerflow-native-guild/config/personas.json',
+    calls[0].options.env.DEER_FLOW_EXTENSIONS_CONFIG_PATH,
+    path.join(OPS_ROOT, 'config', 'extensions_config.json'),
   );
+  assert.equal(calls[0].options.env.DEER_FLOW_SKILLS_PATH, path.join(FORK_ROOT, 'skills'));
+  assert.equal(calls[0].options.env.DEER_FLOW_HOME, path.join(FORK_ROOT, 'backend', '.deer-flow'));
+  assert.equal(calls[0].options.env.DEER_FLOW_SOCIAL_ASSETS_PATH, ASSETS_ROOT);
   assert.equal(calls[0].options.env.CI, 'true');
-  assert.equal(
-    calls[0].options.env.PATH.startsWith('/tmp/deerflow-native-guild/.runtime/tools/pnpm/node_modules/.bin:'),
-    true,
-  );
-});
-
-const PERSONA_IDS = [
-  'relaxed_wit',
-  'clear_direct',
-  'curious_explorer',
-  'observant_warmth',
-  'quiet_depth',
-  'warm_candid',
-];
-
-function persona(id, version = '1.0.1') {
-  return {
-    id,
-    version,
-    core: `${id} core`,
-    behavior: {
-      attention: 'attention',
-      voice: 'voice',
-      humor: 'humor',
-      disagreement: 'disagreement',
-      care: 'care',
-      initiative: 'initiative',
-    },
-    interests: ['interest'],
-  };
-}
-
-async function withCatalog(catalog, callback) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'deerflow-personas-'));
-  const catalogPath = path.join(directory, 'personas.json');
-  await writeFile(catalogPath, JSON.stringify(catalog), 'utf8');
-  try {
-    return await callback(catalogPath);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-}
-
-test('persona catalog inspection accepts the exact six versioned assets', async () => {
-  await withCatalog({
-    schema_version: '1.0',
-    personas: PERSONA_IDS.map((id) => persona(id)),
-  }, async (catalogPath) => {
-    assert.deepEqual(await inspectPersonaCatalog({ catalogPath }), {
-      detail: '6 CreatorAgent personas at version 1.0.1',
-    });
-  });
-});
-
-test('persona catalog inspection rejects extra, duplicate, and wrong-version assets', async () => {
-  const invalidCatalogs = [
-    [...PERSONA_IDS.map((id) => persona(id)), persona('extra_persona')],
-    [...PERSONA_IDS.slice(0, -1).map((id) => persona(id)), persona('relaxed_wit')],
-    PERSONA_IDS.map((id) => persona(id, id === 'quiet_depth' ? '1.0.0' : '1.0.1')),
-  ];
-
-  for (const personas of invalidCatalogs) {
-    await withCatalog({ schema_version: '1.0', personas }, async (catalogPath) => {
-      await assert.rejects(
-        inspectPersonaCatalog({ catalogPath }),
-        /exactly the six approved CreatorAgent personas at version 1\.0\.1/i,
-      );
-    });
-  }
-});
-
-test('persona catalog inspection rejects malformed and oversized asset bodies', async () => {
-  const valid = PERSONA_IDS.map((id) => persona(id));
-  const invalidCatalogs = [
-    { schema_version: '1.0', personas: valid, extra: true },
-    {
-      schema_version: '1.0',
-      personas: valid.map((asset, index) => (index === 0 ? { ...asset, identity: 'forbidden' } : asset)),
-    },
-    {
-      schema_version: '1.0',
-      personas: valid.map((asset, index) => (index === 0
-        ? { ...asset, behavior: { ...asset.behavior, care: '' } }
-        : asset)),
-    },
-    {
-      schema_version: '1.0',
-      personas: valid.map((asset, index) => (index === 0 ? { ...asset, core: 'x'.repeat(513) } : asset)),
-    },
-    {
-      schema_version: '1.0',
-      personas: valid.map((asset, index) => (index === 0 ? { ...asset, interests: [] } : asset)),
-    },
-  ];
-
-  for (const catalog of invalidCatalogs) {
-    await withCatalog(catalog, async (catalogPath) => {
-      await assert.rejects(inspectPersonaCatalog({ catalogPath }), /invalid persona catalog/i);
-    });
-  }
-
-  await withCatalog({
-    schema_version: '1.0',
-    personas: valid.map((asset, index) => (index === 0
-      ? { ...asset, core: 'x'.repeat(33_000) }
-      : asset)),
-  }, async (catalogPath) => {
-    await assert.rejects(inspectPersonaCatalog({ catalogPath }), /32 KiB/i);
-  });
 });

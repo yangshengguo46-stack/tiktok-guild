@@ -1,26 +1,15 @@
 #!/usr/bin/env node
-import { access, mkdir } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEERFLOW_PNPM_VERSION, DEERFLOW_REPOSITORY } from '../src/constants.mjs';
 import { ensureGuildSoul } from '../src/guild-soul.mjs';
 import { runCommand } from '../src/process.mjs';
-import { applyProductPatches } from '../src/product-patches.mjs';
 import { loadRuntimeConfig } from '../src/runtime-config.mjs';
 
 function isFullCommit(value) {
   return typeof value === 'string' && /^[0-9a-f]{40}$/iu.test(value);
-}
-
-async function defaultPathExists(candidate) {
-  try {
-    await access(candidate);
-    return true;
-  } catch (error) {
-    if (error.code === 'ENOENT') return false;
-    throw error;
-  }
 }
 
 async function checkedRun(run, command, args, options) {
@@ -35,10 +24,8 @@ async function checkedRun(run, command, args, options) {
 export async function bootstrapRuntime({
   packageRoot,
   config,
-  pathExists = defaultPathExists,
   makeDirectory = (directory) => mkdir(directory, { recursive: true, mode: 0o700 }),
   run = runCommand,
-  applyPatches = applyProductPatches,
   installSoul = ensureGuildSoul,
 } = {}) {
   const loaded = config ?? await loadRuntimeConfig({ packageRoot });
@@ -52,43 +39,15 @@ export async function bootstrapRuntime({
   }
 
   const root = path.resolve(loaded.packageRoot);
-  const runtimeRoot = path.resolve(root, loaded.manifest.runtime_root);
-  if (!runtimeRoot.startsWith(`${root}${path.sep}`)) {
-    throw new Error('Runtime root must stay inside the native package.');
-  }
-  const destination = path.join(runtimeRoot, 'deer-flow');
-  const checkoutExists = await pathExists(destination);
-  if (checkoutExists && !await pathExists(path.join(destination, '.git'))) {
-    throw new Error(`Existing DeerFlow destination is not a managed Git checkout: ${destination}`);
+  const ancestry = await run('git', ['-C', root, 'merge-base', '--is-ancestor', commit, 'HEAD'], { cwd: root });
+  if (ancestry.code !== 0) {
+    throw new Error(`Pinned upstream commit ${commit} must be an ancestor of the current DeerFlow fork.`);
   }
 
-  await makeDirectory(runtimeRoot);
-  if (!checkoutExists) {
-    await checkedRun(run, 'git', ['clone', '--filter=blob:none', '--no-checkout', repository, destination], {
-      cwd: runtimeRoot,
-    });
-    await checkedRun(run, 'git', ['-C', destination, 'checkout', '--detach', commit], { cwd: runtimeRoot });
-  }
-
-  const remote = await checkedRun(run, 'git', ['-C', destination, 'config', '--get', 'remote.origin.url'], {
-    cwd: runtimeRoot,
-  });
-  if (remote.stdout.trim() !== DEERFLOW_REPOSITORY) {
-    throw new Error('Existing DeerFlow checkout must use the official upstream repository.');
-  }
-  const head = await checkedRun(run, 'git', ['-C', destination, 'rev-parse', 'HEAD'], { cwd: runtimeRoot });
-  if (head.stdout.trim().toLowerCase() !== commit.toLowerCase()) {
-    throw new Error(`Expected pinned HEAD ${commit}. Move the checkout aside, then rerun: mv '${destination}' '${destination}.backup'`);
-  }
-
-  await applyPatches({
-    packageRoot: root,
-    destination,
-    patches: loaded.manifest.product_patches ?? [],
-    run,
-  });
   await installSoul({ packageRoot: root });
 
+  const opsRoot = loaded.opsRoot ?? path.join(root, 'ops', 'guild-runtime');
+  const runtimeRoot = path.join(opsRoot, '.runtime');
   const cacheRoot = path.join(runtimeRoot, 'cache');
   const binRoot = path.join(runtimeRoot, 'bin');
   const pnpmRoot = path.join(runtimeRoot, 'tools', 'pnpm');
@@ -112,7 +71,7 @@ export async function bootstrapRuntime({
     },
   });
   await checkedRun(run, 'make', ['install'], {
-    cwd: destination,
+    cwd: root,
     env: {
       ...process.env,
       CI: 'true',
@@ -128,7 +87,7 @@ export async function bootstrapRuntime({
       COREPACK_HOME: path.join(cacheRoot, 'corepack'),
     },
   });
-  return { repository, commit, destination };
+  return { repository, commit, destination: root };
 }
 
 function isMain() {
@@ -136,7 +95,7 @@ function isMain() {
 }
 
 if (isMain()) {
-  const packageRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+  const packageRoot = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
   bootstrapRuntime({ packageRoot })
     .then(({ destination, commit }) => console.log(`DeerFlow ready at ${destination} (${commit}).`))
     .catch((error) => {

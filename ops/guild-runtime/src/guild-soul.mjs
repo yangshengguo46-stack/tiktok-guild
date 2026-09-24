@@ -12,9 +12,9 @@ Use DeerFlow's normal planning, tools, memory and delegation as needed. A draft 
 `;
 
 export async function ensureGuildSoul({ packageRoot }) {
-  const home = path.join(packageRoot, '.runtime', 'deerflow-home');
+  const home = path.join(packageRoot, 'backend', '.deer-flow');
   const target = path.join(home, 'SOUL.md');
-  const source = path.join(packageRoot, 'config', 'guild-soul.md');
+  const source = path.join(packageRoot, 'ops', 'guild-runtime', 'config', 'guild-soul.md');
   await mkdir(home, { recursive: true, mode: 0o700 });
   try {
     await copyFile(source, target, constants.COPYFILE_EXCL);

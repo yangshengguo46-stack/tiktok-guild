@@ -13,7 +13,8 @@ export async function startRuntime({
   start = spawnForeground,
 } = {}) {
   const root = path.resolve(packageRoot);
-  const pnpmBinRoot = path.join(root, '.runtime', 'tools', 'pnpm', 'node_modules', '.bin');
+  const opsRoot = path.join(root, 'ops', 'guild-runtime');
+  const pnpmBinRoot = path.join(opsRoot, '.runtime', 'tools', 'pnpm', 'node_modules', '.bin');
   await installSoul({ packageRoot: root });
   const report = await doctor({ packageRoot: root });
   if (!report.ok) {
@@ -21,16 +22,21 @@ export async function startRuntime({
     throw new Error(`Doctor failed: ${failed}.\n${formatDoctorReport(report)}`);
   }
   const code = await start('make', ['start'], {
-    cwd: path.join(root, '.runtime', 'deer-flow'),
+    cwd: root,
     env: {
       ...process.env,
       CI: 'true',
       PATH: `${pnpmBinRoot}${path.delimiter}${process.env.PATH ?? ''}`,
-      DEER_FLOW_CONFIG_PATH: path.join(root, 'config', 'config.yaml'),
-      DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(root, 'config', 'extensions_config.json'),
+      DEER_FLOW_CONFIG_PATH: path.join(opsRoot, 'config', 'config.yaml'),
+      DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(opsRoot, 'config', 'extensions_config.json'),
       DEER_FLOW_SKILLS_PATH: path.join(root, 'skills'),
-      DEER_FLOW_HOME: path.join(root, '.runtime', 'deerflow-home'),
-      DEER_FLOW_GUILD_PERSONAS_PATH: path.join(root, 'config', 'personas.json'),
+      DEER_FLOW_HOME: path.join(root, 'backend', '.deer-flow'),
+      DEER_FLOW_SOCIAL_ASSETS_PATH: path.join(
+        root,
+        'docs',
+        'product',
+        'creator-agent-final-persona-rev1',
+      ),
     },
   });
   if (code !== 0 && code !== 130 && code !== 143) throw new Error(`DeerFlow exited with code ${code}.`);
@@ -42,7 +48,7 @@ function isMain() {
 }
 
 if (isMain()) {
-  const packageRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+  const packageRoot = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
   startRuntime({ packageRoot }).catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

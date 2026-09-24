@@ -1,6 +1,6 @@
 # TikTok LIVE 公会 DeerFlow CreatorAgent
 
-本目录运行一个本机 DeerFlow 默认 Lead。2026-09-24 起，产品唯一生效规格是用户提供的 `CreatorAgent_FINAL_PERSONA_REV1_20260924.zip` 及 [AI 自动切换人格修订](docs/superpowers/specs/2026-09-24-deerflow-auto-persona-design.md)。较早的招募运行时、关系摘要、方法卡、通道来源和旧计划均已作废；只保留了原有“工作台”的路由、导航、翻译和诚实占位。
+本目录为当前 DeerFlow fork 的默认 Lead 提供本机运维配置。2026-09-24 起，产品唯一生效规格是用户提供的 `CreatorAgent_FINAL_PERSONA_REV1_20260924.zip` 及 [AI 自动切换人格修订](../../docs/superpowers/specs/2026-09-24-deerflow-auto-persona-design.md)。较早的招募运行时、关系摘要、方法卡、通道来源和旧计划均已作废；只保留了原有“工作台”的路由、导航、翻译和诚实占位。
 
 当前包内容：
 
@@ -19,18 +19,19 @@
 
 ```sh
 cd /Users/yangyucheng/Documents/ChatGPT/Tiktok公会
+cd ops/guild-runtime
 npm ci
 npm run bootstrap
 npm run doctor
 npm start
 ```
 
-`bootstrap` 校验并使用固定 DeerFlow commit，应用唯一累计补丁，并将社交内核安装到 `.runtime/deerflow-home/SOUL.md`。如果运行目录里恰好是本项目上一版业务优先内核，它会安全迁移；用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再运行 doctor 和 DeerFlow。
+`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
-`doctor` 验证固定源码、累计补丁、本地依赖、两个 MCP 工具目录，以及 `config/personas.json` 中恰好六份 `1.0.1` 人格。它不调用 TikTok 业务写工具。
+`doctor` 是只读的：它验证 fork 祖先、原生 social 模块和 0026 migration、附件 manifest/六份 `1.0.1` 人格、数据库 revision，以及两份固定 MCP schema-digest catalog。它不启动 MCP server，不创建或迁移数据库，也不调用 TikTok 业务写工具。Task 10 完成本机状态迁移前，缺失或旧版本数据库会被诚实报告为失败。
 
 ## 第一个安全提示
 
 > 作为默认 Lead，请只读使用 Guild Operator 和 TKDesk 的当前事实，说明每项事实的来源、时间、作用域和缺失数据。不要发消息、发邀约、关注、评论、送礼、发布或更改平台状态。
 
-`.runtime/` 是可重建的本机运行目录，不纳入 Git。已核对的当前能力与缺口见 [迁移审计](docs/audits/2026-09-23-deerflow-guild-migration-audit.md)。
+`backend/.deer-flow/` 是原生本机状态目录，不纳入 Git。已核对的当前能力与缺口见 [CreatorAgent 能力矩阵](../../docs/verification/creator-agent/capability-matrix.md)。

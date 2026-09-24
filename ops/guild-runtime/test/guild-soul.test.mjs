@@ -16,53 +16,47 @@ Use DeerFlow's normal planning, tools, memory and delegation as needed. A draft 
 `;
 
 async function soulFixture() {
-  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'guild-soul-'));
-  await mkdir(path.join(fixtureRoot, 'config'));
-  await writeFile(path.join(fixtureRoot, 'config', 'guild-soul.md'), 'new social kernel\n');
-  return fixtureRoot;
+  const forkRoot = await mkdtemp(path.join(os.tmpdir(), 'guild-soul-'));
+  await mkdir(path.join(forkRoot, 'ops', 'guild-runtime', 'config'), { recursive: true });
+  await writeFile(
+    path.join(forkRoot, 'ops', 'guild-runtime', 'config', 'guild-soul.md'),
+    'new social kernel\n',
+  );
+  return forkRoot;
 }
 
-test('installs the packaged social kernel when SOUL is missing', async () => {
-  const fixtureRoot = await soulFixture();
-  try {
-    const result = await ensureGuildSoul({ packageRoot: fixtureRoot });
-    assert.deepEqual(result, {
-      installed: true,
-      migrated: false,
-      path: path.join(fixtureRoot, '.runtime', 'deerflow-home', 'SOUL.md'),
-    });
-    assert.equal(await readFile(result.path, 'utf8'), 'new social kernel\n');
-  } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
-  }
+test('installs the packaged social kernel into the native backend home when SOUL is missing', async (t) => {
+  const forkRoot = await soulFixture();
+  t.after(() => rm(forkRoot, { recursive: true, force: true }));
+  const result = await ensureGuildSoul({ packageRoot: forkRoot });
+  assert.deepEqual(result, {
+    installed: true,
+    migrated: false,
+    path: path.join(forkRoot, 'backend', '.deer-flow', 'SOUL.md'),
+  });
+  assert.equal(await readFile(result.path, 'utf8'), 'new social kernel\n');
 });
 
-test('migrates the exact previous packaged business-first SOUL', async () => {
-  const fixtureRoot = await soulFixture();
-  const target = path.join(fixtureRoot, '.runtime', 'deerflow-home', 'SOUL.md');
-  try {
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, LEGACY_BUSINESS_FIRST_SOUL);
-    const result = await ensureGuildSoul({ packageRoot: fixtureRoot });
-    assert.deepEqual(result, { installed: true, migrated: true, path: target });
-    assert.equal(await readFile(target, 'utf8'), 'new social kernel\n');
-  } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
-  }
+test('migrates only the exact previous packaged business-first SOUL', async (t) => {
+  const forkRoot = await soulFixture();
+  t.after(() => rm(forkRoot, { recursive: true, force: true }));
+  const target = path.join(forkRoot, 'backend', '.deer-flow', 'SOUL.md');
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, LEGACY_BUSINESS_FIRST_SOUL);
+  const result = await ensureGuildSoul({ packageRoot: forkRoot });
+  assert.deepEqual(result, { installed: true, migrated: true, path: target });
+  assert.equal(await readFile(target, 'utf8'), 'new social kernel\n');
 });
 
-test('preserves a genuinely customized default Lead SOUL', async () => {
-  const fixtureRoot = await soulFixture();
-  const target = path.join(fixtureRoot, '.runtime', 'deerflow-home', 'SOUL.md');
-  try {
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, 'operator customization\n');
-    const result = await ensureGuildSoul({ packageRoot: fixtureRoot });
-    assert.deepEqual(result, { installed: false, migrated: false, path: target });
-    assert.equal(await readFile(target, 'utf8'), 'operator customization\n');
-  } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
-  }
+test('preserves a genuinely customized native Lead SOUL', async (t) => {
+  const forkRoot = await soulFixture();
+  t.after(() => rm(forkRoot, { recursive: true, force: true }));
+  const target = path.join(forkRoot, 'backend', '.deer-flow', 'SOUL.md');
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, 'operator customization\n');
+  const result = await ensureGuildSoul({ packageRoot: forkRoot });
+  assert.deepEqual(result, { installed: false, migrated: false, path: target });
+  assert.equal(await readFile(target, 'utf8'), 'operator customization\n');
 });
 
 test('packaged SOUL uses the social kernel and cannot restore the obsolete business-first opening', async () => {
