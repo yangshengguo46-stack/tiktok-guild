@@ -22,11 +22,18 @@ export async function startRuntime({
     const failed = report.checks.filter(({ ok }) => !ok).map(({ name }) => name).join(', ');
     throw new Error(`Doctor failed: ${failed}.\n${formatDoctorReport(report)}`);
   }
+  console.warn(
+    'Guild runtime local mode: authentication setup is bypassed with a synthetic admin. '
+      + 'Remove DEER_FLOW_AUTH_DISABLED before production deployment.',
+  );
   const code = await start('make', ['start'], {
     cwd: root,
     env: {
       ...process.env,
       CI: 'true',
+      // The workbench is local-only during this phase, so /setup does not block
+      // product verification. The backend ignores this flag in explicit production mode.
+      DEER_FLOW_AUTH_DISABLED: '1',
       PATH: `${pnpmBinRoot}${path.delimiter}${process.env.PATH ?? ''}`,
       DEER_FLOW_CONFIG_PATH: path.join(opsRoot, 'config', 'config.yaml'),
       DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG),

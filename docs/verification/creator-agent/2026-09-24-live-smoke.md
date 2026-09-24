@@ -2,7 +2,7 @@
 
 时间：2026-09-24（Asia/Shanghai）  
 派发号：`DSR-LIVE-20260924-01`  
-版本：`master@0d3cf831`
+版本：`master@e451326a`
 
 ## 本机启动
 
@@ -14,7 +14,10 @@
 - Gateway `GET http://127.0.0.1:8001/health`：HTTP 200，`{"status":"healthy"}`；
 - 前端直连 `http://127.0.0.1:3000/`：HTTP 200；
 - Nginx `http://127.0.0.1:2026/`：HTTP 200；
-- `/workspace/guild` 在未创建管理员账户时按设计重定向到 `/setup`；没有代替用户创建账户。
+- `npm start` 注入 `DEER_FLOW_AUTH_DISABLED=1`，Gateway 输出本地 auth-disabled 警告；
+- `/setup` 自动重定向到 `/workspace`，`/workspace/guild`：HTTP 200；
+- `/api/v1/auth/me`：HTTP 200，返回 `default@test.local` synthetic admin，`needs_setup=false`；
+- `DEER_FLOW_AUTH_DISABLED=1` 在 `DEER_FLOW_ENV=production` 下经后端保护判定为无效，生产仍需正常认证。
 
 当前本机生产模式进程保持运行：Gateway 8001、Frontend 3000、Nginx 2026。
 
@@ -36,8 +39,9 @@
 ## 结论与阻塞
 
 - 本机启动、原生 Lead、MCP 静态合同和真实模型传输：`verified-local` / `verified-model`；
+- 本地工作台不再被账号密码初始化拦截；账号、密码、会话和数据库实现仍保留，出厂部署前移除
+  `start.mjs` 的本地 auth-disabled 注入即可恢复；
 - 自动人格候选生成：本轮已通过真实模型验证；
 - 真实模型的语义“switch”质量：`blocked`，本轮没有把模型的保守 `stay` 解释成成功切换；
-- 首次使用仍需要用户在 `http://127.0.0.1:2026/setup` 完成管理员账户创建；这是安全敏感的
-  用户动作，不能由代理代填；
+- 当前仅为 loopback 本地验收模式，匿名请求使用 synthetic admin；不得暴露到共享或生产环境；
 - TikTok 真实收信、发信、正式邀约、送达/已读回执仍是 `unverified-external`。

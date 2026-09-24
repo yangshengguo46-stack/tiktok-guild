@@ -8,7 +8,7 @@
 
 实施分支：`codex/deerflow-social-runtime`
 
-状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；现场试运行第一批完成，等待管理员初始化
+状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；现场试运行第一批完成，本地 auth gate 已暂时停用
 当前写入者：`/root`
 
 ## 现场试运行阶段（DSR-LIVE-20260924-01）
@@ -39,9 +39,12 @@ Ruling：停止上述“修复 start 路径”的派工——复核入口契约�
 再以新的可复现证据开启代码修复批次。
 
 现场结果：按正确顺序 bootstrap/doctor/acceptance/start 后，固定 pnpm `10.26.2` 生效；
-Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200，`/workspace/guild`
-在首个管理员账户缺失时重定向 `/setup`。真实 `gpt-6-sol` 人格生成耗时 12.886 秒并产出
-未激活候选；选择器返回合规 `stay`，真实模型语义 switch 仍未证明。完整证据见
+Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当前 `npm start`
+仅在本地入口注入 `DEER_FLOW_AUTH_DISABLED=1`，`/setup` 自动进入 `/workspace`，
+`/workspace/guild` 返回 200，`/api/v1/auth/me` 返回 synthetic admin。账号密码认证实现、
+数据库和 setup 页面均保留；`DEER_FLOW_ENV=production`/`ENVIRONMENT=production` 时后端
+忽略此开关。真实 `gpt-6-sol` 人格生成耗时 12.886 秒并产出未激活候选；选择器返回合规
+`stay`，真实模型语义 switch 仍未证明。完整证据见
 `docs/verification/creator-agent/2026-09-24-live-smoke.md`。
 
 ## 唯一生效边界
@@ -102,7 +105,8 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200，`/wo
 - Frontend check：通过；sidebar/workbench Playwright：`5 passed`。
 - Frontend full：201 files / 1626 tests，`1599 passed, 27 failed`；两个 DOM storage
   文件下的完全相同失败已在 untouched upstream + Node 26.4.0 复现。
-- Ops：`34 passed`；doctor 15/15；acceptance `ok: true`。新增 WAL 快照 warm-up 回归覆盖 macOS 只读打开语义。
+- Ops：`35 passed`；doctor 15/15；acceptance `ok: true`。新增 auth-gate 启动回归和 WAL 快照
+  warm-up 回归覆盖本地免注册与 macOS 只读打开语义。
 - Backend full：`18 failed, 17531 passed, 189 skipped, 3 deselected`；18 项与 untouched
   upstream 精确匹配，分支新增失败为 0。详见
   `docs/verification/creator-agent/final-verification.md`。
@@ -121,4 +125,5 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200，`/wo
 - 2026-09-24 04:34 CST：纠正“人格必须绑定子 Agent”的误解；人格只是可选解析层。
 - 2026-09-24 04:58 CST：用户要求按四份详细方案直接施工，实施计划锁定为 10 个任务。
 - 2026-09-24 15:xx CST：Task 10 完成隔离状态 bootstrap、全产品验证和证据收口；独立复审通过并完成本地 fast-forward。
-- 2026-09-24 18:xx CST：现场试运行第一批完成；本机三服务启动成功，真实模型生成候选成功，等待用户完成 `/setup` 管理员初始化。
+- 2026-09-24 18:xx CST：现场试运行第一批完成；本机三服务启动成功，真实模型生成候选成功，
+  本地 auth gate 暂停，工作台无需注册即可进入；出厂前恢复正常认证。
