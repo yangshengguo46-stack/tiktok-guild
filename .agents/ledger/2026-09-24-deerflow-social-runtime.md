@@ -142,3 +142,18 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 - 2026-09-24 18:xx CST：现场试运行第一批完成；本机三服务启动成功，真实模型生成候选成功，
   本地 auth gate 暂停，工作台无需注册即可进入；出厂前恢复正常认证。
 - 2026-09-24 19:08 CST：按计划完成本地运行时初始化复核；空关系状态保持不变，未创建账号、主播事实或平台动作。
+
+## 2026-09-28 审计收口补记
+
+- 稳定性修复、运行诊断、可选 TikHub、供应商原版配置加载和本地插件合同按现有证据收口；不把离线或只读证据升级为 TikTok 外部完成。
+- `business_20003` 事故确认是 Agent 把“检测”误走成真实 `full_auto` 运行。已补 MCP 工具说明、`tkdesk-agent` skill 被动检查门禁和回归测试；保留 20003 的授权撤销与 fail-closed 语义。
+- 当前没有活动运行；`tiktok_discovery` 因 20003 保持封锁，collection-backstage 独立 readiness 不替代 discovery 授权。恢复必须由明确的线上运行意图触发，并先做零查询检查。
+- 真实长跑、真实来信/发信/邀约/回执、模型语义切换、PostgreSQL live、自有授权替代供应商来源继续是 `unverified-external`、`blocked` 或 roadmap 延后。
+- 2026-09-29：当前配置 `gpt-6-sol` 的真实 selector 跟进已记录；合成 `stay` 以 0.99 置信度在 4.804 秒返回，合成 `switch` 曾在默认 10 秒边界超时，随后 30 秒有界探针在 5.552 秒返回 `clear_direct@1.0.1`、置信度 0.99。语义 switch 已验证，默认 10 秒截止的偶发延迟仍待稳定性评估，证据见 `2026-09-29-project-closeout-selector-evidence.json`。
+
+## 2026-09-29 经纪人 profile owner 收口
+
+- 现场确认旧的经纪人 MCP 进程 PID 7480 及其 headless Chromium 子进程 PID 8152 脱离当前 Gateway，独占 `~/.codex/tiktok-live-broker-operator/profile`；当前 Gateway 只留下新的三 MCP 配置，症状表现为 `profile_busy`、`ProcessSingleton` 和重复登录。
+- 已备份经纪人操作库后优雅停止旧 owner；没有删除 profile、登录资料或锁文件。现有 profile 的最近登录状态保留。
+- Gateway MCP cache 已重置。使用同一 profile 启动新的 broker server，`broker_workspace` 成功读取 Atlantis（guild `103785`），未再出现 `login_required` 或 `profile_busy`。
+- 本次仅做 workspace 读取和进程恢复，没有执行 TikTok 发信、邀约或其他平台写入；外部消息/回执继续保持 `unverified-external`。

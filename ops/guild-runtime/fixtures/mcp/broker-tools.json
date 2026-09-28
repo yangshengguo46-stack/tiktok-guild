@@ -1,0 +1,12 @@
+{
+  "tools": [
+    {
+      "name": "broker_workspace",
+      "input_schema_sha256": "f1292d28c9b829d797138806eb53a29a412469a814bb78249c8e4e65e6557c8e"
+    },
+    {
+      "name": "broker_messaging",
+      "input_schema_sha256": "479fa431d636206d2cc18729d3f573631f191e08b0e67a9d304b8ed7f2c79244"
+    }
+  ]
+}

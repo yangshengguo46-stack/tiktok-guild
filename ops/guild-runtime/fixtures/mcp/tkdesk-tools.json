@@ -1,32 +1,140 @@
 {
   "tools": [
-    { "name": "status", "input_schema_sha256": "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225" },
-    { "name": "core_configuration_status", "input_schema_sha256": "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225" },
-    { "name": "original_country_catalog", "input_schema_sha256": "d479f9009720c40e68c1142ba4b69baf6b1068613ffbb6508c0a91fbb49c139f" },
-    { "name": "mobile_authorization_status", "input_schema_sha256": "5894e29afc4b089c128e234f11039ab8a75cc8eb8d6c3b47ee57116417a2c2b7" },
-    { "name": "clear_mobile_authorization", "input_schema_sha256": "a041156d948447836ee6f50a7ac19befb88f0c6aa559e5b2c8ddf7b6d57d5d2c" },
-    { "name": "session_status", "input_schema_sha256": "65a5f5be5cc76a0ee345ffab3710802396c58dd5a9102288f04e70e2a1e318b5" },
-    { "name": "start_login", "input_schema_sha256": "ecb5a3566ad238884903909029817cfe3b742c76fee60649f3f627d72599c902" },
-    { "name": "check_login", "input_schema_sha256": "ecb5a3566ad238884903909029817cfe3b742c76fee60649f3f627d72599c902" },
-    { "name": "reset_session", "input_schema_sha256": "55b5dc0ddfa4cb9688fbf23f91e1dd4a94b2f7bd93cf020afdf775cb268ee384" },
-    { "name": "create_discovery_run", "input_schema_sha256": "e9ead8e8d6806d07c939bc85a7612f7145a23a44b93977cb2779876a6b1f4052" },
-    { "name": "configure_collection_route", "input_schema_sha256": "80733e2a2e7183579fb80970d09d706b158e1491946743cee93f492c7212d49e" },
-    { "name": "verify_collection_route", "input_schema_sha256": "36b1256fca499512a9a1c65704e0ca975159f8647cefb8a6a33139d1416720b4" },
-    { "name": "collection_route_status", "input_schema_sha256": "de359ed5074e383be51259681f98c793af2d920b4d17f4b40d81713b38cbce1e" },
-    { "name": "collection_backstage_preflight", "input_schema_sha256": "de359ed5074e383be51259681f98c793af2d920b4d17f4b40d81713b38cbce1e" },
-    { "name": "start_run", "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612" },
-    { "name": "pause_run", "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612" },
-    { "name": "resume_run", "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612" },
-    { "name": "cancel_run", "input_schema_sha256": "21dfa3dc9773ac8dadffbbbce9547a1c6b77e7d6ee6647963d473231faa3b010" },
-    { "name": "get_run", "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612" },
-    { "name": "list_runs", "input_schema_sha256": "e952bb814c1a93263cd24cf12eb57b4cd94b224233ec46191fdb87f77bcac09a" },
-    { "name": "preview_collection_cleanup", "input_schema_sha256": "0dc96b997f0dce20cc118f47284e9ffa6ea0fce1269fbc9e9354d7cb68a43ac2" },
-    { "name": "commit_collection_cleanup", "input_schema_sha256": "77d9e2e427d56a33322514bbe6f62d94b0849586ef8324dd58d3da6d74dab623" },
-    { "name": "preview_candidates", "input_schema_sha256": "19998cb50e257fe12cbfb0b4f5189ea09e7aaea69d3d2e380adb8a89151b574d" },
-    { "name": "query_candidates", "input_schema_sha256": "0488e8a810b423a9eb198f8e71793f68e48965ad1851a25c3253339fb1cb9757" },
-    { "name": "check_candidate_qualifications", "input_schema_sha256": "f460eb9c8a4910313f7d7a763a489e1b102f3e8b82a230b896ef85b00fb9ac63" },
-    { "name": "prepare_handoff", "input_schema_sha256": "36c94e08b9ce2a632cab90d1e0f8ce62b20c52b2e6c00911807396e45faafc1b" },
-    { "name": "commit_handoff", "input_schema_sha256": "3d82209493deba7dbe69b3b270f006e130e8947554c2ef85a112cc0f91d69f3f" },
-    { "name": "audit_events", "input_schema_sha256": "a402bcdb18b2725ed84d87ff9526badb2ab40e37d10eb3c5f43029c73851f7db" }
+    {
+      "name": "status",
+      "input_schema_sha256": "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225"
+    },
+    {
+      "name": "core_configuration_status",
+      "input_schema_sha256": "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225"
+    },
+    {
+      "name": "original_country_catalog",
+      "input_schema_sha256": "d479f9009720c40e68c1142ba4b69baf6b1068613ffbb6508c0a91fbb49c139f"
+    },
+    {
+      "name": "mobile_authorization_status",
+      "input_schema_sha256": "5894e29afc4b089c128e234f11039ab8a75cc8eb8d6c3b47ee57116417a2c2b7"
+    },
+    {
+      "name": "clear_mobile_authorization",
+      "input_schema_sha256": "a041156d948447836ee6f50a7ac19befb88f0c6aa559e5b2c8ddf7b6d57d5d2c"
+    },
+    {
+      "name": "session_status",
+      "input_schema_sha256": "65a5f5be5cc76a0ee345ffab3710802396c58dd5a9102288f04e70e2a1e318b5"
+    },
+    {
+      "name": "start_login",
+      "input_schema_sha256": "ecb5a3566ad238884903909029817cfe3b742c76fee60649f3f627d72599c902"
+    },
+    {
+      "name": "reopen_login",
+      "input_schema_sha256": "d548e92e7d26f700dfa71354b3a2c5ce6b72ed687c69d271d7c9bc2e48459d8d"
+    },
+    {
+      "name": "check_login",
+      "input_schema_sha256": "ecb5a3566ad238884903909029817cfe3b742c76fee60649f3f627d72599c902"
+    },
+    {
+      "name": "reset_session",
+      "input_schema_sha256": "55b5dc0ddfa4cb9688fbf23f91e1dd4a94b2f7bd93cf020afdf775cb268ee384"
+    },
+    {
+      "name": "create_discovery_run",
+      "input_schema_sha256": "fa510e705462ed7af40212947e9eee89d8fb8fac8a7f09148cba022c11aa5822"
+    },
+    {
+      "name": "configure_collection_route",
+      "input_schema_sha256": "80733e2a2e7183579fb80970d09d706b158e1491946743cee93f492c7212d49e"
+    },
+    {
+      "name": "verify_collection_route",
+      "input_schema_sha256": "36b1256fca499512a9a1c65704e0ca975159f8647cefb8a6a33139d1416720b4"
+    },
+    {
+      "name": "collection_route_status",
+      "input_schema_sha256": "de359ed5074e383be51259681f98c793af2d920b4d17f4b40d81713b38cbce1e"
+    },
+    {
+      "name": "collection_backstage_preflight",
+      "input_schema_sha256": "de359ed5074e383be51259681f98c793af2d920b4d17f4b40d81713b38cbce1e"
+    },
+    {
+      "name": "initialize_collection_backstage",
+      "input_schema_sha256": "a36c6d88cfd6ccd67d53bae9213f116dabf7d922fff00ec76c5e0f322834828a"
+    },
+    {
+      "name": "prepare_discovery_live",
+      "input_schema_sha256": "3d31efdca025b7ad7e9c4fbdf5128961c380241d9ba22fad066f62702a7fafd4"
+    },
+    {
+      "name": "start_run",
+      "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612"
+    },
+    {
+      "name": "pause_run",
+      "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612"
+    },
+    {
+      "name": "resume_run",
+      "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612"
+    },
+    {
+      "name": "cancel_run",
+      "input_schema_sha256": "21dfa3dc9773ac8dadffbbbce9547a1c6b77e7d6ee6647963d473231faa3b010"
+    },
+    {
+      "name": "get_run",
+      "input_schema_sha256": "1d23b6bb61c64b3f07f4ba0aa4549d4abf0734b2e7d619642ea1c0bfb1587612"
+    },
+    {
+      "name": "list_runs",
+      "input_schema_sha256": "e952bb814c1a93263cd24cf12eb57b4cd94b224233ec46191fdb87f77bcac09a"
+    },
+    {
+      "name": "preview_collection_cleanup",
+      "input_schema_sha256": "0dc96b997f0dce20cc118f47284e9ffa6ea0fce1269fbc9e9354d7cb68a43ac2"
+    },
+    {
+      "name": "commit_collection_cleanup",
+      "input_schema_sha256": "77d9e2e427d56a33322514bbe6f62d94b0849586ef8324dd58d3da6d74dab623"
+    },
+    {
+      "name": "preview_candidates",
+      "input_schema_sha256": "19998cb50e257fe12cbfb0b4f5189ea09e7aaea69d3d2e380adb8a89151b574d"
+    },
+    {
+      "name": "query_candidates",
+      "input_schema_sha256": "0488e8a810b423a9eb198f8e71793f68e48965ad1851a25c3253339fb1cb9757"
+    },
+    {
+      "name": "get_handoff",
+      "input_schema_sha256": "862b02f287e61a4581f8826138e4f51b759f31207d703054cde45e90f87fbff7"
+    },
+    {
+      "name": "creator_research_status",
+      "input_schema_sha256": "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225"
+    },
+    {
+      "name": "research_candidate",
+      "input_schema_sha256": "c77bc8ed0d92f0bc96741226a8232513ac4f35c28b5c1a8ad3c1d42a2b2ddf83"
+    },
+    {
+      "name": "check_candidate_qualifications",
+      "input_schema_sha256": "f460eb9c8a4910313f7d7a763a489e1b102f3e8b82a230b896ef85b00fb9ac63"
+    },
+    {
+      "name": "prepare_handoff",
+      "input_schema_sha256": "36c94e08b9ce2a632cab90d1e0f8ce62b20c52b2e6c00911807396e45faafc1b"
+    },
+    {
+      "name": "commit_handoff",
+      "input_schema_sha256": "3d82209493deba7dbe69b3b270f006e130e8947554c2ef85a112cc0f91d69f3f"
+    },
+    {
+      "name": "audit_events",
+      "input_schema_sha256": "a402bcdb18b2725ed84d87ff9526badb2ab40e37d10eb3c5f43029c73851f7db"
+    }
   ]
 }

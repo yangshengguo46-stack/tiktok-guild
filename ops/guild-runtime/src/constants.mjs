@@ -4,9 +4,10 @@ export const DEERFLOW_PNPM_VERSION = '10.26.2';
 export const GUILD_EXTENSIONS_CONFIG = 'extensions_config.guild.json';
 
 export const GUILD_OPERATOR_ROOT = '/Users/yangyucheng/plugins/tiktok-live-guild-operator';
+export const BROKER_OPERATOR_ROOT = '/Users/yangyucheng/plugins/tiktok-live-broker-operator';
 export const TKDESK_ROOT = '/Users/yangyucheng/plugins/tkdesk-agent';
 
-export const MCP_SERVER_NAMES = Object.freeze(['guild_operator', 'tkdesk']);
+export const MCP_SERVER_NAMES = Object.freeze(['guild_operator', 'broker_operator', 'tkdesk']);
 export const GUILD_TOOL_NAMES = Object.freeze([
   'guild_workspace',
   'guild_creators',
@@ -16,6 +17,11 @@ export const GUILD_TOOL_NAMES = Object.freeze([
   'guild_revenue',
   'guild_governance',
   'guild_intelligence',
+  'guild_onboarding',
+]);
+export const BROKER_TOOL_NAMES = Object.freeze([
+  'broker_workspace',
+  'broker_messaging',
 ]);
 export const TKDESK_TOOL_NAMES = Object.freeze([
   'status',
@@ -25,6 +31,7 @@ export const TKDESK_TOOL_NAMES = Object.freeze([
   'clear_mobile_authorization',
   'session_status',
   'start_login',
+  'reopen_login',
   'check_login',
   'reset_session',
   'create_discovery_run',
@@ -32,6 +39,8 @@ export const TKDESK_TOOL_NAMES = Object.freeze([
   'verify_collection_route',
   'collection_route_status',
   'collection_backstage_preflight',
+  'initialize_collection_backstage',
+  'prepare_discovery_live',
   'start_run',
   'pause_run',
   'resume_run',
@@ -42,6 +51,9 @@ export const TKDESK_TOOL_NAMES = Object.freeze([
   'commit_collection_cleanup',
   'preview_candidates',
   'query_candidates',
+  'get_handoff',
+  'creator_research_status',
+  'research_candidate',
   'check_candidate_qualifications',
   'prepare_handoff',
   'commit_handoff',

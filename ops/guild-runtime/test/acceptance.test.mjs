@@ -39,7 +39,7 @@ test('the package leaves the active skills path to the start environment', async
   assert.equal(Object.hasOwn(config.skills, 'path'), false);
 });
 
-test('the native runtime has one Lead, two direct MCPs, and no layered runtime', async () => {
+test('the native runtime has one Lead, three direct MCPs, and no layered runtime', async () => {
   const extensions = JSON.parse(await readFile(path.join(OPS_ROOT, 'config', 'extensions_config.guild.json'), 'utf8'));
   const configText = await readFile(path.join(OPS_ROOT, 'config', 'config.yaml'), 'utf8');
   const manifestText = await readFile(path.join(OPS_ROOT, 'config', 'local-manifest.json'), 'utf8');
@@ -52,7 +52,7 @@ test('the native runtime has one Lead, two direct MCPs, and no layered runtime',
   assert.equal('cases_path' in manifest, false);
   assert.equal('product_patches' in manifest, false);
   assert.equal('runtime_root' in manifest, false);
-  assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'tkdesk']);
+  assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'broker_operator', 'tkdesk']);
   assert.deepEqual(extensions.mcpServers.guild_operator.enabled_tools, [
     'guild_workspace',
     'guild_creators',
@@ -62,8 +62,17 @@ test('the native runtime has one Lead, two direct MCPs, and no layered runtime',
     'guild_revenue',
     'guild_governance',
     'guild_intelligence',
+    'guild_onboarding',
   ]);
-  assert.equal(extensions.mcpServers.tkdesk.enabled_tools.length, 28);
+  assert.deepEqual(extensions.mcpServers.broker_operator.enabled_tools, [
+    'broker_workspace',
+    'broker_messaging',
+  ]);
+  const tkdeskCatalog = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
+  assert.deepEqual(extensions.mcpServers.tkdesk.enabled_tools, tkdeskCatalog.tools.map(({ name }) => name));
+  assert.equal(extensions.mcpServers.tkdesk.enabled_tools.includes('reopen_login'), true);
+  assert.equal(extensions.mcpServers.tkdesk.enabled_tools.includes('initialize_collection_backstage'), true);
+  assert.equal(extensions.mcpServers.tkdesk.enabled_tools.includes('prepare_discovery_live'), true);
   assert.deepEqual(extensions.mcpServers.tkdesk.enabled_tools.slice(-3), [
     'prepare_handoff',
     'commit_handoff',
@@ -75,16 +84,19 @@ test('the native runtime has one Lead, two direct MCPs, and no layered runtime',
 
 test('catalog snapshots preserve handoff and forbid outreach tools', async () => {
   const guild = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'guild-tools.json'), 'utf8'));
+  const broker = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'broker-tools.json'), 'utf8'));
   const tkdesk = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
 
-  assert.equal(guild.tools.length, 8);
+  assert.equal(guild.tools.length, 9);
+  assert.equal(broker.tools.length, 2);
   assert.equal(tkdesk.tools.some(({ name }) => name === 'prepare_handoff'), true);
   assert.equal(tkdesk.tools.some(({ name }) => name === 'commit_handoff'), true);
+  assert.equal(tkdesk.tools.some(({ name }) => name === 'reopen_login'), true);
   assert.deepEqual(
     tkdesk.tools.filter(({ name }) => /send_message|send_invitation|follow|comment|gift|publish/iu.test(name)),
     [],
   );
-  for (const item of [...guild.tools, ...tkdesk.tools]) {
+  for (const item of [...guild.tools, ...broker.tools, ...tkdesk.tools]) {
     assert.match(item.input_schema_sha256, /^[0-9a-f]{64}$/u);
   }
 });
@@ -102,17 +114,29 @@ test('offline acceptance rejects a blank installed Lead mission', async (t) => {
 test('offline acceptance composes config, doctor, and catalog evidence with a customized mission', async (t) => {
   const customMission = 'Use my customized guild Lead mission.\n';
   const root = await offlinePackage(t, customMission);
+  const broker = JSON.parse(await readFile(path.join(root, 'ops', 'guild-runtime', 'fixtures', 'mcp', 'broker-tools.json'), 'utf8'));
   const tkdesk = JSON.parse(await readFile(path.join(root, 'ops', 'guild-runtime', 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
   const report = await runOfflineAcceptance(root);
 
   assert.deepEqual(report, {
     ok: true,
-    mcpServers: 2,
-    guildTools: 8,
+    mcpServers: 3,
+    guildTools: 9,
+    brokerTools: broker.tools.length,
     tkdeskTools: tkdesk.tools.length,
+    catalogEvidence: 'static-approved-snapshots',
     nativeGuildLead: true,
   });
   assert.equal(await readFile(path.join(root, 'backend', '.deer-flow', 'SOUL.md'), 'utf8'), customMission);
+});
+
+test('live acceptance requests runtime checks and preserves an unavailable catalog reason', async (t) => {
+  const root = await offlinePackage(t, 'fixture mission');
+  await assert.rejects(runAcceptance({ packageRoot: root, live: true,
+    runTests: async () => ({ code: 0, stdout: '', stderr: '' }),
+    doctor: async ({ live }) => ({ ok: live !== true,
+      checks: [{ name: 'gateway_mcp_config', ok: false, evidence: 'gateway-config', detail: 'unavailable: HTTP 503' }] }),
+  }), /gateway_mcp_config.*unavailable.*503/u);
 });
 
 test('standalone operations point to the unique CreatorAgent design', async () => {

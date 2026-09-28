@@ -18,6 +18,7 @@ import {
   inspectPinnedPnpm,
   runDoctor,
 } from '../scripts/doctor.mjs';
+import { createServer } from 'node:http';
 import { startRuntime } from '../scripts/start.mjs';
 import { runCommand } from '../src/process.mjs';
 
@@ -31,9 +32,11 @@ const REQUIRED_CHECKS = [
   'git',
   'runtime_config',
   'guild_operator_root',
+  'broker_operator_root',
   'tkdesk_root',
   'tkdesk_launcher',
   'guild_dependencies',
+  'broker_dependencies',
   'fork_upstream_ancestor',
   'native_social_runtime',
   'creator_agent_assets',
@@ -41,6 +44,7 @@ const REQUIRED_CHECKS = [
   'database_revision',
   'deerflow_pnpm',
   'guild_mcp',
+  'broker_mcp',
   'tkdesk_mcp',
 ];
 
@@ -52,6 +56,44 @@ test('doctor reports every required check by name and never stops at the first f
   assert.equal(report.ok, false);
   assert.deepEqual(report.checks.map(({ name }) => name), REQUIRED_CHECKS);
   assert.deepEqual(report.checks.map(({ ok }) => ok), REQUIRED_CHECKS.map(() => false));
+});
+
+test('live doctor marks an unavailable Gateway instead of passing static snapshots as running tools', async (t) => {
+  const server = createServer((_request, response) => { response.writeHead(503).end(); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const adapters = Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, async () => ({ detail: 'static fixture' })]));
+  for (const name of ['guild_direct_catalog', 'broker_direct_catalog', 'tkdesk_direct_catalog']) {
+    adapters[name] = async () => ({ detail: 'direct fixture' });
+  }
+  const report = await runDoctor({
+    packageRoot: FORK_ROOT,
+    live: true,
+    gatewayUrl: `http://127.0.0.1:${server.address().port}`,
+    adapters,
+  });
+  assert.equal(report.ok, false);
+  assert.match(report.checks.find(({ name }) => name === 'gateway_mcp_config')?.detail ?? '', /unavailable.*503/iu);
+  assert.equal(report.gatewayLoadedCatalog.status, 'unverified');
+});
+
+test('live doctor rejects the running configuration when broker is missing', async (t) => {
+  const extensions = JSON.parse(await readFile(path.join(OPS_ROOT, 'config', 'extensions_config.guild.json'), 'utf8'));
+  delete extensions.mcpServers.broker_operator;
+  const server = createServer((_request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ mcp_servers: extensions.mcpServers }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const adapters = Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, async () => ({ detail: 'static fixture' })]));
+  for (const name of ['guild_direct_catalog', 'broker_direct_catalog', 'tkdesk_direct_catalog']) {
+    adapters[name] = async () => ({ detail: 'direct fixture' });
+  }
+  const report = await runDoctor({ packageRoot: FORK_ROOT, live: true,
+    gatewayUrl: `http://127.0.0.1:${server.address().port}`, adapters });
+  assert.equal(report.ok, false);
+  assert.match(report.checks.find(({ name }) => name === 'gateway_mcp_config')?.detail ?? '', /missing.*broker_operator/iu);
 });
 
 test('fork inspection checks ancestry instead of requiring HEAD to equal the pin', async () => {
@@ -101,9 +143,11 @@ test('asset inspection rejects a modified package even when its manifest is re-s
 });
 
 test('approved MCP catalogs are checked statically without starting either server', async () => {
+  const tkdesk = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
   assert.deepEqual(await inspectApprovedCatalogs({ opsRoot: OPS_ROOT }), {
-    guild: '8 approved read-only tools',
-    tkdesk: '28 approved tools; handoff present and outreach absent',
+    guild: '9 approved tools; ordinary backstage writes are agent-operated, creator removal remains approval-gated',
+    broker: '2 approved tools; isolated broker profile and broker-scoped messaging only',
+    tkdesk: `${tkdesk.tools.length} approved tools; recovery and handoff present, outreach absent`,
   });
 });
 

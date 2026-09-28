@@ -4,6 +4,8 @@ import path from 'node:path';
 import {
   DEERFLOW_COMMIT,
   DEERFLOW_REPOSITORY,
+  BROKER_OPERATOR_ROOT,
+  BROKER_TOOL_NAMES,
   GUILD_OPERATOR_ROOT,
   GUILD_EXTENSIONS_CONFIG,
   GUILD_TOOL_NAMES,
@@ -84,23 +86,32 @@ export function validateRuntimeConfig(config, { exists, nodeVersion }) {
   }
   exactValues(guild.enabled_tools, GUILD_TOOL_NAMES, 'Guild tools');
 
+  const broker = servers.broker_operator;
+  if (broker.command !== 'node'
+    || broker.cwd !== BROKER_OPERATOR_ROOT
+    || broker.args?.[0] !== `${BROKER_OPERATOR_ROOT}/src/server.mjs`) {
+    throw new Error('Broker Operator command must point directly to the isolated broker plugin server.');
+  }
+  exactValues(broker.enabled_tools, BROKER_TOOL_NAMES, 'Broker tools');
+
   const tkdesk = servers.tkdesk;
   if (tkdesk.command !== `${TKDESK_ROOT}/scripts/launch_mcp`
     || tkdesk.cwd !== TKDESK_ROOT) {
     throw new Error('TKDesk command must point directly to the existing plugin launcher.');
   }
   exactValues(tkdesk.enabled_tools, TKDESK_TOOL_NAMES, 'TKDesk tools');
-  if (guild.enabled !== true || tkdesk.enabled !== true
-    || !guild.required || !tkdesk.required
-    || guild.tool_name_prefix !== false || tkdesk.tool_name_prefix !== false) {
+  if (guild.enabled !== true || broker.enabled !== true || tkdesk.enabled !== true
+    || !guild.required || !broker.required || !tkdesk.required
+    || guild.tool_name_prefix !== false || broker.tool_name_prefix !== false || tkdesk.tool_name_prefix !== false) {
     throw new Error('Approved MCP servers must be enabled, required, and expose stable unprefixed tool names.');
   }
-  const forbidden = [...guild.enabled_tools, ...tkdesk.enabled_tools].filter((name) => FORBIDDEN_OUTREACH.test(name));
+  const forbidden = [...guild.enabled_tools, ...broker.enabled_tools, ...tkdesk.enabled_tools]
+    .filter((name) => FORBIDDEN_OUTREACH.test(name));
   if (forbidden.length > 0) {
     throw new Error(`Approved MCP allowlists contain forbidden outreach tools: ${forbidden.join(', ')}`);
   }
 
-  for (const executable of [guild.args[0], tkdesk.command]) {
+  for (const executable of [guild.args[0], broker.args[0], tkdesk.command]) {
     if (!exists(executable)) throw new Error(`Required plugin executable does not exist: ${executable}`);
   }
 

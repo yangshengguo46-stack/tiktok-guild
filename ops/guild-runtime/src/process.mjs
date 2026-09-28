@@ -92,6 +92,7 @@ export function probeMcpServer({
     const child = spawn(command, args, {
       cwd,
       env,
+      detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let buffer = '';
@@ -99,13 +100,28 @@ export function probeMcpServer({
     let outputBytes = 0;
     let nextId = 1;
     let settled = false;
+    let closed = false;
     const pending = new Map();
 
-    const stop = () => {
+    const stop = () => new Promise((done) => {
+      if (closed || !child.pid) { done(); return; }
+      const signal = (value) => {
+        try {
+          if (process.platform === 'win32') child.kill(value);
+          else process.kill(-child.pid, value);
+        } catch (error) {
+          if (error.code !== 'ESRCH') child.kill(value);
+        }
+      };
+      const termTimer = setTimeout(() => signal('SIGTERM'), 250);
+      const killTimer = setTimeout(() => signal('SIGKILL'), 500);
+      child.once('close', () => {
+        clearTimeout(termTimer);
+        clearTimeout(killTimer);
+        done();
+      });
       child.stdin.end();
-      const killTimer = setTimeout(() => child.kill('SIGTERM'), 250);
-      killTimer.unref();
-    };
+    });
     const finish = (callback) => {
       if (settled) return;
       settled = true;
@@ -115,10 +131,22 @@ export function probeMcpServer({
         rejectCall(new Error('MCP probe ended before a response arrived.'));
       }
       pending.clear();
-      stop();
-      callback();
+      void stop().then(callback);
     };
-    const fail = (message) => finish(() => reject(new Error(message)));
+    const fail = (message) => {
+      const redact = (value) => {
+        let text = value;
+        for (const [name, secret] of Object.entries(env)) {
+          if (/key|token|secret|password|authorization|cookie/iu.test(name) && secret) {
+            text = text.split(String(secret)).join('[redacted]');
+          }
+        }
+        return text;
+      };
+      const diagnostic = redact(stderr.trim()).slice(-2048);
+      const reason = redact(message).slice(0, 2048);
+      finish(() => reject(new Error(`${reason}${diagnostic ? ` Stderr: ${diagnostic}` : ''}`)));
+    };
     const addBytes = (chunk) => {
       outputBytes += Buffer.byteLength(chunk);
       if (outputBytes > maxOutputBytes) {
@@ -148,6 +176,7 @@ export function probeMcpServer({
     child.stderr.on('data', (chunk) => {
       if (addBytes(chunk)) stderr += chunk;
     });
+    child.stdin.on('error', (error) => fail(`MCP stdin failed: ${error.code ?? error.message}`));
     child.stdout.on('data', (chunk) => {
       if (!addBytes(chunk)) return;
       buffer += chunk;
@@ -172,8 +201,9 @@ export function probeMcpServer({
       }
     });
     child.on('error', (error) => fail(`Could not start MCP server: ${error.message}`));
-    child.on('close', (code) => {
-      if (!settled) fail(`MCP server exited before the probe completed (code ${code}). ${stderr.trim()}`);
+    child.on('close', (code, signal) => {
+      closed = true;
+      if (!settled) fail(`MCP server exited before the probe completed (code ${code}, signal ${signal ?? 'none'}).`);
     });
 
     const overallTimer = setTimeout(() => fail('MCP probe timed out.'), timeoutMs * 3);
@@ -186,8 +216,20 @@ export function probeMcpServer({
           clientInfo: { name: 'deerflow-native-guild-doctor', version: '0.1.0' },
         });
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
-        const listed = await call('tools/list', {});
-        finish(() => resolve({ initialize, tools: listed?.tools ?? [] }));
+        const tools = [];
+        const cursors = new Set();
+        let cursor;
+        do {
+          const listed = await call('tools/list', cursor ? { cursor } : {});
+          if (!Array.isArray(listed?.tools)) throw new Error('MCP tools/list returned an invalid catalog.');
+          tools.push(...listed.tools);
+          cursor = listed.nextCursor;
+          if (cursor !== undefined && (typeof cursor !== 'string' || !cursor || cursors.has(cursor) || cursors.size >= 100)) {
+            throw new Error('MCP tools/list returned invalid or unbounded pagination.');
+          }
+          if (cursor) cursors.add(cursor);
+        } while (cursor);
+        finish(() => resolve({ initialize, tools }));
       } catch (error) {
         fail(error.message);
       }

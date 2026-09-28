@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   DEERFLOW_COMMIT,
   DEERFLOW_PNPM_VERSION,
+  BROKER_OPERATOR_ROOT,
+  BROKER_TOOL_NAMES,
   GUILD_OPERATOR_ROOT,
   GUILD_EXTENSIONS_CONFIG,
   GUILD_TOOL_NAMES,
@@ -17,15 +19,19 @@ import {
 } from '../src/constants.mjs';
 import { runCommand } from '../src/process.mjs';
 import { loadRuntimeConfig, validateRuntimeConfig } from '../src/runtime-config.mjs';
+import { buildRuntimeEnvironment } from '../src/runtime-environment.mjs';
+import { inspectDirectMcpCatalog, inspectGatewayMcpConfig } from '../src/mcp-catalog.mjs';
 
 export const REQUIRED_DOCTOR_CHECKS = Object.freeze([
   'node',
   'git',
   'runtime_config',
   'guild_operator_root',
+  'broker_operator_root',
   'tkdesk_root',
   'tkdesk_launcher',
   'guild_dependencies',
+  'broker_dependencies',
   'fork_upstream_ancestor',
   'native_social_runtime',
   'creator_agent_assets',
@@ -33,7 +39,11 @@ export const REQUIRED_DOCTOR_CHECKS = Object.freeze([
   'database_revision',
   'deerflow_pnpm',
   'guild_mcp',
+  'broker_mcp',
   'tkdesk_mcp',
+]);
+export const LIVE_DOCTOR_CHECKS = Object.freeze([
+  'gateway_mcp_config', 'guild_direct_catalog', 'broker_direct_catalog', 'tkdesk_direct_catalog',
 ]);
 
 const CREATOR_AGENT_PERSONA_IDS = Object.freeze([
@@ -54,8 +64,9 @@ const PERSONA_BEHAVIOR_FIELDS = Object.freeze([
   'initiative',
 ]);
 const APPROVED_CATALOG_SHA256 = Object.freeze({
-  guild: 'c5311d17e659729e5cf9f8096a6b84120c09b2d2f367a6a78420d98e9f194f0b',
-  tkdesk: '7073e1a6587f3a9da962fb3a9e0a98d9a01f917ca9c8b2728b623cea1ffe0056',
+  guild: 'd92e46f6ecb1dd55961ee8e77acd594d9096d417acb2110fe548b73c28d58b21',
+  broker: '86d60336f5694d6342f70017351a2a9ee4120c2451e47cc1e23d1af936954f98',
+  tkdesk: 'bc175ef6a46ee75d25e02516a7b39324c938863a9e746c8a7830e0011fb7cf49',
 });
 const APPROVED_ASSET_MANIFEST_SHA256 = 'cb1246bdc1a8c2c68dcf3d1df89d0d67e727a60ef1e2db8fe823998d55d69b24';
 const FORBIDDEN_OUTREACH = /send_message|send_invitation|follow|comment|gift|publish/iu;
@@ -318,31 +329,40 @@ export async function inspectApprovedCatalogs({ opsRoot }) {
   const guildNames = await loadApprovedCatalog(
     path.join(opsRoot, 'fixtures', 'mcp', 'guild-tools.json'),
     APPROVED_CATALOG_SHA256.guild,
-    8,
+    9,
     'Guild Operator',
   );
   const tkdeskNames = await loadApprovedCatalog(
     path.join(opsRoot, 'fixtures', 'mcp', 'tkdesk-tools.json'),
     APPROVED_CATALOG_SHA256.tkdesk,
-    28,
+    TKDESK_TOOL_NAMES.length,
     'TKDesk',
+  );
+  const brokerNames = await loadApprovedCatalog(
+    path.join(opsRoot, 'fixtures', 'mcp', 'broker-tools.json'),
+    APPROVED_CATALOG_SHA256.broker,
+    2,
+    'Broker Operator',
   );
   exactValues(guildNames, GUILD_TOOL_NAMES, 'Guild Operator catalog');
   exactValues(config.mcpServers.guild_operator.enabled_tools, guildNames, 'Guild Operator allowlist');
+  exactValues(brokerNames, BROKER_TOOL_NAMES, 'Broker Operator catalog');
+  exactValues(config.mcpServers.broker_operator.enabled_tools, brokerNames, 'Broker Operator allowlist');
   exactValues(tkdeskNames, TKDESK_TOOL_NAMES, 'TKDesk catalog');
   exactValues(config.mcpServers.tkdesk.enabled_tools, tkdeskNames, 'TKDesk allowlist');
-  for (const required of ['prepare_handoff', 'commit_handoff']) {
+  for (const required of ['reopen_login', 'initialize_collection_backstage', 'prepare_discovery_live', 'prepare_handoff', 'commit_handoff']) {
     if (!tkdeskNames.includes(required)) throw new Error(`TKDesk is missing ${required}`);
   }
-  const forbidden = [...guildNames, ...tkdeskNames].filter((name) => FORBIDDEN_OUTREACH.test(name));
+  const forbidden = [...guildNames, ...brokerNames, ...tkdeskNames].filter((name) => FORBIDDEN_OUTREACH.test(name));
   if (forbidden.length > 0) throw new Error(`Approved catalogs expose forbidden outreach tools: ${forbidden.join(', ')}`);
   return {
-    guild: '8 approved read-only tools',
-    tkdesk: '28 approved tools; handoff present and outreach absent',
+    guild: '9 approved tools; ordinary backstage writes are agent-operated, creator removal remains approval-gated',
+    broker: '2 approved tools; isolated broker profile and broker-scoped messaging only',
+    tkdesk: `${TKDESK_TOOL_NAMES.length} approved tools; recovery and handoff present, outreach absent`,
   };
 }
 
-function defaultAdapters(packageRoot) {
+function defaultAdapters(packageRoot, { gatewayUrl, environment, timeoutMs }) {
   let loadedConfig;
   let approvedCatalogs;
   const getConfig = async () => {
@@ -354,9 +374,13 @@ function defaultAdapters(packageRoot) {
     approvedCatalogs ??= await inspectApprovedCatalogs({ opsRoot: config.opsRoot });
     return approvedCatalogs;
   };
-  const guildLauncher = path.join(GUILD_OPERATOR_ROOT, 'src', 'server.mjs');
   const tkdeskLauncher = path.join(TKDESK_ROOT, 'scripts', 'launch_mcp');
   const migrationPath = path.join(packageRoot, 'backend/packages/harness/deerflow/persistence/migrations/versions/0026_social_runtime.py');
+  const directCatalog = async (serverName) => {
+    const config = await getConfig();
+    return inspectDirectMcpCatalog({ serverName, server: config.extensions.mcpServers[serverName],
+      environment: buildRuntimeEnvironment({ packageRoot, environment }), timeoutMs });
+  };
 
   return {
     node: async () => {
@@ -367,11 +391,15 @@ function defaultAdapters(packageRoot) {
     runtime_config: async () => {
       const config = await getConfig();
       validateRuntimeConfig(config, { exists: existsSync, nodeVersion: process.versions.node });
-      return { detail: 'fork-native two-MCP config is valid' };
+      return { detail: 'fork-native guild, broker, and collection MCP config is valid' };
     },
     guild_operator_root: async () => {
       await requireDirectory(GUILD_OPERATOR_ROOT);
       return { detail: GUILD_OPERATOR_ROOT };
+    },
+    broker_operator_root: async () => {
+      await requireDirectory(BROKER_OPERATOR_ROOT);
+      return { detail: BROKER_OPERATOR_ROOT };
     },
     tkdesk_root: async () => {
       await requireDirectory(TKDESK_ROOT);
@@ -384,6 +412,10 @@ function defaultAdapters(packageRoot) {
     guild_dependencies: async () => {
       await requireSuccess('npm', ['ls', '--omit=dev', '--json'], { cwd: GUILD_OPERATOR_ROOT });
       return { detail: 'Guild Operator dependencies are installed' };
+    },
+    broker_dependencies: async () => {
+      await requireSuccess('npm', ['ls', '--omit=dev', '--json'], { cwd: BROKER_OPERATOR_ROOT });
+      return { detail: 'Broker Operator dependencies are installed' };
     },
     fork_upstream_ancestor: async () => inspectForkAncestor({ forkRoot: packageRoot }),
     native_social_runtime: async () => {
@@ -403,27 +435,40 @@ function defaultAdapters(packageRoot) {
     }),
     deerflow_pnpm: async () => inspectPinnedPnpm({ frontendRoot: path.join(packageRoot, 'frontend') }),
     guild_mcp: async () => ({ detail: (await getCatalogs()).guild }),
+    broker_mcp: async () => ({ detail: (await getCatalogs()).broker }),
     tkdesk_mcp: async () => ({ detail: (await getCatalogs()).tkdesk }),
+    gateway_mcp_config: async () => inspectGatewayMcpConfig({ gatewayUrl,
+      expectedServers: (await getConfig()).extensions.mcpServers, timeoutMs }),
+    guild_direct_catalog: () => directCatalog('guild_operator'),
+    broker_direct_catalog: () => directCatalog('broker_operator'),
+    tkdesk_direct_catalog: () => directCatalog('tkdesk'),
   };
 }
 
-export async function runDoctor({ packageRoot, adapters = {} }) {
+export async function runDoctor({ packageRoot, adapters = {}, live = false,
+  gatewayUrl = process.env.DEER_FLOW_GUILD_GATEWAY_URL ?? 'http://127.0.0.1:2026',
+  environment = process.env, timeoutMs = 10000 }) {
   const resolvedRoot = path.resolve(packageRoot);
   const checks = [];
-  const allAdapters = { ...defaultAdapters(resolvedRoot), ...adapters };
-  for (const name of REQUIRED_DOCTOR_CHECKS) {
+  const allAdapters = { ...defaultAdapters(resolvedRoot, { gatewayUrl, environment, timeoutMs }), ...adapters };
+  for (const name of [...REQUIRED_DOCTOR_CHECKS, ...(live ? LIVE_DOCTOR_CHECKS : [])]) {
+    const evidence = name === 'gateway_mcp_config' ? 'gateway-config'
+      : LIVE_DOCTOR_CHECKS.includes(name) ? 'direct-discovery' : 'static';
     try {
       const result = await allAdapters[name]({ packageRoot: resolvedRoot });
-      checks.push({ name, ok: true, detail: result?.detail ?? 'ok' });
+      checks.push({ name, ok: true, evidence, detail: result?.detail ?? 'ok' });
     } catch (error) {
-      checks.push({ name, ok: false, detail: error.message });
+      checks.push({ name, ok: false, evidence, detail: error.message });
     }
   }
-  return { ok: checks.every(({ ok }) => ok), checks };
+  return { ok: checks.every(({ ok }) => ok), checks,
+    ...(live ? { gatewayLoadedCatalog: { status: 'unverified', reason: 'Gateway has no read-only loaded-catalog endpoint; direct probes use separate processes.' } } : {}),
+  };
 }
 
 export function formatDoctorReport(report) {
-  return report.checks.map(({ name, ok, detail }) => `${ok ? '✓' : '✗'} ${name}: ${detail}`).join('\n');
+  return report.checks.map(({ name, ok, evidence, detail }) => `${ok ? '✓' : '✗'} ${name} [${evidence ?? 'static'}]: ${detail}`).join('\n')
+    + (report.gatewayLoadedCatalog ? `\n? gateway_loaded_catalog: ${report.gatewayLoadedCatalog.status}; ${report.gatewayLoadedCatalog.reason}` : '');
 }
 
 function isMain() {
@@ -432,7 +477,12 @@ function isMain() {
 
 if (isMain()) {
   const packageRoot = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
-  runDoctor({ packageRoot })
+  const flags = process.argv.slice(2);
+  if (flags.some((flag) => !['--live', '--static'].includes(flag)) || (flags.includes('--live') && flags.includes('--static'))) {
+    console.error('Usage: doctor.mjs [--static|--live]');
+    process.exit(1);
+  }
+  runDoctor({ packageRoot, live: flags.includes('--live') })
     .then((report) => {
       console.log(formatDoctorReport(report));
       if (!report.ok) process.exitCode = 1;

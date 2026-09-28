@@ -7,12 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 import { runCommand } from '../src/process.mjs';
 import { GUILD_EXTENSIONS_CONFIG } from '../src/constants.mjs';
-import { inspectApprovedCatalogs, runDoctor } from './doctor.mjs';
+import { formatDoctorReport, inspectApprovedCatalogs, runDoctor } from './doctor.mjs';
 
 export async function runAcceptance({
   packageRoot,
   doctor = (options) => runDoctor(options),
   runTests = runCommand,
+  live = false,
 } = {}) {
   const root = path.resolve(packageRoot);
   const opsRoot = path.join(root, 'ops', 'guild-runtime');
@@ -22,27 +23,32 @@ export async function runAcceptance({
   assert.ok(runtimeMission.trim().length > 0, 'runtime guild mission is empty');
   assert.equal(existsSync(path.join(root, 'skills/public/guild-recruitment-lead/SKILL.md')), false);
   const extensions = JSON.parse(await readFile(path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG), 'utf8'));
-  assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'tkdesk']);
+  assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'broker_operator', 'tkdesk']);
 
   const testResult = await runTests(process.execPath, ['--test'], { cwd: opsRoot });
   if (testResult.code !== 0) throw new Error(`Package tests failed: ${testResult.stderr || testResult.stdout}`);
 
-  const doctorReport = await doctor({ packageRoot: root });
+  const doctorReport = await doctor({ packageRoot: root, live });
   if (!doctorReport.ok) {
     const failed = doctorReport.checks.filter(({ ok }) => !ok).map(({ name }) => name).join(', ');
-    throw new Error(`Doctor failed: ${failed}`);
+    throw new Error(`Doctor failed: ${failed}.\n${formatDoctorReport(doctorReport)}`);
   }
 
   await inspectApprovedCatalogs({ opsRoot });
   const guild = JSON.parse(await readFile(path.join(opsRoot, 'fixtures', 'mcp', 'guild-tools.json'), 'utf8'));
+  const broker = JSON.parse(await readFile(path.join(opsRoot, 'fixtures', 'mcp', 'broker-tools.json'), 'utf8'));
   const tkdesk = JSON.parse(await readFile(path.join(opsRoot, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
 
   return {
     ok: true,
-    mcpServers: 2,
+    mcpServers: 3,
     guildTools: guild.tools.length,
+    brokerTools: broker.tools.length,
     tkdeskTools: tkdesk.tools.length,
+    catalogEvidence: 'static-approved-snapshots',
     nativeGuildLead: true,
+    ...(live ? { runtimeEvidence: doctorReport.checks.filter(({ evidence }) => evidence && evidence !== 'static'),
+      gatewayLoadedCatalog: doctorReport.gatewayLoadedCatalog ?? { status: 'unverified' } } : {}),
   };
 }
 
@@ -52,7 +58,12 @@ function isMain() {
 
 if (isMain()) {
   const packageRoot = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
-  runAcceptance({ packageRoot })
+  const flags = process.argv.slice(2);
+  if (flags.some((flag) => !['--static', '--live'].includes(flag)) || (flags.includes('--static') && flags.includes('--live'))) {
+    console.error('Usage: acceptance.mjs [--static|--live]');
+    process.exit(1);
+  }
+  runAcceptance({ packageRoot, live: flags.includes('--live') })
     .then((report) => console.log(JSON.stringify(report, null, 2)))
     .catch((error) => {
       console.error(error.message);

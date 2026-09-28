@@ -18,7 +18,23 @@
         "guild_operations",
         "guild_revenue",
         "guild_governance",
-        "guild_intelligence"
+        "guild_intelligence",
+        "guild_onboarding"
+      ]
+    },
+    "broker_operator": {
+      "enabled": true,
+      "required": true,
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/yangyucheng/plugins/tiktok-live-broker-operator/src/server.mjs"
+      ],
+      "cwd": "/Users/yangyucheng/plugins/tiktok-live-broker-operator",
+      "tool_name_prefix": false,
+      "enabled_tools": [
+        "broker_workspace",
+        "broker_messaging"
       ]
     },
     "tkdesk": {
@@ -37,6 +53,7 @@
         "clear_mobile_authorization",
         "session_status",
         "start_login",
+        "reopen_login",
         "check_login",
         "reset_session",
         "create_discovery_run",
@@ -44,6 +61,8 @@
         "verify_collection_route",
         "collection_route_status",
         "collection_backstage_preflight",
+        "initialize_collection_backstage",
+        "prepare_discovery_live",
         "start_run",
         "pause_run",
         "resume_run",
@@ -54,6 +73,9 @@
         "commit_collection_cleanup",
         "preview_candidates",
         "query_candidates",
+        "get_handoff",
+        "creator_research_status",
+        "research_candidate",
         "check_candidate_qualifications",
         "prepare_handoff",
         "commit_handoff",
