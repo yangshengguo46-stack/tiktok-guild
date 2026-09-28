@@ -37,3 +37,48 @@ class CreatorAgentRelationshipRow(Base):
     identity_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     human_takeover: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     receipt_state: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown", server_default="unknown")
+
+
+class CreatorHandoffBatchRow(Base):
+    __tablename__ = "creator_handoff_batch"
+
+    owner_user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    dataset_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provenance_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+
+class CreatorHandoffCandidateRow(Base):
+    __tablename__ = "creator_handoff_candidate"
+
+    owner_user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    creator_uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+
+class CreatorClaimRow(Base):
+    __tablename__ = "creator_claim"
+
+    owner_user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    creator_uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    batch_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    dataset_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    candidate_payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="gray")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+
+class CreatorOutreachSequenceRow(Base):
+    __tablename__ = "creator_outreach_sequence"
+
+    owner_user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    creator_uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    sequence_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sender_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)

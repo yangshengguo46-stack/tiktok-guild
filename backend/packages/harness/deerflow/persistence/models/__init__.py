@@ -21,7 +21,13 @@ from deerflow.persistence.channel_connections.model import (
     ChannelCredentialRow,
     ChannelOAuthStateRow,
 )
-from deerflow.persistence.creator_agent_relationship.model import CreatorAgentRelationshipRow
+from deerflow.persistence.creator_agent_relationship.model import (
+    CreatorAgentRelationshipRow,
+    CreatorClaimRow,
+    CreatorHandoffBatchRow,
+    CreatorHandoffCandidateRow,
+    CreatorOutreachSequenceRow,
+)
 from deerflow.persistence.feedback.model import FeedbackRow
 from deerflow.persistence.managed_subagents.model import ManagedSubagentRow
 from deerflow.persistence.mcp_tasks.model import McpTaskRow
@@ -44,6 +50,10 @@ __all__ = [
     "ChannelCredentialRow",
     "ChannelOAuthStateRow",
     "CreatorAgentRelationshipRow",
+    "CreatorClaimRow",
+    "CreatorHandoffBatchRow",
+    "CreatorHandoffCandidateRow",
+    "CreatorOutreachSequenceRow",
     "FeedbackRow",
     "McpTaskRow",
     "ManagedSubagentRow",
