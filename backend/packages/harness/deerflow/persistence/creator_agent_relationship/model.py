@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from deerflow.persistence.base import Base
@@ -71,6 +71,8 @@ class CreatorClaimRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
 
+    __table_args__ = (CheckConstraint("status IN ('gray','public_touched','contacted','replied','closed')", name="ck_creator_claim_status"),)
+
 
 class CreatorOutreachSequenceRow(Base):
     __tablename__ = "creator_outreach_sequence"
@@ -82,3 +84,29 @@ class CreatorOutreachSequenceRow(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+    __table_args__ = (
+        Index(
+            "uq_creator_active_sequence",
+            "owner_user_id",
+            "creator_uid",
+            unique=True,
+            sqlite_where=text("status IN ('pending','public_touched','contacted','replied')"),
+            postgresql_where=text("status IN ('pending','public_touched','contacted','replied')"),
+        ),
+        CheckConstraint("status IN ('pending','public_touched','contacted','replied','closed')", name="ck_creator_sequence_status"),
+    )
+
+
+class CreatorOutreachReceiptRow(Base):
+    __tablename__ = "creator_outreach_receipt"
+
+    owner_user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    creator_uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    sequence_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    receipt_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
