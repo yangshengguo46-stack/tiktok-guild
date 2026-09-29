@@ -259,3 +259,142 @@ async def test_bubble_does_not_contact_or_suppress_verified_inbound_reply(repo):
     assert reply["advanced"] is True
     model = await repo.read_model(owner_user_id="guild", creator_uid="creator-1")
     assert model["claim"]["status"] == "replied"
+
+
+@pytest.mark.asyncio
+async def test_message_before_public_is_blocked_and_retries_after_public_completion(repo):
+    await _creator(repo)
+    workflow = PublicOutreachWorkflow(repo, worker_id="message-order")
+    tasks = await workflow.create_public_outreach_tasks(
+        "guild",
+        "creator-1",
+        1,
+        "web:account-001",
+        ["like", "comment", "follow", "message"],
+    )
+    by_action = {task["action"]: task for task in tasks}
+    message_receipt = _receipt("web:account-001", "creator-1", "message", "message-before-public")
+
+    blocked = await workflow.record_message_result(by_action["message"]["task_id"], message_receipt)
+    assert blocked["status"] == "blocked"
+    assert blocked["error_code"] == "public_actions_required"
+    assert (await repo.read_action_task(by_action["message"]["task_id"]))["state"] == "pending"
+
+    for action in ("like", "comment", "follow"):
+        await workflow.record_public_action_result(
+            by_action[action]["task_id"],
+            _receipt("web:account-001", "creator-1", action, f"public-{action}"),
+        )
+    contacted = await workflow.record_message_result(by_action["message"]["task_id"], message_receipt)
+    assert contacted["status"] == "verified"
+    assert contacted["advanced"] is True
+    model = await repo.read_model(owner_user_id="guild", creator_uid="creator-1")
+    assert model["claim"]["status"] == "contacted"
+
+
+@pytest.mark.asyncio
+async def test_web_and_ios_unknown_operator_results_are_bounded_and_retryable(repo):
+    await _creator(repo, creator_uid="web-creator")
+    await _creator(repo, creator_uid="ios-creator", sender_account_id="ios:device-001:account-001")
+
+    async def unknown_operator(**_kwargs):
+        return {"verified": False, "error_code": "unknown"}
+
+    workflow = PublicOutreachWorkflow(
+        repo,
+        web_operator=unknown_operator,
+        ios_operator=unknown_operator,
+        worker_id="unknown-results",
+    )
+    for creator_uid, sender_account_id in (
+        ("web-creator", "web:account-001"),
+        ("ios-creator", "ios:device-001:account-001"),
+    ):
+        tasks = await workflow.create_public_outreach_tasks(
+            "guild",
+            creator_uid,
+            1,
+            sender_account_id,
+            ["like", "comment", "follow"],
+        )
+        result = await workflow.execute_task(
+            tasks[0]["task_id"],
+            creator={"creator_uid": creator_uid},
+            device={"device_ref": "device-001"},
+        )
+        assert result["status"] == "unknown"
+        assert result["manual_required"] is True
+        assert result["error_code"] == "unknown"
+        assert (await repo.read_action_task(tasks[0]["task_id"]))["state"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_public_action_rejects_non_public_receipt_type_without_advancing(repo):
+    await _creator(repo)
+    workflow = PublicOutreachWorkflow(repo, worker_id="receipt-type")
+    tasks = await workflow.create_public_outreach_tasks(
+        "guild",
+        "creator-1",
+        1,
+        "web:account-001",
+        ["like", "comment", "follow"],
+    )
+    invalid = _receipt("web:account-001", "creator-1", "like", "wrong-kind")
+    invalid["receipt_payload"]["receipt_type"] = "dm_receipt"
+    result = await workflow.record_public_action_result(tasks[0]["task_id"], invalid)
+    assert result["status"] == "unknown"
+    assert result["manual_required"] is True
+    assert (await repo.read_action_task(tasks[0]["task_id"]))["state"] == "pending"
+    model = await repo.read_model(owner_user_id="guild", creator_uid="creator-1")
+    assert model["claim"]["status"] == "gray"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("action_group", "wrong-group"),
+        ("sender_account_id", "web:other-account"),
+        ("receipt_type", "dm_receipt"),
+        ("verified", False),
+    ),
+)
+async def test_aggregate_public_receipt_requires_matching_nested_contract(repo, field, value):
+    creator_uid = f"aggregate-{field}"
+    await _creator(repo, creator_uid=creator_uid)
+    workflow = PublicOutreachWorkflow(repo, worker_id=f"aggregate-{field}")
+    tasks = await workflow.create_public_outreach_tasks(
+        "guild",
+        creator_uid,
+        1,
+        "web:account-001",
+        ["like", "comment", "follow"],
+    )
+    group = tasks[0]["payload_json"]["action_group"]
+    aggregate = {
+        "provider_ref": f"aggregate-{field}",
+        "receipt_payload": {
+            "receipt_type": "public_action_receipt",
+            "sender_account_id": "web:account-001",
+            "creator_uid": creator_uid,
+            "action_group": group,
+            "actions": [
+                {
+                    "action": action,
+                    "action_group": group,
+                    "sender_account_id": "web:account-001",
+                    "creator_uid": creator_uid,
+                    "receipt_type": "public_action_receipt",
+                    "verified": True,
+                }
+                for action in ("like", "comment", "follow")
+            ],
+        },
+        "verification_source": "provider_readback",
+        "verified": True,
+    }
+    aggregate["receipt_payload"]["actions"][1][field] = value
+    result = await workflow.record_public_action_result(tasks[0]["task_id"], aggregate)
+    assert result["status"] == "unknown"
+    assert result["manual_required"] is True
+    assert all(task["state"] == "pending" for task in await repo.list_action_tasks("guild", creator_uid, 1))
