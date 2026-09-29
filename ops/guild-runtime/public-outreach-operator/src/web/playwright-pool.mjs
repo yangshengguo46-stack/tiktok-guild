@@ -61,9 +61,16 @@ export function createPlaywrightPool({
     if (requestedChannel && requestedChannel !== 'web') {
       return { ok: false, error_code: 'channel_mismatch' };
     }
-    const accounts = requestedId
+    const allAccounts = requestedId
       ? [await profiles.get(requestedId)]
-      : await profiles.list({ status: 'enabled', health: 'healthy' });
+      : await profiles.list();
+    const accounts = requestedId
+      ? allAccounts
+      : allAccounts.filter((account) => account.status === 'enabled' && account.health === 'healthy' && account.channel === 'web');
+    if (requestedId && !accounts[0]) return { ok: false, error_code: 'account_not_found' };
+    if (!requestedId && accounts.length === 0 && allAccounts.some((account) => account.channel !== 'web')) {
+      return { ok: false, error_code: 'web_profile_unavailable' };
+    }
     for (const account of accounts) {
       if (account?.channel !== 'web') {
         if (requestedId) return { ok: false, error_code: 'channel_mismatch' };
@@ -87,6 +94,7 @@ export function createPlaywrightPool({
           account: { ...account },
           context,
           userDataDir: account.userDataDir,
+          persistManualTakeover: (details) => profiles.recordManualTakeover(account.sender_account_id, details),
         };
         active.set(lease.lease_id, activeLease);
         return { ...activeLease };

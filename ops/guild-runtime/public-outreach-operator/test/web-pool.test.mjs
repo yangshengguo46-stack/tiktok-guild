@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readdir } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -142,6 +142,27 @@ test('web pool rejects iOS registration and explicit non-web claims', async () =
   });
   assert.equal((await pool.register(account('ios_001', { channel: 'ios' }))).error_code, 'channel_mismatch');
   assert.equal((await pool.claim({ sender_account_id: 'ios_001', channel: 'ios' })).error_code, 'channel_mismatch');
+  await pool.close();
+});
+
+test('an existing on-disk iOS profile is skipped without crashing the Web pool', async () => {
+  const profileRoot = await tempRoot();
+  const profileDir = path.join(profileRoot, 'profiles', 'ios_existing');
+  await mkdir(profileDir, { recursive: true });
+  await mkdir(path.join(profileRoot, 'locks'), { recursive: true });
+  await writeFile(path.join(profileDir, 'registry.json'), JSON.stringify({
+    sender_account_id: 'ios_existing',
+    channel: 'ios',
+    status: 'enabled',
+    health: 'healthy',
+  }));
+  const pool = createPlaywrightPool({
+    profileRoot,
+    launchPersistentContext: fakeLauncher([]),
+  });
+  const result = await pool.claim();
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, 'web_profile_unavailable');
   await pool.close();
 });
 

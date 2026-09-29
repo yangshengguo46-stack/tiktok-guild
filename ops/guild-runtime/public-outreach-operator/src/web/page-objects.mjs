@@ -182,11 +182,13 @@ export class TikTokWebPageObjects {
         observed_uid: observedUid,
       });
     }
-    if (creatorHandle && observedHandle && String(observedHandle).replace(/^@/, '').toLowerCase() !== String(creatorHandle).replace(/^@/, '').toLowerCase()) {
-      throw new WebActionError('unknown', 'Current profile handle does not match the requested creator.', {
-        requested_handle: creatorHandle,
-        observed_handle: observedHandle,
-      });
+    if (creatorHandle) {
+      if (!observedHandle || String(observedHandle).replace(/^@/, '').toLowerCase() !== String(creatorHandle).replace(/^@/, '').toLowerCase()) {
+        throw new WebActionError('unknown', 'Current profile handle does not match the requested creator.', {
+          requested_handle: creatorHandle,
+          observed_handle: observedHandle,
+        });
+      }
     }
     if (!observedUid && !observedHandle) {
       throw new WebActionError('unknown', 'Current profile identity could not be verified.');

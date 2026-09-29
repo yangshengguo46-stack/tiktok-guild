@@ -9,7 +9,7 @@ function nowMs(clock) {
   return typeof clock === 'function' ? clock() : Date.now();
 }
 
-function normalizeAccount(input) {
+function normalizeAccount(input, { allowNonWebChannel = false } = {}) {
   const source = typeof input === 'string' ? { sender_account_id: input } : input;
   if (!source || typeof source !== 'object') throw new TypeError('Account must be an object.');
   const senderAccountId = source.sender_account_id ?? source.account_id;
@@ -19,7 +19,7 @@ function normalizeAccount(input) {
   const status = source.status ?? (source.enabled === false ? 'disabled' : 'enabled');
   const health = source.health ?? source.health_status ?? 'healthy';
   const channel = source.channel ?? 'web';
-  if (channel !== 'web') throw new TypeError('Web profile registry only accepts channel web.');
+  if (channel !== 'web' && !allowNonWebChannel) throw new TypeError('Web profile registry only accepts channel web.');
   if (!['enabled', 'disabled', 'paused'].includes(status)) throw new TypeError(`Unknown account status: ${status}`);
   if (!['healthy', 'unhealthy', 'unknown'].includes(health)) throw new TypeError(`Unknown account health: ${health}`);
   return {
@@ -31,6 +31,7 @@ function normalizeAccount(input) {
     health,
     capabilities: Array.isArray(source.capabilities) ? [...source.capabilities] : [],
     metadata: source.metadata && typeof source.metadata === 'object' ? { ...source.metadata } : {},
+    manual_takeover: source.manual_takeover ?? null,
     updated_at: source.updated_at ?? new Date().toISOString(),
   };
 }
@@ -86,7 +87,7 @@ export function createProfileRegistry({
     if (memory.has(accountId)) return memory.get(accountId);
     const value = await readJson(metadataPath(root, accountId));
     if (!value) return null;
-    const account = { ...normalizeAccount(value), userDataDir: profilePath(root, accountId) };
+    const account = { ...normalizeAccount(value, { allowNonWebChannel: true }), userDataDir: profilePath(root, accountId) };
     memory.set(accountId, account);
     return account;
   }
@@ -243,6 +244,34 @@ export function createProfileRegistry({
     return { ok: false, error_code: 'lease_not_found' };
   }
 
+  async function recordManualTakeover(senderAccountId, details = {}) {
+    await ensureRoot();
+    const account = await load(senderAccountId);
+    const errorCode = typeof details.error_code === 'string' && details.error_code
+      ? details.error_code
+      : 'unknown';
+    const taskId = `manual-takeover:${senderAccountId}:${errorCode}`;
+    const recordedAt = new Date(nowMs(clock)).toISOString();
+    const task = {
+      status: 'manual_required',
+      task_id: taskId,
+      sender_account_id: senderAccountId,
+      error_code: errorCode,
+      reason: details.message ?? errorCode,
+      created_at: recordedAt,
+    };
+    if (!account) return task;
+    const updated = {
+      ...account,
+      status: 'paused',
+      manual_takeover: task,
+      updated_at: recordedAt,
+    };
+    await writeFile(metadataPath(root, senderAccountId), `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
+    memory.set(senderAccountId, updated);
+    return task;
+  }
+
   async function get(senderAccountId) {
     await ensureRoot();
     return load(senderAccountId);
@@ -256,6 +285,7 @@ export function createProfileRegistry({
     acquire,
     release,
     recoverExpired,
+    recordManualTakeover,
   });
 }
 

@@ -54,10 +54,20 @@ async function manualTakeover(account, details) {
   let task = null;
   let taskError = null;
   try {
-    task = await invokeHook(account, ['createManualTakeover', 'requestManualTakeover', 'manualTakeover'], details);
+    task = await invokeHook(account, ['persistManualTakeover'], details);
     if (task !== null) taskStatus = 'created';
   } catch (error) {
     taskStatus = 'hook_failed';
+    taskError = error instanceof Error ? error.message : 'manual takeover persistence failed';
+  }
+  try {
+    const externalTask = await invokeHook(account, ['createManualTakeover', 'requestManualTakeover', 'manualTakeover'], details);
+    if (externalTask !== null) {
+      task = externalTask;
+      taskStatus = 'created';
+    }
+  } catch (error) {
+    if (taskStatus !== 'created') taskStatus = 'hook_failed';
     taskError = error instanceof Error ? error.message : 'manual takeover hook failed';
   }
   return {
@@ -133,14 +143,22 @@ export async function executeWebAction({
 } = {}) {
   const resolvedAccount = account?.account ?? account;
   const executionAccount = account?.context && !resolvedAccount?.context
-    ? { ...resolvedAccount, context: account.context, lease_id: account.lease_id, userDataDir: account.userDataDir }
+    ? {
+      ...resolvedAccount,
+      context: account.context,
+      lease_id: account.lease_id,
+      userDataDir: account.userDataDir,
+      persistManualTakeover: account.persistManualTakeover,
+    }
     : resolvedAccount;
   if (!executionAccount || typeof executionAccount !== 'object') {
     return { verified: false, error_code: 'unknown', message: 'Sender account is required.' };
   }
   const actions = orderedActions(action);
   if (!actions.length || actions.some((item) => typeof item !== 'string')) {
-    return { verified: false, error_code: 'provider_rejected', message: 'A web action is required.' };
+    const details = { error_code: 'unknown', message: 'A web action is required.' };
+    const takeover = await manualTakeover(executionAccount, details);
+    return { verified: false, ...details, manual_takeover: takeover };
   }
   try {
     validateOrder(actions);

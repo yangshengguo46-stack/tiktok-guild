@@ -44,7 +44,13 @@ class FakeLocator {
 }
 
 class FakePage {
-  constructor({ login = false, challenge = false, creatorUid = 'creator_001', creatorHandle = 'creator' } = {}) {
+  constructor({
+    login = false,
+    challenge = false,
+    creatorUid = 'creator_001',
+    creatorHandle = 'creator',
+    searchable = false,
+  } = {}) {
     this.controls = new Map();
     this.controls.set(FAKE_LOCATORS.loginRequired, new FakeLocator({ visible: login }));
     this.controls.set(FAKE_LOCATORS.challenge, new FakeLocator({ visible: challenge }));
@@ -53,8 +59,8 @@ class FakePage {
       visible: true,
       attributes: { 'data-creator-uid': creatorUid, 'data-creator-handle': creatorHandle },
     }));
-    this.controls.set(FAKE_LOCATORS.creatorSearch, new FakeLocator());
-    this.controls.set(FAKE_LOCATORS.creatorResult, new FakeLocator());
+    this.controls.set(FAKE_LOCATORS.creatorSearch, new FakeLocator({ visible: searchable }));
+    this.controls.set(FAKE_LOCATORS.creatorResult, new FakeLocator({ visible: searchable }));
     this.controls.set(FAKE_LOCATORS.likeButton, new FakeLocator({
       visible: true,
       attributes: { 'aria-pressed': 'false' },
@@ -113,6 +119,25 @@ test('executes like, comment, follow in order and returns verified receipts', as
   assert.deepEqual(result.receipt_payload.actions.map((item) => item.action), ['like', 'comment', 'follow']);
   assert.equal(result.receipt_payload.actions[1].payload.text, 'Hello from our creator team.');
   assert.equal(result.verification_source.length, 3);
+});
+
+test('handle-only creator identity requires canonical handle read-back', async () => {
+  const matched = await executeWebAction({
+    account: account(new FakePage({ creatorHandle: 'target_handle', searchable: true })),
+    creator: { handle: 'target_handle' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(matched.verified, true);
+
+  const mismatched = await executeWebAction({
+    account: account(new FakePage({ creatorHandle: 'other_handle', searchable: true })),
+    creator: { handle: 'target_handle' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(mismatched.verified, false);
+  assert.equal(mismatched.error_code, 'unknown');
 });
 
 test('message is optional and still requires message read-back', async () => {
@@ -193,6 +218,17 @@ test('cancellation is explicit and ordered actions reject invalid order', async 
   assert.equal(outOfOrder.error_code, 'provider_rejected');
 });
 
+test('missing action returns bounded unknown/manual-required state', async () => {
+  const result = await executeWebAction({
+    account: account(new FakePage()),
+    creator: { creator_uid: 'creator_001' },
+    action: [],
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.error_code, 'unknown');
+  assert.equal(result.manual_takeover.status, 'manual_required');
+});
+
 test('stale profile identity and missing search results stop before a write', async () => {
   const stale = await executeWebAction({
     account: account(new FakePage({ creatorUid: 'wrong_creator' })),
@@ -250,6 +286,34 @@ test('a claimed pool lease can be passed directly to the web executor', async ()
   await pool.close();
 });
 
+test('pool lease manual takeover persists paused/manual-required state in the registry', async () => {
+  const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'public-outreach-takeover-'));
+  const pool = createPlaywrightPool({
+    profileRoot,
+    launchPersistentContext: async () => ({
+      async newPage() {
+        return new FakePage({ login: true });
+      },
+      async close() {},
+    }),
+  });
+  await pool.register({ sender_account_id: 'persisted' });
+  const lease = await pool.claim('persisted');
+  const result = await executeWebAction({
+    account: lease,
+    creator: { creator_uid: 'creator_001' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.manual_takeover.task_status, 'created');
+  assert.equal(result.manual_takeover.task.status, 'manual_required');
+  const health = await pool.health('persisted');
+  assert.equal(health.account.status, 'paused');
+  assert.equal(health.account.manual_takeover.task_id, result.manual_takeover.task.task_id);
+  await pool.close();
+});
+
 test('manual takeover remains deterministic when hooks are absent or throw', async () => {
   const absent = await executeWebAction({
     account: account(new FakePage({ login: true })),
@@ -276,4 +340,23 @@ test('manual takeover remains deterministic when hooks are absent or throw', asy
   assert.equal(thrown.manual_takeover.status, 'manual_required');
   assert.equal(thrown.manual_takeover.pause_status, 'hook_failed');
   assert.equal(thrown.manual_takeover.task_status, 'hook_failed');
+});
+
+test('manual takeover persistence is retained when an external hook throws', async () => {
+  let persisted = null;
+  const result = await executeWebAction({
+    account: account(new FakePage({ login: true }), {
+      persistManualTakeover: async (details) => {
+        persisted = { task_id: 'manual-takeover:ordinary_001:login_required', ...details };
+        return persisted;
+      },
+      createManualTakeover: async () => { throw new Error('external unavailable'); },
+    }),
+    creator: { creator_uid: 'creator_001' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.manual_takeover.task.task_id, 'manual-takeover:ordinary_001:login_required');
+  assert.equal(persisted.error_code, 'login_required');
 });
