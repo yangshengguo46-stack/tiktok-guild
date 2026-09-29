@@ -2,7 +2,7 @@
 
 Date: 2026-09-29
 
-Repository revision: `e1eeddbff` (`fix: gate outreach on registered xcuitest driver`)
+Repository revision: `477a67d0a` (`test: fix outreach lease test clock`)
 
 This evidence records the local verification boundary for the Web Playwright
 and iPhone Appium/XCUITest public outreach channels. No TikTok account, device,
@@ -19,17 +19,17 @@ remains closed.
 
 ## Static and unit verification
 
-| Area | Command or evidence | Result | Boundary |
-| --- | --- | --- | --- |
-| Backend outreach/persistence | `backend/.venv/bin/pytest -q backend/tests/test_creator_outreach_channels.py backend/tests/test_creator_outreach_repository.py backend/tests/test_public_outreach_workflow.py backend/tests/test_public_outreach_api.py backend/tests/test_persistence_bootstrap.py backend/tests/test_persistence_migrations_env.py` | `82 passed` | The reclaimed-lease test uses an explicit fixed `now` inside the second lease; production lease expiry validation was unchanged. |
-| Operator package | `cd ops/guild-runtime/public-outreach-operator && npm ci --ignore-scripts && npm test` | `43 passed` | Installs the pinned local dependencies only; no browser, iPhone, WDA, or TikTok write starts. `npm audit` reported dependency advisories and was not auto-fixed. |
-| Runtime package | `cd ops/guild-runtime && npm test` | `99 passed, 1 failed` | The only failure is the retained historical nginx log assertion. |
-| Static doctor | `cd ops/guild-runtime && npm run doctor -- --static` after operator `npm ci --ignore-scripts` | Static checks passed | Doctor verified package metadata, Playwright `1.59.1`, Appium `3.1.0`, XCUITest `12.13.3`, profile-root parent permissions, runtime config, catalog, and driver registration. It reported zero registered iPhones, so the live WDA pilot remains unavailable. |
-| Static acceptance | `cd ops/guild-runtime && npm run acceptance -- --static` | Runtime checks passed; suite `99 passed, 1 failed` | Acceptance used fake adapters and catalog probes. It did not launch a browser, attach an iPhone, start WDA, or write to TikTok. |
-| Frontend lint | `cd frontend && node_modules/.bin/eslint <public outreach workbench files>` | Passed | Direct ESLint invocation avoids the pnpm dependency-install guard. |
-| Frontend types | `cd frontend && node_modules/.bin/tsc --noEmit` | Passed | Type checking only. |
-| Frontend build | `cd frontend && SKIP_ENV_VALIDATION=1 DEER_FLOW_AUTH_DISABLED=1 node_modules/.bin/next build` | Passed | Production build completed successfully. |
-| Workbench E2E | `cd frontend && PLAYWRIGHT_SKIP_WEB_SERVER=1 PLAYWRIGHT_BASE_URL=http://localhost:3000 node_modules/.bin/playwright test tests/e2e/public-outreach-workbench.spec.ts --config=playwright.config.ts` with a temporary local Next server | `1 passed` | All API routes were mocked. The test covers account state, task state, receipt evidence, retry, takeover, unknown, and closure controls; it never reaches TikTok. |
+| Area                         | Command or evidence                                                                                                                                                                                                                                                                                                                  | Result                                                                    | Boundary                                                                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend outreach/persistence | `backend/.venv/bin/pytest -q backend/tests/test_creator_outreach_channels.py backend/tests/test_creator_outreach_repository.py backend/tests/test_public_outreach_workflow.py backend/tests/test_public_outreach_api.py backend/tests/test_persistence_bootstrap.py backend/tests/test_persistence_migrations_env.py` at `477a67d0a` | `82 passed`                                                               | The reclaimed-lease test uses an explicit fixed `now` inside the second lease; production lease expiry validation was unchanged.                                                                                                                              |
+| Operator package             | `cd ops/guild-runtime/public-outreach-operator && npm ci --ignore-scripts && npm test`                                                                                                                                                                                                                                               | `43 passed`                                                               | Installs the pinned local dependencies only; no browser, iPhone, WDA, or TikTok write starts. `npm audit` reported dependency advisories and was not auto-fixed.                                                                                              |
+| Runtime package              | `cd ops/guild-runtime && npm test`                                                                                                                                                                                                                                                                                                   | `99 passed, 1 failed`                                                     | The only failure is the retained historical nginx log assertion.                                                                                                                                                                                              |
+| Static doctor                | `cd ops/guild-runtime && npm run doctor -- --static` after operator `npm ci --ignore-scripts`                                                                                                                                                                                                                                        | Static checks passed                                                      | Doctor verified package metadata, Playwright `1.59.1`, Appium `3.1.0`, XCUITest `12.13.3`, profile-root parent permissions, runtime config, catalog, and driver registration. It reported zero registered iPhones, so the live WDA pilot remains unavailable. |
+| Static acceptance            | `cd ops/guild-runtime && npm run acceptance -- --static`                                                                                                                                                                                                                                                                             | Exited `1` at the historical nginx assertion; suite `99 passed, 1 failed` | The CLI stopped before its later fake-adapter, doctor, and catalog stages, so no acceptance pass is claimed. The separately run operator tests and static doctor are recorded above.                                                                          |
+| Frontend lint                | `cd frontend && node_modules/.bin/eslint <public outreach workbench files>`                                                                                                                                                                                                                                                          | Passed                                                                    | Direct ESLint invocation avoids the pnpm dependency-install guard.                                                                                                                                                                                            |
+| Frontend types               | `cd frontend && node_modules/.bin/tsc --noEmit`                                                                                                                                                                                                                                                                                      | Passed                                                                    | Type checking only.                                                                                                                                                                                                                                           |
+| Frontend build               | `cd frontend && SKIP_ENV_VALIDATION=1 DEER_FLOW_AUTH_DISABLED=1 node_modules/.bin/next build`                                                                                                                                                                                                                                        | Passed                                                                    | Production build completed successfully.                                                                                                                                                                                                                      |
+| Workbench E2E                | `cd frontend && PLAYWRIGHT_SKIP_WEB_SERVER=1 PLAYWRIGHT_BASE_URL=http://localhost:3000 node_modules/.bin/playwright test tests/e2e/public-outreach-workbench.spec.ts --config=playwright.config.ts` with a temporary local Next server                                                                                               | `1 passed`                                                                | All API routes were mocked. The test covers account state, task state, receipt evidence, retry, takeover, unknown, and closure controls; it never reaches TikTok.                                                                                             |
 
 The first `pnpm check` attempt was stopped by pnpm's ignored-build approval
 guard for `esbuild` and `unrs-resolver`. That command also wrote a temporary
@@ -64,18 +64,18 @@ The stress run used `createProfileRegistry` and `createPlaywrightPool` with a
 temporary directory, a fake persistent-context launcher, and a deterministic
 clock. It did not open a browser or make network requests.
 
-| Metric | Result |
-| --- | ---: |
-| Profiles registered | 50 |
-| Concurrent leases at capacity | 10 |
-| 51st registration | Rejected with `profile_limit_exceeded` |
-| Capacity rejection | `capacity_exhausted` |
-| Stale leases recovered and replacement claimed | Yes |
-| Lease recovery time | 4.255 ms |
-| Peak resident set | 46.17 MiB |
-| Process CPU / wall time | 122.05% over 156.059 ms |
-| Synthetic profile registration throughput | 320.39 profiles/s |
-| Fake launch count | 11, including one replacement after recovery |
+| Metric                                         |                                       Result |
+| ---------------------------------------------- | -------------------------------------------: |
+| Profiles registered                            |                                           50 |
+| Concurrent leases at capacity                  |                                           10 |
+| 51st registration                              |       Rejected with `profile_limit_exceeded` |
+| Capacity rejection                             |                         `capacity_exhausted` |
+| Stale leases recovered and replacement claimed |                                          Yes |
+| Lease recovery time                            |                                     4.255 ms |
+| Peak resident set                              |                                    46.17 MiB |
+| Process CPU / wall time                        |                      122.05% over 156.059 ms |
+| Synthetic profile registration throughput      |                            320.39 profiles/s |
+| Fake launch count                              | 11, including one replacement after recovery |
 
 These are local fake-runtime measurements on one host. They are useful for
 lock, cap, and recovery behavior only; they do not estimate TikTok throughput,
