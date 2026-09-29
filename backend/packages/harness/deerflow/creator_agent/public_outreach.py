@@ -261,6 +261,18 @@ class PublicOutreachWorkflow:
             "model": model,
         }
 
+    async def _duplicate_result(self, task: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "status": "duplicate",
+            "advanced": False,
+            "receipt": {"receipt_id": task.get("receipt_id")} if task.get("receipt_id") else None,
+            "task": task,
+            "model": await self.repository.read_model(
+                owner_user_id=task["owner_user_id"],
+                creator_uid=task["creator_uid"],
+            ),
+        }
+
     async def _claim_for_result(self, task: dict[str, Any]) -> dict[str, Any] | None:
         if task["state"] == "completed":
             return None
@@ -512,6 +524,8 @@ class PublicOutreachWorkflow:
             raise ValueError("action task does not exist")
         if task["action"] != "message":
             raise ValueError("message result requires a message task")
+        if task["state"] == "completed":
+            return await self._duplicate_result(task)
         public_ready, model = await self._public_ready(task)
         if not public_ready:
             return {
@@ -650,6 +664,8 @@ class PublicOutreachWorkflow:
         task = await self.repository.read_action_task(task_id)
         if task is None:
             raise ValueError("action task does not exist")
+        if task["state"] == "completed":
+            return await self._duplicate_result(task)
         sender = await self._sender_for_task(task)
         if task["action"] == "message":
             public_ready, model = await self._public_ready(task)
@@ -664,7 +680,7 @@ class PublicOutreachWorkflow:
         claim = await self._claim_for_result(task)
         if claim is None:
             current = await self.repository.read_action_task(task_id)
-            return {"status": "duplicate", "task": current}
+            return await self._duplicate_result(current or task)
         if claim.get("__sequence_closed__"):
             current = await self.repository.read_action_task(task_id)
             return {

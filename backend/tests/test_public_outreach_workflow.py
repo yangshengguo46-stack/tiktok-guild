@@ -290,6 +290,15 @@ async def test_message_before_public_is_blocked_and_retries_after_public_complet
     assert contacted["advanced"] is True
     model = await repo.read_model(owner_user_id="guild", creator_uid="creator-1")
     assert model["claim"]["status"] == "contacted"
+    direct_duplicate = await workflow.record_message_result(by_action["message"]["task_id"], message_receipt)
+    assert direct_duplicate["status"] == "duplicate"
+    assert direct_duplicate["receipt"]["receipt_id"] == "message-before-public"
+    execute_duplicate = await workflow.execute_task(
+        by_action["message"]["task_id"],
+        creator={"creator_uid": "creator-1"},
+    )
+    assert execute_duplicate["status"] == "duplicate"
+    assert execute_duplicate["receipt"]["receipt_id"] == "message-before-public"
 
 
 @pytest.mark.asyncio
