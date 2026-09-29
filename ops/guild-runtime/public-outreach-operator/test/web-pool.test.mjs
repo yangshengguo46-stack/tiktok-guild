@@ -133,3 +133,40 @@ test('disabled or unhealthy accounts are excluded from automatic claims', async 
   assert.equal(result.error_code, 'capacity_exhausted');
   await pool.close();
 });
+
+test('web pool rejects iOS registration and explicit non-web claims', async () => {
+  const profileRoot = await tempRoot();
+  const pool = createPlaywrightPool({
+    profileRoot,
+    launchPersistentContext: fakeLauncher([]),
+  });
+  assert.equal((await pool.register(account('ios_001', { channel: 'ios' }))).error_code, 'channel_mismatch');
+  assert.equal((await pool.claim({ sender_account_id: 'ios_001', channel: 'ios' })).error_code, 'channel_mismatch');
+  await pool.close();
+});
+
+test('release requires the lease token and cannot release another pool owner', async () => {
+  const profileRoot = await tempRoot();
+  const first = createPlaywrightPool({ profileRoot, launchPersistentContext: fakeLauncher([]) });
+  const second = createPlaywrightPool({ profileRoot, launchPersistentContext: fakeLauncher([]) });
+  await first.register(account('owned'));
+  const lease = await first.claim('owned');
+  assert.equal((await second.release({ sender_account_id: 'owned' })).error_code, 'lease_token_required');
+  assert.equal((await second.release({ lease_id: 'wrong', sender_account_id: 'owned' })).error_code, 'lease_not_found');
+  assert.equal((await second.claim('owned')).error_code, 'profile_in_use');
+  assert.equal((await first.release(lease.lease_id)).ok, true);
+  await first.close();
+  await second.close();
+});
+
+test('concurrent registration preserves the exact 50-profile cap', async () => {
+  const profileRoot = await tempRoot();
+  const pool = createPlaywrightPool({ profileRoot, launchPersistentContext: fakeLauncher([]) });
+  const results = await Promise.all(
+    Array.from({ length: 51 }, (_, index) => pool.register(account(`parallel_${index}`))),
+  );
+  assert.equal(results.filter((result) => result.ok).length, 50);
+  assert.equal(results.filter((result) => result.error_code === 'profile_limit_exceeded').length, 1);
+  assert.equal((await pool.health()).accounts.length, 50);
+  await pool.close();
+});

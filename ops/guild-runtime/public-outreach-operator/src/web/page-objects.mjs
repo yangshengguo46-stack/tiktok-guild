@@ -9,6 +9,7 @@ export const FAKE_LOCATORS = Object.freeze({
   creatorSearch: '[data-outreach-creator-search]',
   creatorResult: '[data-outreach-creator-result]',
   profileRoot: '[data-outreach-profile]',
+  creatorIdentity: '[data-outreach-creator-identity]',
   likeButton: '[data-outreach-like]',
   commentInput: '[data-outreach-comment-input]',
   commentSubmit: '[data-outreach-comment-submit]',
@@ -25,6 +26,7 @@ export const PILOT_LOCATORS = Object.freeze({
   creatorSearch: '[data-e2e="search-input"]',
   creatorResult: '[data-e2e="search-user-container"]',
   profileRoot: '[data-e2e="user-page"]',
+  creatorIdentity: '[data-e2e="user-page"]',
   likeButton: '[data-e2e="browse-like-icon"]',
   commentInput: '[data-e2e="comment-input"]',
   commentSubmit: '[data-e2e="comment-post"]',
@@ -121,14 +123,20 @@ async function receiptVisible(page, selector, expectedText = null) {
 }
 
 export class TikTokWebPageObjects {
-  constructor({ page, locators = null, pilotEnabled = false } = {}) {
+  constructor({ page, locators = null, pilotEnabled = false, testOnly = false } = {}) {
     if (!page) throw new TypeError('page is required.');
     this.page = page;
     this.pilotEnabled = pilotAllowed(pilotEnabled);
-    if (locators) {
+    this.testOnly = testOnly === true && process.env.PUBLIC_OUTREACH_FAKE_BROWSER === '1';
+    if (locators && !this.pilotEnabled && !this.testOnly) {
+      throw new WebActionError('pilot_required', 'Custom provider selectors require the authorized pilot flag.');
+    }
+    if (locators && (this.pilotEnabled || this.testOnly)) {
       this.locators = Object.freeze({ ...FAKE_LOCATORS, ...locators });
     } else if (this.pilotEnabled) {
       this.locators = PILOT_LOCATORS;
+    } else if (this.testOnly) {
+      this.locators = FAKE_LOCATORS;
     } else {
       throw new WebActionError('pilot_required', 'Real provider selectors require the authorized pilot flag.');
     }
@@ -136,20 +144,54 @@ export class TikTokWebPageObjects {
 
   async prepareCreator(creator = {}) {
     await checkGate(this.page, this.locators);
+    const creatorUid = creator.creator_uid ?? creator.uid ?? creator.user_id ?? null;
+    const creatorHandle = creator.handle ?? creator.username ?? null;
+    if (!creatorUid && !creatorHandle) {
+      throw new WebActionError('provider_rejected', 'Creator identity is required before a provider write.');
+    }
     if (creator.profile_url && this.pilotEnabled && typeof this.page.goto === 'function') {
       await this.page.goto(creator.profile_url);
-    } else if (creator.handle && typeof this.page.locator === 'function') {
+    } else if (creatorHandle && typeof this.page.locator === 'function') {
       const search = locatorFor(this.page, this.locators.creatorSearch);
-      if (search && await visible(search)) {
-        await fill(search, creator.handle);
-        if (typeof search.press === 'function') await search.press('Enter');
-        const result = locatorFor(this.page, this.locators.creatorResult);
-        if (await visible(result) && typeof result.click === 'function') await result.click();
+      if (!search || !await visible(search)) throw new WebActionError('selector_missing', 'Creator search control is missing.');
+      await fill(search, creatorHandle);
+      if (typeof search.press === 'function') await search.press('Enter');
+      const result = locatorFor(this.page, this.locators.creatorResult);
+      if (!result || !await visible(result) || typeof result.click !== 'function') {
+        throw new WebActionError('selector_missing', 'Creator search result was not found.');
       }
+      await result.click();
     }
     const profile = locatorFor(this.page, this.locators.profileRoot);
     if (!await visible(profile)) throw new WebActionError('selector_missing', 'Creator profile could not be read back.');
-    return { verification_source: `${LOCATOR_VERSION}:profile` };
+    const identityLocator = locatorFor(this.page, this.locators.creatorIdentity);
+    if (!await visible(identityLocator)) {
+      throw new WebActionError('selector_missing', 'Creator identity read-back is missing.');
+    }
+    const observedUid = await attribute(identityLocator, 'data-creator-uid')
+      ?? await attribute(identityLocator, 'data-user-id')
+      ?? await attribute(profile, 'data-creator-uid')
+      ?? await attribute(profile, 'data-user-id');
+    const observedHandle = await attribute(identityLocator, 'data-creator-handle')
+      ?? await attribute(identityLocator, 'data-username')
+      ?? await attribute(profile, 'data-creator-handle')
+      ?? await attribute(profile, 'data-username');
+    if (creatorUid && observedUid !== creatorUid) {
+      throw new WebActionError('unknown', 'Current profile identity does not match the requested creator.', {
+        requested_uid: creatorUid,
+        observed_uid: observedUid,
+      });
+    }
+    if (creatorHandle && observedHandle && String(observedHandle).replace(/^@/, '').toLowerCase() !== String(creatorHandle).replace(/^@/, '').toLowerCase()) {
+      throw new WebActionError('unknown', 'Current profile handle does not match the requested creator.', {
+        requested_handle: creatorHandle,
+        observed_handle: observedHandle,
+      });
+    }
+    if (!observedUid && !observedHandle) {
+      throw new WebActionError('unknown', 'Current profile identity could not be verified.');
+    }
+    return { verification_source: `${LOCATOR_VERSION}:profile-identity` };
   }
 
   async like() {

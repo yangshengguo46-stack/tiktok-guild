@@ -18,13 +18,15 @@ function normalizeAccount(input) {
   }
   const status = source.status ?? (source.enabled === false ? 'disabled' : 'enabled');
   const health = source.health ?? source.health_status ?? 'healthy';
+  const channel = source.channel ?? 'web';
+  if (channel !== 'web') throw new TypeError('Web profile registry only accepts channel web.');
   if (!['enabled', 'disabled', 'paused'].includes(status)) throw new TypeError(`Unknown account status: ${status}`);
   if (!['healthy', 'unhealthy', 'unknown'].includes(health)) throw new TypeError(`Unknown account health: ${health}`);
   return {
     sender_account_id: senderAccountId,
     external_ref: source.external_ref ?? null,
     profile_ref: source.profile_ref ?? senderAccountId,
-    channel: source.channel ?? 'web',
+    channel,
     status,
     health,
     capabilities: Array.isArray(source.capabilities) ? [...source.capabilities] : [],
@@ -68,6 +70,7 @@ export function createProfileRegistry({
   const root = path.resolve(profileRoot);
   const memory = new Map();
   let readyPromise;
+  let registrationTail = Promise.resolve();
 
   async function ensureRoot() {
     if (!readyPromise) {
@@ -88,6 +91,48 @@ export function createProfileRegistry({
     return account;
   }
 
+  async function withFilesystemLock(work) {
+    const file = path.join(root, 'registry.lock');
+    const deadline = Date.now() + 10_000;
+    let handle;
+    while (!handle) {
+      try {
+        handle = await open(file, 'wx');
+        await handle.writeFile(`${JSON.stringify({ acquired_at: Date.now() })}\n`, 'utf8');
+        await handle.close();
+        handle = null;
+        break;
+      } catch (error) {
+        if (handle) await handle.close().catch(() => {});
+        if (error?.code !== 'EEXIST') throw error;
+        const lock = await readJson(file);
+        if (lock?.acquired_at && lock.acquired_at + 30_000 < Date.now()) {
+          await rm(file, { force: true });
+          continue;
+        }
+        if (Date.now() >= deadline) throw new Error('Profile registry lock timeout.');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+    try {
+      return await work();
+    } finally {
+      await rm(file, { force: true });
+    }
+  }
+
+  async function serializeRegistration(work) {
+    const previous = registrationTail;
+    let release;
+    registrationTail = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await withFilesystemLock(work);
+    } finally {
+      release();
+    }
+  }
+
   async function list({ status, health } = {}) {
     await ensureRoot();
     const entries = await import('node:fs/promises').then(({ readdir }) => readdir(path.join(root, 'profiles'), { withFileTypes: true }));
@@ -106,22 +151,33 @@ export function createProfileRegistry({
 
   async function register(input) {
     await ensureRoot();
-    const account = normalizeAccount(input);
-    const existing = await load(account.sender_account_id);
-    if (!existing && (await list()).length >= maxProfiles) {
-      return { ok: false, error_code: 'profile_limit_exceeded', max_profiles: maxProfiles };
+    let account;
+    try {
+      account = normalizeAccount(input);
+    } catch (error) {
+      return {
+        ok: false,
+        error_code: error?.message?.includes('channel') ? 'channel_mismatch' : 'invalid_account',
+        message: error instanceof Error ? error.message : 'Invalid account.',
+      };
     }
-    const merged = {
-      ...(existing ?? {}),
-      ...account,
-      userDataDir: profilePath(root, account.sender_account_id),
-      registered_at: existing?.registered_at ?? new Date(nowMs(clock)).toISOString(),
-      updated_at: new Date(nowMs(clock)).toISOString(),
-    };
-    await mkdir(merged.userDataDir, { recursive: true });
-    await writeFile(metadataPath(root, account.sender_account_id), `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
-    memory.set(account.sender_account_id, merged);
-    return { ok: true, account: { ...merged } };
+    return serializeRegistration(async () => {
+      const existing = await load(account.sender_account_id);
+      if (!existing && (await list()).length >= maxProfiles) {
+        return { ok: false, error_code: 'profile_limit_exceeded', max_profiles: maxProfiles };
+      }
+      const merged = {
+        ...(existing ?? {}),
+        ...account,
+        userDataDir: profilePath(root, account.sender_account_id),
+        registered_at: existing?.registered_at ?? new Date(nowMs(clock)).toISOString(),
+        updated_at: new Date(nowMs(clock)).toISOString(),
+      };
+      await mkdir(merged.userDataDir, { recursive: true });
+      await writeFile(metadataPath(root, account.sender_account_id), `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+      memory.set(account.sender_account_id, merged);
+      return { ok: true, account: { ...merged } };
+    });
   }
 
   async function recoverExpired() {
@@ -174,6 +230,7 @@ export function createProfileRegistry({
   async function release(input) {
     await ensureRoot();
     const leaseId = typeof input === 'string' ? input : input?.lease_id;
+    if (!leaseId) return { ok: false, error_code: 'lease_token_required' };
     const accountId = typeof input === 'object' ? input?.sender_account_id ?? input?.account_id : null;
     const entries = accountId ? [accountId] : (await list()).map((account) => account.sender_account_id);
     for (const id of entries) {

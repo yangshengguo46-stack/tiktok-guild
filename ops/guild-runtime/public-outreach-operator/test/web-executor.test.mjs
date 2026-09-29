@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { executeWebAction } from '../src/web/tiktok-web-executor.mjs';
 import { FAKE_LOCATORS } from '../src/web/page-objects.mjs';
+import { createPlaywrightPool } from '../src/web/playwright-pool.mjs';
+
+process.env.PUBLIC_OUTREACH_FAKE_BROWSER = '1';
 
 class FakeLocator {
   constructor({ visible = false, text = '', attributes = {}, onClick = null, onFill = null } = {}) {
@@ -38,11 +44,15 @@ class FakeLocator {
 }
 
 class FakePage {
-  constructor({ login = false, challenge = false } = {}) {
+  constructor({ login = false, challenge = false, creatorUid = 'creator_001', creatorHandle = 'creator' } = {}) {
     this.controls = new Map();
     this.controls.set(FAKE_LOCATORS.loginRequired, new FakeLocator({ visible: login }));
     this.controls.set(FAKE_LOCATORS.challenge, new FakeLocator({ visible: challenge }));
     this.controls.set(FAKE_LOCATORS.profileRoot, new FakeLocator({ visible: true }));
+    this.controls.set(FAKE_LOCATORS.creatorIdentity, new FakeLocator({
+      visible: true,
+      attributes: { 'data-creator-uid': creatorUid, 'data-creator-handle': creatorHandle },
+    }));
     this.controls.set(FAKE_LOCATORS.creatorSearch, new FakeLocator());
     this.controls.set(FAKE_LOCATORS.creatorResult, new FakeLocator());
     this.controls.set(FAKE_LOCATORS.likeButton, new FakeLocator({
@@ -87,7 +97,6 @@ class FakePage {
 const account = (page, hooks = {}) => ({
   sender_account_id: 'ordinary_001',
   page,
-  locators: FAKE_LOCATORS,
   ...hooks,
 });
 
@@ -97,7 +106,7 @@ test('executes like, comment, follow in order and returns verified receipts', as
     account: account(page),
     creator: { creator_uid: 'creator_001' },
     action: ['like', 'comment', 'follow'],
-    payload: { comment: 'Hello from our creator team.' },
+    payload: { comment: 'Hello from our creator team.', testOnly: true },
   });
   assert.equal(result.verified, true);
   assert.equal(result.receipt_payload.receipt_type, 'public_action_receipt');
@@ -108,10 +117,10 @@ test('executes like, comment, follow in order and returns verified receipts', as
 
 test('message is optional and still requires message read-back', async () => {
   const result = await executeWebAction({
-    account: account(new FakePage()),
+    account: account(new FakePage({ creatorUid: 'creator_002' })),
     creator: { creator_uid: 'creator_002' },
     action: 'message',
-    payload: { message: 'Would you be open to chatting?' },
+    payload: { message: 'Would you be open to chatting?', testOnly: true },
   });
   assert.equal(result.verified, true);
   assert.equal(result.receipt_payload.receipt_type, 'dm_receipt');
@@ -127,16 +136,18 @@ test('login and challenge states pause the account and request manual takeover',
     }),
     creator: { creator_uid: 'creator_003' },
     action: 'like',
+    payload: { testOnly: true },
   });
   assert.equal(result.verified, false);
   assert.equal(result.error_code, 'login_required');
-  assert.deepEqual(result.manual_takeover, { task_id: 'takeover-1', reason: 'login_required' });
+  assert.deepEqual(result.manual_takeover.task, { task_id: 'takeover-1', reason: 'login_required' });
   assert.deepEqual(events, [['pause', 'login_required']]);
 
   const challenge = await executeWebAction({
     account: account(new FakePage({ challenge: true })),
     creator: { creator_uid: 'creator_004' },
     action: 'like',
+    payload: { testOnly: true },
   });
   assert.equal(challenge.verified, false);
   assert.equal(challenge.error_code, 'challenge');
@@ -155,6 +166,7 @@ test('missing read-back never becomes success and unknown results create takeove
     }),
     creator: { creator_uid: 'creator_005' },
     action: 'like',
+    payload: { testOnly: true },
   });
   assert.equal(result.verified, false);
   assert.equal(result.error_code, 'unknown');
@@ -166,6 +178,7 @@ test('cancellation is explicit and ordered actions reject invalid order', async 
     account: account(new FakePage()),
     creator: { creator_uid: 'creator_006' },
     action: 'like',
+    payload: { testOnly: true },
     signal: { aborted: true },
   });
   assert.deepEqual(cancelled, { verified: false, error_code: 'cancelled' });
@@ -174,7 +187,93 @@ test('cancellation is explicit and ordered actions reject invalid order', async 
     account: account(new FakePage()),
     creator: { creator_uid: 'creator_007' },
     action: ['follow', 'like'],
+    payload: { testOnly: true },
   });
   assert.equal(outOfOrder.verified, false);
   assert.equal(outOfOrder.error_code, 'provider_rejected');
+});
+
+test('stale profile identity and missing search results stop before a write', async () => {
+  const stale = await executeWebAction({
+    account: account(new FakePage({ creatorUid: 'wrong_creator' })),
+    creator: { creator_uid: 'requested_creator' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(stale.verified, false);
+  assert.equal(stale.error_code, 'unknown');
+
+  const missingSearchPage = new FakePage({ creatorUid: 'requested_creator' });
+  missingSearchPage.controls.get(FAKE_LOCATORS.creatorResult).visible = false;
+  const missingSearch = await executeWebAction({
+    account: account(missingSearchPage),
+    creator: { creator_uid: 'requested_creator', handle: 'requested' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(missingSearch.verified, false);
+  assert.equal(missingSearch.error_code, 'selector_missing');
+});
+
+test('custom locators cannot bypass the pilot gate', async () => {
+  const result = await executeWebAction({
+    account: account(new FakePage()),
+    creator: { creator_uid: 'creator_001' },
+    action: 'like',
+    payload: { locators: FAKE_LOCATORS },
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.error_code, 'pilot_required');
+  assert.equal(result.manual_takeover.status, 'manual_required');
+});
+
+test('a claimed pool lease can be passed directly to the web executor', async () => {
+  const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'public-outreach-lease-'));
+  const pool = createPlaywrightPool({
+    profileRoot,
+    launchPersistentContext: async () => ({
+      async newPage() {
+        return new FakePage({ creatorUid: 'creator_lease' });
+      },
+      async close() {},
+    }),
+  });
+  await pool.register({ sender_account_id: 'lease_account' });
+  const lease = await pool.claim('lease_account');
+  const result = await executeWebAction({
+    account: lease,
+    creator: { creator_uid: 'creator_lease' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(result.verified, true);
+  await pool.close();
+});
+
+test('manual takeover remains deterministic when hooks are absent or throw', async () => {
+  const absent = await executeWebAction({
+    account: account(new FakePage({ login: true })),
+    creator: { creator_uid: 'creator_001' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(absent.verified, false);
+  assert.equal(absent.manual_takeover.status, 'manual_required');
+  assert.equal(absent.manual_takeover.pause_status, 'paused');
+  assert.equal(absent.manual_takeover.task_status, 'manual_required');
+
+  const thrown = await executeWebAction({
+    account: account(new FakePage({ challenge: true }), {
+      pause: async () => { throw new Error('pause unavailable'); },
+      createManualTakeover: async () => { throw new Error('task unavailable'); },
+    }),
+    creator: { creator_uid: 'creator_001' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(thrown.verified, false);
+  assert.equal(thrown.error_code, 'challenge');
+  assert.equal(thrown.manual_takeover.status, 'manual_required');
+  assert.equal(thrown.manual_takeover.pause_status, 'hook_failed');
+  assert.equal(thrown.manual_takeover.task_status, 'hook_failed');
 });

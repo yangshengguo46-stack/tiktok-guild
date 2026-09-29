@@ -57,10 +57,18 @@ export function createPlaywrightPool({
     }
     if (active.size >= maxActive) return { ok: false, error_code: 'capacity_exhausted', max_active: maxActive };
     const requestedId = typeof request === 'string' ? request : request?.sender_account_id ?? request?.account_id;
+    const requestedChannel = typeof request === 'object' ? request?.channel : undefined;
+    if (requestedChannel && requestedChannel !== 'web') {
+      return { ok: false, error_code: 'channel_mismatch' };
+    }
     const accounts = requestedId
       ? [await profiles.get(requestedId)]
       : await profiles.list({ status: 'enabled', health: 'healthy' });
     for (const account of accounts) {
+      if (account?.channel !== 'web') {
+        if (requestedId) return { ok: false, error_code: 'channel_mismatch' };
+        continue;
+      }
       if (!account || active.has(account.sender_account_id)) continue;
       const lease = await profiles.acquire(account.sender_account_id, {
         leaseTtlMs: typeof request === 'object' && request.leaseTtlMs ? request.leaseTtlMs : leaseTtlMs,

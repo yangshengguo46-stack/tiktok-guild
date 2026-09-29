@@ -29,8 +29,47 @@ async function invokeHook(account, names, ...args) {
 
 async function manualTakeover(account, details) {
   if (!MANUAL_CODES.has(details.error_code)) return null;
-  await invokeHook(account, ['pause', 'pauseAccount', 'markPaused'], details);
-  return invokeHook(account, ['createManualTakeover', 'requestManualTakeover', 'manualTakeover'], details);
+  const markPausedLocally = () => {
+    try {
+      if (account && typeof account === 'object') account.status = 'paused';
+    } catch {
+      // The native account adapter remains authoritative when the lease is immutable.
+    }
+  };
+  let pauseStatus = 'local_state_only';
+  let pauseError = null;
+  try {
+    const pauseResult = await invokeHook(account, ['pause', 'pauseAccount', 'markPaused'], details);
+    if (pauseResult !== null) pauseStatus = 'paused';
+    else {
+      markPausedLocally();
+      pauseStatus = 'paused';
+    }
+  } catch (error) {
+    pauseStatus = 'hook_failed';
+    pauseError = error instanceof Error ? error.message : 'pause hook failed';
+    markPausedLocally();
+  }
+  let taskStatus = 'manual_required';
+  let task = null;
+  let taskError = null;
+  try {
+    task = await invokeHook(account, ['createManualTakeover', 'requestManualTakeover', 'manualTakeover'], details);
+    if (task !== null) taskStatus = 'created';
+  } catch (error) {
+    taskStatus = 'hook_failed';
+    taskError = error instanceof Error ? error.message : 'manual takeover hook failed';
+  }
+  return {
+    status: 'manual_required',
+    error_code: details.error_code,
+    sender_account_id: account?.sender_account_id ?? account?.account_id ?? null,
+    pause_status: pauseStatus,
+    task_status: taskStatus,
+    task,
+    ...(pauseError ? { pause_error: pauseError } : {}),
+    ...(taskError ? { task_error: taskError } : {}),
+  };
 }
 
 function normalizeError(error) {
@@ -93,7 +132,10 @@ export async function executeWebAction({
   signal,
 } = {}) {
   const resolvedAccount = account?.account ?? account;
-  if (!resolvedAccount || typeof resolvedAccount !== 'object') {
+  const executionAccount = account?.context && !resolvedAccount?.context
+    ? { ...resolvedAccount, context: account.context, lease_id: account.lease_id, userDataDir: account.userDataDir }
+    : resolvedAccount;
+  if (!executionAccount || typeof executionAccount !== 'object') {
     return { verified: false, error_code: 'unknown', message: 'Sender account is required.' };
   }
   const actions = orderedActions(action);
@@ -104,19 +146,20 @@ export async function executeWebAction({
     validateOrder(actions);
   } catch (error) {
     const details = normalizeError(error);
-    const takeover = await manualTakeover(resolvedAccount, details);
-    return { verified: false, ...details, ...(takeover ? { manual_takeover: takeover } : {}) };
+    const takeover = await manualTakeover(executionAccount, details);
+    return { verified: false, ...details, manual_takeover: takeover };
   }
   if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
 
   let browserPage;
   let ownedPage = false;
   try {
-    ({ page: browserPage, owned: ownedPage } = await pageFor(resolvedAccount));
+    ({ page: browserPage, owned: ownedPage } = await pageFor(executionAccount));
     const pageObjects = createTikTokPageObjects({
       page: browserPage,
-      locators: payload.locators ?? resolvedAccount.locators,
-      pilotEnabled: payload.pilotEnabled ?? resolvedAccount.pilot_enabled,
+      locators: payload.locators ?? executionAccount.locators,
+      pilotEnabled: payload.pilotEnabled ?? executionAccount.pilot_enabled,
+      testOnly: payload.testOnly === true,
     });
     const receipts = [];
     for (const currentAction of actions) {
@@ -124,7 +167,7 @@ export async function executeWebAction({
       const result = await pageObjects.run(currentAction, { ...payload, creator });
       if (!result || !result.evidence) throw new WebActionError('unknown', 'Action completed without read-back evidence.');
       receipts.push(receiptFor({
-        account: resolvedAccount,
+        account: executionAccount,
         creator,
         action: currentAction,
         evidence: result.evidence,
@@ -148,11 +191,11 @@ export async function executeWebAction({
       };
   } catch (error) {
     const details = normalizeError(error);
-    const takeover = await manualTakeover(resolvedAccount, details);
+    const takeover = await manualTakeover(executionAccount, details);
     return {
       verified: false,
       ...details,
-      ...(takeover ? { manual_takeover: takeover } : {}),
+      manual_takeover: takeover,
     };
   } finally {
     if (ownedPage) {
