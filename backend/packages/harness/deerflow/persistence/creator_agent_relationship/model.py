@@ -107,6 +107,7 @@ class CreatorOutreachReceiptRow(Base):
     receipt_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     provider_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    verification_source: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)

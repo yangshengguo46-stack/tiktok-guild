@@ -197,7 +197,8 @@ class CreatorOutreachRepository:
             await session.commit()
             return row.to_dict()
 
-    async def record_receipt(self, *, owner_user_id: str, creator_uid: str, sequence_no: int, receipt_id: str, kind: str, provider_ref: str | None, payload: dict[str, Any], verified: bool) -> dict[str, Any]:
+    async def record_receipt(self, *, owner_user_id: str, creator_uid: str, sequence_no: int, receipt_id: str, kind: str, provider_ref: str | None, verification_source: str, payload: dict[str, Any], verified: bool) -> dict[str, Any]:
+        """Persist a provider/verifier-owned receipt; callers must record its source."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         creator_uid = _text(creator_uid, "creator_uid")
         if type(sequence_no) is not int or sequence_no < 1:
@@ -206,6 +207,7 @@ class CreatorOutreachRepository:
         kind = _text(kind, "kind", 32)
         if kind not in _RECEIPT_KINDS:
             raise ValueError("unsupported outreach receipt kind")
+        verification_source = _text(verification_source, "verification_source", 64)
         if type(verified) is not bool:
             raise ValueError("verified must be boolean")
         payload = _bounded(payload, field="receipt payload")
@@ -217,10 +219,20 @@ class CreatorOutreachRepository:
                 raise ValueError("sequence does not exist")
             existing = await session.get(CreatorOutreachReceiptRow, (owner_user_id, creator_uid, sequence_no, receipt_id))
             if existing is not None:
-                if (existing.kind, existing.provider_ref, existing.payload_json, existing.verified) != (kind, provider_ref, payload, verified):
+                if (existing.kind, existing.provider_ref, existing.verification_source, existing.payload_json, existing.verified) != (kind, provider_ref, verification_source, payload, verified):
                     raise ValueError("receipt replay conflict")
                 return existing.to_dict()
-            row = CreatorOutreachReceiptRow(owner_user_id=owner_user_id, creator_uid=creator_uid, sequence_no=sequence_no, receipt_id=receipt_id, kind=kind, provider_ref=provider_ref, payload_json=payload, verified=verified)
+            row = CreatorOutreachReceiptRow(
+                owner_user_id=owner_user_id,
+                creator_uid=creator_uid,
+                sequence_no=sequence_no,
+                receipt_id=receipt_id,
+                kind=kind,
+                provider_ref=provider_ref,
+                verification_source=verification_source,
+                payload_json=payload,
+                verified=verified,
+            )
             try:
                 async with session.begin_nested():
                     session.add(row)
@@ -229,7 +241,7 @@ class CreatorOutreachRepository:
                 existing = await session.get(CreatorOutreachReceiptRow, (owner_user_id, creator_uid, sequence_no, receipt_id))
                 if existing is None:
                     raise
-                if (existing.kind, existing.provider_ref, existing.payload_json, existing.verified) != (kind, provider_ref, payload, verified):
+                if (existing.kind, existing.provider_ref, existing.verification_source, existing.payload_json, existing.verified) != (kind, provider_ref, verification_source, payload, verified):
                     raise ValueError("receipt replay conflict")
                 return existing.to_dict()
             await session.commit()

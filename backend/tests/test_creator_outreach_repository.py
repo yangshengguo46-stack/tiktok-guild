@@ -54,9 +54,9 @@ async def test_chat_bubble_cannot_advance_and_verified_facts_are_required(repo):
     with pytest.raises(ValueError):
         await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="fake", next_status="contacted")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender")
-    await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r1", kind="public_action_receipt", provider_ref="p1", payload={"action": "like"}, verified=True)
+    await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r1", kind="public_action_receipt", provider_ref="p1", verification_source="provider_readback", payload={"action": "like"}, verified=True)
     await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r1", next_status="public_touched")
-    await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r2", kind="dm_receipt", provider_ref="p2", payload={"action": "message"}, verified=True)
+    await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r2", kind="dm_receipt", provider_ref="p2", verification_source="provider_readback", payload={"action": "message"}, verified=True)
     await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r2", next_status="contacted")
     with pytest.raises(ValueError):
         await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r2", next_status="replied")
@@ -68,11 +68,12 @@ async def test_chat_bubble_cannot_advance_and_verified_facts_are_required(repo):
 async def test_receipt_idempotency_and_replay_conflict(repo):
     await repo.claim_creator(owner_user_id="guild", creator_uid="c-1")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender")
-    first = await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", payload={"x": 1}, verified=True)
-    duplicate = await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", payload={"x": 1}, verified=True)
-    assert {key: duplicate[key] for key in ("receipt_id", "kind", "provider_ref", "payload_json", "verified")} == {key: first[key] for key in ("receipt_id", "kind", "provider_ref", "payload_json", "verified")}
+    first = await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", verification_source="provider_readback", payload={"x": 1}, verified=True)
+    duplicate = await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", verification_source="provider_readback", payload={"x": 1}, verified=True)
+    keys = ("receipt_id", "kind", "provider_ref", "verification_source", "payload_json", "verified")
+    assert {key: duplicate[key] for key in keys} == {key: first[key] for key in keys}
     with pytest.raises(ValueError):
-        await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", payload={"x": 2}, verified=True)
+        await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", verification_source="provider_readback", payload={"x": 2}, verified=True)
 
 
 @pytest.mark.asyncio
@@ -84,9 +85,19 @@ async def test_closed_claim_cannot_rebind_sender(repo):
         ("dm", "dm_receipt", "contacted"),
         ("inbound", "verified_inbound", "replied"),
     ):
-        await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id=receipt_id, kind=kind, provider_ref=f"p-{receipt_id}", payload={"receipt": receipt_id}, verified=True)
+        await repo.record_receipt(
+            owner_user_id="guild",
+            creator_uid="c-1",
+            sequence_no=1,
+            receipt_id=receipt_id,
+            kind=kind,
+            provider_ref=f"p-{receipt_id}",
+            verification_source="provider_readback",
+            payload={"receipt": receipt_id},
+            verified=True,
+        )
         await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id=receipt_id, next_status=next_status)
-    await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="close", kind="closure_receipt", provider_ref="p", payload={"reason": "operator"}, verified=True)
+        await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="close", kind="closure_receipt", provider_ref="p", verification_source="operator", payload={"reason": "operator"}, verified=True)
     await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="close", next_status="closed")
     with pytest.raises(ValueError, match="closed"):
         await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender-b")

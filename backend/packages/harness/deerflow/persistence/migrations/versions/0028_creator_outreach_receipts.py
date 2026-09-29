@@ -38,6 +38,7 @@ def upgrade() -> None:
             sa.Column("receipt_id", sa.String(128), nullable=False),
             sa.Column("kind", sa.String(32), nullable=False),
             sa.Column("provider_ref", sa.String(128), nullable=True),
+            sa.Column("verification_source", sa.String(64), nullable=False),
             sa.Column("payload_json", sa.JSON(), nullable=False),
             sa.Column("verified", sa.Boolean(), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
