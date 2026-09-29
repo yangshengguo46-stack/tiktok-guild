@@ -149,26 +149,38 @@ export function createWdaHealthChecker({
     if (typeof driverProbe === 'function') {
       try {
         const probe = await driverProbe({ device, driver });
-        if (probe === false) {
+        const verified = probe
+          && probe.ready === true
+          && probe.device_verified === true
+          && probe.wda_verified === true;
+        if (!verified) {
           return {
             ok: false,
-            state: 'offline',
+            state: 'manual_required',
             error_code: 'wda_unavailable',
             prerequisites: normalized,
-            message: 'WebDriverAgent did not answer its health probe.',
+            probe,
+            message: 'WebDriverAgent probe must return ready=true with verified device and WDA conditions.',
           };
         }
+        return { ok: true, state: 'ready', prerequisites: normalized, probe };
       } catch (error) {
         return {
           ok: false,
-          state: 'offline',
+          state: 'manual_required',
           error_code: 'wda_unavailable',
           prerequisites: normalized,
           message: error instanceof Error ? error.message : 'WebDriverAgent health probe failed.',
         };
       }
     }
-    return { ok: true, state: 'ready', prerequisites: normalized };
+    return {
+      ok: false,
+      state: 'manual_required',
+      error_code: 'wda_probe_required',
+      prerequisites: normalized,
+      message: 'A live WebDriverAgent health probe is required before marking the device ready.',
+    };
   };
 }
 

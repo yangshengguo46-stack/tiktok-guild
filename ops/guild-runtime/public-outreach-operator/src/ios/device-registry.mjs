@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 
 import {
   IOS_DEVICE_STATES,
@@ -64,11 +65,15 @@ export function createDeviceRegistry({
   prerequisites = null,
   prerequisiteProbe = undefined,
   driverProbe = null,
+  lockLeaseMs = 5_000,
+  lockHeartbeatMs = Math.max(25, Math.floor(lockLeaseMs / 3)),
+  lockAcquireTimeoutMs = 10_000,
 } = {}) {
   if (typeof rootDir !== 'string' || !rootDir) throw new TypeError('rootDir is required.');
   const root = path.resolve(rootDir);
   const file = path.join(root, 'devices.json');
   const lockFile = path.join(root, 'devices.lock');
+  const hostName = os.hostname();
   const checker = healthChecker ?? createWdaHealthChecker({
     prerequisites,
     prerequisiteProbe,
@@ -106,21 +111,43 @@ export function createDeviceRegistry({
     await rename(temporary, file);
   }
 
+  async function writeLockRecord(record) {
+    const temporary = `${lockFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(record)}\n`, 'utf8');
+    await rename(temporary, lockFile);
+  }
+
+  function ownerDead(record) {
+    if (record?.hostname !== hostName || !Number.isInteger(record?.pid)) return false;
+    try {
+      process.kill(record.pid, 0);
+      return false;
+    } catch (error) {
+      return error?.code === 'ESRCH';
+    }
+  }
+
   async function withFilesystemLock(work) {
     await ensureRoot();
     const token = crypto.randomUUID();
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + lockAcquireTimeoutMs;
     let acquired = false;
     while (!acquired) {
       try {
         const handle = await open(lockFile, 'wx');
-        await handle.writeFile(`${JSON.stringify({ token, acquired_at: Date.now() })}\n`, 'utf8');
+        await handle.writeFile(`${JSON.stringify({
+          token,
+          pid: process.pid,
+          hostname: hostName,
+          acquired_at: Date.now(),
+          lease_until: Date.now() + lockLeaseMs,
+        })}\n`, 'utf8');
         await handle.close();
         acquired = true;
       } catch (error) {
         if (error?.code !== 'EEXIST') throw error;
         const current = await readJson(lockFile, null);
-        if (current?.acquired_at && current.acquired_at + 30_000 < Date.now()) {
+        if (current?.lease_until <= Date.now() && ownerDead(current)) {
           await rm(lockFile, { force: true });
           continue;
         }
@@ -128,9 +155,30 @@ export function createDeviceRegistry({
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
     }
+    let heartbeatLost = false;
+    const heartbeat = setInterval(async () => {
+      const current = await readJson(lockFile, null);
+      if (current?.token !== token) {
+        heartbeatLost = true;
+        return;
+      }
+      try {
+        await writeLockRecord({
+          ...current,
+          heartbeat_at: Date.now(),
+          lease_until: Date.now() + lockLeaseMs,
+        });
+      } catch {
+        heartbeatLost = true;
+      }
+    }, lockHeartbeatMs);
+    heartbeat.unref?.();
     try {
-      return await work();
+      const result = await work();
+      if (heartbeatLost) throw new Error('iOS device registry lock was lost during the operation.');
+      return result;
     } finally {
+      clearInterval(heartbeat);
       const current = await readJson(lockFile, null);
       if (current?.token === token) await rm(lockFile, { force: true });
     }

@@ -67,7 +67,7 @@ function normalizeElement(element) {
     async press(key) {
       if (typeof element.press === 'function') return element.press(key);
       if (typeof element.sendKeys === 'function') return element.sendKeys(key);
-      return undefined;
+      throw new IosSessionError('manual_required', 'Search control cannot submit Enter through the available driver API.');
     },
   };
 }
@@ -80,6 +80,7 @@ export function createXcuitestSession({
   driverFactory = null,
   registry = null,
   healthCheck = null,
+  navigationAdapter = null,
   evidenceRoot = null,
   sessionId = crypto.randomUUID(),
 } = {}) {
@@ -99,12 +100,23 @@ export function createXcuitestSession({
       if (!activeDriver) return false;
       if (typeof activeDriver.getStatus === 'function') {
         const status = await activeDriver.getStatus();
-        return status?.ready !== false;
+        return {
+          ready: status?.ready === true,
+          device_verified: status?.device_verified === true,
+          wda_verified: status?.wda_verified === true,
+        };
       }
-      if (typeof activeDriver.isWdaHealthy === 'function') return activeDriver.isWdaHealthy();
+      if (typeof activeDriver.isWdaHealthy === 'function') {
+        const result = await activeDriver.isWdaHealthy();
+        return result;
+      }
       if (typeof activeDriver.status === 'function') {
         const status = await activeDriver.status();
-        return status?.ready !== false;
+        return {
+          ready: status?.ready === true,
+          device_verified: status?.device_verified === true,
+          wda_verified: status?.wda_verified === true,
+        };
       }
       return false;
     },
@@ -247,13 +259,17 @@ export function createXcuitestSession({
   }
 
   async function navigateToCreator({ creator = {}, locators = {} } = {}) {
-    const activeDriver = await ensureDriver();
     const profileUrl = creator.profile_url ?? creator.profileUrl ?? null;
     if (profileUrl) {
-      if (typeof activeDriver.url === 'function') await activeDriver.url(profileUrl);
-      else if (typeof activeDriver.navigateTo === 'function') await activeDriver.navigateTo(profileUrl);
-      else if (typeof activeDriver.get === 'function') await activeDriver.get(profileUrl);
-      else throw new IosSessionError('selector_missing', 'The XCUITest driver cannot navigate to a creator profile.');
+      if (typeof navigationAdapter !== 'function') {
+        throw new IosSessionError('manual_required', 'Profile URL navigation requires an explicit app-level navigation adapter.');
+      }
+      const navigation = await navigationAdapter({ creator, profile_url: profileUrl, driver: await ensureDriver() });
+      if (!navigation || navigation.ok !== true) {
+        throw new IosSessionError('manual_required', 'The app-level profile navigation adapter did not verify navigation.', {
+          navigation,
+        });
+      }
       return readCreatorIdentity(locators.creatorIdentity);
     }
     const handle = creator.handle ?? creator.username ?? null;

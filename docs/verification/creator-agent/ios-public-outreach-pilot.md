@@ -19,6 +19,9 @@ write to TikTok or attach a real device.
 - Register exactly one device with `device_ref`, `udid`, `platform_version`, and
   `wda_bundle_id`, and provide a live WDA probe hook. A non-empty bundle id or
   caller-supplied `paired`/`online` metadata is not proof of readiness. The
+  probe must return `{ ready: true, device_verified: true,
+  wda_verified: true }`; any missing, null, or failed field keeps the device
+  unavailable/manual-required.
   expected initial health state is `ready` only after the probe succeeds;
   otherwise the device remains `manual_required` or `offline`.
 - Log into one ordinary TikTok account manually on the iPhone. Do not put
@@ -62,6 +65,11 @@ write to TikTok or attach a real device.
   provider controls. Coordinate-only fallback is rejected into manual takeover
   even when an evidence record exists, because it cannot prove target identity
   or control identity.
+- Profile URL navigation requires an explicit app-level navigation adapter that
+  verifies the destination. The operator does not treat a generic driver URL
+  call as proof of TikTok in-app navigation. Handle search must successfully
+  submit Enter through the driver; if the control cannot submit it, the task
+  becomes manual-required.
 - Custom iOS locators are available only when the separately authorized pilot
   flag is enabled. The locator version and evidence source are included in the
   receipt.

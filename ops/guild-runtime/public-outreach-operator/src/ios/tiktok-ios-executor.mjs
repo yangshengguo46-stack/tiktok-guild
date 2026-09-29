@@ -60,6 +60,14 @@ function pilotAllowed(explicit) {
   return ['1', 'true', 'yes'].includes(String(process.env.PUBLIC_OUTREACH_TIKTOK_PILOT ?? '').toLowerCase());
 }
 
+function locatorDescription(locator) {
+  if (typeof locator === 'string') return `accessibility_id=${locator}`;
+  if (!locator || typeof locator !== 'object') return 'unknown';
+  const key = ['accessibility_id', 'accessibilityId', 'text', 'label', 'predicate', 'class_chain']
+    .find((candidate) => locator[candidate] !== undefined);
+  return key ? `${key}=${String(locator[key])}` : 'coordinate-only';
+}
+
 async function invokeHook(account, names, ...args) {
   for (const name of names) {
     if (typeof account?.[name] === 'function') return account[name](...args);
@@ -249,7 +257,7 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       if (!await active(control)) await session.tap(locators.likeButton);
       const readBack = await session.find(locators.likeButton);
       if (!await active(readBack)) throw new IosSessionError('unknown', 'Like did not produce a verified active state.');
-      return { action, evidence: `${locatorVersion}:accessibility_id:like-button` };
+      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.likeButton)}` };
     }
     case 'follow': {
       const control = await session.find(locators.followButton);
@@ -257,7 +265,7 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       if (!await active(control)) await session.tap(locators.followButton);
       const readBack = await session.find(locators.followButton);
       if (!await active(readBack)) throw new IosSessionError('unknown', 'Follow did not produce a verified active state.');
-      return { action, evidence: `${locatorVersion}:accessibility_id:follow-button` };
+      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.followButton)}` };
     }
     case 'comment': {
       const value = payload.comment ?? payload.comment_text ?? payload.text;
@@ -268,7 +276,7 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       if (!await visible(receipt) || !(await text(receipt)).includes(value)) {
         throw new IosSessionError('unknown', 'Comment was not verified by a provider read-back.');
       }
-      return { action, evidence: `${locatorVersion}:accessibility_id:comment-item` };
+      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.commentReceipt)}` };
     }
     case 'message': {
       const value = payload.message ?? payload.message_text ?? payload.text;
@@ -279,7 +287,7 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       if (!await visible(receipt) || !(await text(receipt)).includes(value)) {
         throw new IosSessionError('unknown', 'Message was not verified by a provider read-back.');
       }
-      return { action, evidence: `${locatorVersion}:accessibility_id:message-item` };
+      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.messageReceipt)}` };
     }
     default:
       throw new IosSessionError('provider_rejected', `Unsupported iOS action: ${action}`);
@@ -323,6 +331,9 @@ export async function executeIosAction({
         driverFactory: account?.driverFactory ?? resolvedAccount.driverFactory ?? device.driverFactory,
         registry: device.registry,
         healthCheck: device.healthCheck,
+        navigationAdapter: account?.navigationAdapter
+          ?? resolvedAccount.navigationAdapter
+          ?? device.navigationAdapter,
         evidenceRoot: payload.evidenceRoot ?? device.evidenceRoot,
       });
       ownedSession = true;

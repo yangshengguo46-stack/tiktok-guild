@@ -46,6 +46,7 @@ class FakeElement {
   async click() { await this.onClick?.(this); }
   async clear() { this.text = ''; }
   async setValue(value) { this.text = value; }
+  async press() {}
 }
 
 class FakeDriver {
@@ -108,7 +109,7 @@ async function registry() {
   return createDeviceRegistry({
     rootDir,
     prerequisites: readyPrerequisites,
-    driverProbe: async () => true,
+    driverProbe: async () => ({ ready: true, device_verified: true, wda_verified: true }),
   });
 }
 
@@ -127,8 +128,16 @@ test('registers a ready device and prevents a second active session', async () =
 
 test('filesystem lease prevents two registry instances from claiming the same device', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'ios-cross-process-'));
-  const first = createDeviceRegistry({ rootDir, prerequisites: readyPrerequisites, driverProbe: async () => true });
-  const second = createDeviceRegistry({ rootDir, prerequisites: readyPrerequisites, driverProbe: async () => true });
+  const first = createDeviceRegistry({
+    rootDir,
+    prerequisites: readyPrerequisites,
+    driverProbe: async () => ({ ready: true, device_verified: true, wda_verified: true }),
+  });
+  const second = createDeviceRegistry({
+    rootDir,
+    prerequisites: readyPrerequisites,
+    driverProbe: async () => ({ ready: true, device_verified: true, wda_verified: true }),
+  });
   await first.registerDevice(device());
   const results = await Promise.all([
     first.claim('iphone-001', { sessionId: 'owner-a' }),
@@ -140,6 +149,48 @@ test('filesystem lease prevents two registry instances from claiming the same de
   const loser = results.find((result) => !result.ok);
   assert.equal((await first.release({ device_ref: 'iphone-001', session_id: loser?.session_id ?? 'wrong' })).error_code, 'session_mismatch');
   assert.equal((await first.release({ device_ref: 'iphone-001', session_id: owner.session_id })).ok, true);
+});
+
+test('lock heartbeat keeps a slow health probe exclusive past the lease interval', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'ios-slow-lock-'));
+  let slowMode = false;
+  let healthFinished = false;
+  const slowHealth = async () => {
+    if (slowMode) {
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      healthFinished = true;
+    }
+    return {
+      ok: true,
+      state: 'ready',
+      probe: { ready: true, device_verified: true, wda_verified: true },
+    };
+  };
+  const options = {
+    rootDir,
+    healthChecker: slowHealth,
+    lockLeaseMs: 30,
+    lockHeartbeatMs: 5,
+    lockAcquireTimeoutMs: 1_000,
+  };
+  const first = createDeviceRegistry(options);
+  const second = createDeviceRegistry(options);
+  await first.registerDevice(device());
+  slowMode = true;
+  const healthPromise = first.health('iphone-001');
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  let claimFinished = false;
+  const claimPromise = second.claim('iphone-001', { sessionId: 'slow-owner' }).then((result) => {
+    claimFinished = true;
+    return result;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(healthFinished, false);
+  assert.equal(claimFinished, false);
+  await healthPromise;
+  const claim = await claimPromise;
+  assert.equal(claim.ok, true);
+  assert.equal((await second.release({ device_ref: 'iphone-001', session_id: 'slow-owner' })).ok, true);
 });
 
 test('missing WDA, locked, offline, and unpaired devices fail closed with explicit states', async () => {
@@ -174,6 +225,26 @@ test('missing WDA, locked, offline, and unpaired devices fail closed with explic
   });
   assert.equal(noProbe.ok, false);
   assert.equal(noProbe.error_code, 'wda_probe_required');
+
+  for (const probe of [undefined, null, {}, { ready: false }, { ready: true }, true]) {
+    const invalidProbe = await createWdaHealthChecker({
+      prerequisites: readyPrerequisites,
+      driverProbe: async () => probe,
+    })({ device: { ...device(), platform: 'darwin' } });
+    assert.equal(invalidProbe.ok, false);
+    assert.equal(invalidProbe.state, 'manual_required');
+    assert.equal(invalidProbe.error_code, 'wda_unavailable');
+  }
+  const verifiedProbe = await createWdaHealthChecker({
+    prerequisites: readyPrerequisites,
+    driverProbe: async () => ({
+      ready: true,
+      device_verified: true,
+      wda_verified: true,
+    }),
+  })({ device: { ...device(), platform: 'darwin' } });
+  assert.equal(verifiedProbe.ok, true);
+  assert.equal(verifiedProbe.state, 'ready');
 });
 
 test('session uses accessibility locators, launches TikTok, and closes its lease', async () => {
@@ -261,6 +332,40 @@ test('creator handle is searched and canonically read back before a public actio
   });
   assert.equal(mismatch.verified, false);
   assert.equal(mismatch.error_code, 'unknown');
+});
+
+test('profile URL navigation and missing Enter support fail into bounded manual takeover', async () => {
+  const urlDevices = await registry();
+  const urlRegistered = await urlDevices.registerDevice(device());
+  const urlResult = await executeIosAction({
+    device: {
+      ...urlRegistered.device,
+      registry: urlDevices,
+      healthCheck: async () => ({ ok: true, state: 'ready' }),
+    },
+    account: account({ driver: new FakeDriver() }),
+    creator: { profile_url: 'https://www.tiktok.com/@target_handle' },
+    action: 'like',
+  });
+  assert.equal(urlResult.verified, false);
+  assert.equal(urlResult.error_code, 'manual_required');
+
+  const searchDevices = await registry();
+  const searchRegistered = await searchDevices.registerDevice(device());
+  const noEnterDriver = new FakeDriver();
+  noEnterDriver.controls.get('creator-search').press = undefined;
+  const searchResult = await executeIosAction({
+    device: {
+      ...searchRegistered.device,
+      registry: searchDevices,
+      healthCheck: async () => ({ ok: true, state: 'ready' }),
+    },
+    account: account({ driver: noEnterDriver }),
+    creator: { handle: 'target_handle' },
+    action: 'like',
+  });
+  assert.equal(searchResult.verified, false);
+  assert.equal(searchResult.error_code, 'manual_required');
 });
 
 test('custom iOS locators require pilot authorization and coordinate fallbacks go to takeover', async () => {
