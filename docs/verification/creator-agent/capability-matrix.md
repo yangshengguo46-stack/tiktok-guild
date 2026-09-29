@@ -26,3 +26,21 @@ naturalness, model quality, TikTok behavior, or business results.
 
 The retained guild workbench remains a UI surface and honest placeholder. It is
 not evidence that any external TikTok action occurred.
+
+## Dual-channel public outreach (2026-09-29)
+
+The following rows add the staged verification boundary for the Web
+Playwright and iPhone Appium/XCUITest outreach implementation. They do not
+replace the older external TikTok rows above.
+
+| Capability | Status | Evidence and boundary |
+| --- | --- | --- |
+| Native dual-channel sender/action contract | `verified-local` | Task 1–5 repository and workflow tests cover owner-scoped sender identity, one active creator sequence, sender continuity, action idempotency, ordered `like`/`comment`/`follow`/`message`, verified receipt gates, partial completion, unknown results, and manual takeover. The focused run currently has one reproducible SQLite reclaimed-lease completion failure in `test_action_claim_lease_expiry_and_completion_identity`; this remains an open contract defect. |
+| Web profile cap and active lease cap | `verified-local` | Fake stress registered 50 profiles, leased 10 concurrently, rejected the 51st profile and the 11th active lease, enforced same-profile exclusivity, and recovered a stale lease before replacement. No browser or platform traffic was used. |
+| Web and iPhone executor receipt parity | `verified-local` | Offline fake-driver tests return the shared receipt envelope and require provider read-back for each public action. This proves local contract parity only; no real provider receipt stream exists. |
+| Public outreach control-plane workbench | `verified-local` | Frontend lint, TypeScript, production build, and one mocked Playwright E2E pass. The E2E uses mocked account/task/receipt APIs and cannot prove external action. |
+| Static runtime doctor and acceptance | `verified-local` | Static doctor passes package, dependency, catalog, configuration, profile-parent, and driver-registration checks after `npm ci --ignore-scripts`; acceptance uses fake adapters and remains external-write-free. The full runtime suite retains the historical nginx log assertion failure. |
+| Local fake 50-profile/10-slot stress | `verified-local` | Peak RSS 46.17 MiB, synthetic registration throughput 320.39 profiles/s, lease recovery 4.255 ms, process CPU/wall 122.05% on the test host. These are local fake-runtime measurements, not TikTok capacity or safety evidence. |
+| Authorized Web single-account pilot | `unverified-external` | Not run in this verification window. Requires explicit account/creator authorization, provider read-back, evidence capture, stop conditions, and cleanup. |
+| Authorized iPhone single-device pilot | `unverified-external` | Not run. No registered physical iPhone or verified live WDA probe was present; screenshots, accessibility snapshots, and fake drivers cannot promote this capability. |
+| Ten-account expansion and fifty-account operational rollout | `blocked` | Blocked until the single Web and iPhone pilots pass, the reclaimed-lease defect is fixed, manual takeover is exercised, and provider read-back is verified. |
