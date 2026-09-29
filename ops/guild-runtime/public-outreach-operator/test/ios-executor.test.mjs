@@ -323,6 +323,32 @@ test('registry rejects non-ok ready and paired health states before persistence 
   }
 });
 
+test('claim preserves explicit fresh health state while refusing the lease', async () => {
+  for (const failure of [
+    { state: 'offline', error_code: 'device_offline' },
+    { state: 'manual_required', error_code: 'device_locked' },
+    { state: 'manual_required', error_code: 'device_unpaired' },
+  ]) {
+    let calls = 0;
+    const devices = createDeviceRegistry({
+      rootDir: await mkdtemp(path.join(os.tmpdir(), `ios-claim-${failure.error_code}-`)),
+      healthChecker: async () => {
+        calls += 1;
+        return calls === 1
+          ? strictHealth()
+          : { ok: false, state: failure.state, error_code: failure.error_code };
+      },
+    });
+    await devices.registerDevice(device());
+    const claim = await devices.claim('iphone-001', { sessionId: `claim-${failure.error_code}` });
+    assert.equal(claim.ok, false);
+    assert.equal(claim.error_code, failure.error_code);
+    assert.equal(claim.device.state, failure.state);
+    assert.equal(claim.device.health, failure.error_code);
+    assert.equal((await devices.get('iphone-001')).active_session_id, null);
+  }
+});
+
 test('session uses accessibility locators, launches TikTok, and closes its lease', async () => {
   const devices = await registry();
   const registered = await devices.registerDevice(device());

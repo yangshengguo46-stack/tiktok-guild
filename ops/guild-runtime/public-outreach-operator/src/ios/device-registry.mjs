@@ -348,14 +348,14 @@ export function createDeviceRegistry({
       if (!health.ok) {
         const blocked = {
           ...device,
-          state: 'manual_required',
-          health: 'wda_unavailable',
+          state: health.state,
+          health: health.error_code,
           health_detail: health,
           updated_at: nowIso(clock),
         };
         memory.set(deviceRef, blocked);
         await flush();
-        return { ok: false, error_code: 'wda_unavailable', device: { ...blocked } };
+        return { ok: false, error_code: health.error_code, device: { ...blocked } };
       }
       const claimed = {
         ...device,
