@@ -173,6 +173,7 @@ async def test_action_claim_lease_expiry_and_completion_identity(repo):
         receipt_id="receipt-1",
         lease_owner="worker-b",
         lease_token=second_claim["lease_token"],
+        now=created_at + timedelta(seconds=3),
     )
     assert completed["state"] == "completed"
     assert completed["lease_until"] is None

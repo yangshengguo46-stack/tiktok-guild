@@ -17,16 +17,11 @@ The single Web pilot and single iPhone pilot were not run, so the staged gate
 for expanding to ten Web accounts and eventually fifty registered profiles
 remains closed.
 
-One backend lease regression also remains open: the focused persistence run
-reproduces a failure when a reclaimed SQLite action lease is completed with the
-new owner's token. This is a Task 1 contract defect and blocks calling the
-backend focused suite green.
-
 ## Static and unit verification
 
 | Area | Command or evidence | Result | Boundary |
 | --- | --- | --- | --- |
-| Backend outreach/persistence | `backend/.venv/bin/pytest -q backend/tests/test_creator_outreach_channels.py backend/tests/test_creator_outreach_repository.py backend/tests/test_public_outreach_workflow.py backend/tests/test_public_outreach_api.py backend/tests/test_persistence_bootstrap.py backend/tests/test_persistence_migrations_env.py` | `81 passed, 1 failed` | The failing test is `test_action_claim_lease_expiry_and_completion_identity`; see the lease defect below. |
+| Backend outreach/persistence | `backend/.venv/bin/pytest -q backend/tests/test_creator_outreach_channels.py backend/tests/test_creator_outreach_repository.py backend/tests/test_public_outreach_workflow.py backend/tests/test_public_outreach_api.py backend/tests/test_persistence_bootstrap.py backend/tests/test_persistence_migrations_env.py` | `82 passed` | The reclaimed-lease test uses an explicit fixed `now` inside the second lease; production lease expiry validation was unchanged. |
 | Operator package | `cd ops/guild-runtime/public-outreach-operator && npm ci --ignore-scripts && npm test` | `43 passed` | Installs the pinned local dependencies only; no browser, iPhone, WDA, or TikTok write starts. `npm audit` reported dependency advisories and was not auto-fixed. |
 | Runtime package | `cd ops/guild-runtime && npm test` | `99 passed, 1 failed` | The only failure is the retained historical nginx log assertion. |
 | Static doctor | `cd ops/guild-runtime && npm run doctor -- --static` after operator `npm ci --ignore-scripts` | Static checks passed | Doctor verified package metadata, Playwright `1.59.1`, Appium `3.1.0`, XCUITest `12.13.3`, profile-root parent permissions, runtime config, catalog, and driver registration. It reported zero registered iPhones, so the live WDA pilot remains unavailable. |
@@ -57,18 +52,11 @@ This assertion is unchanged by the dual-channel outreach implementation and is
 outside Task 8's evidence-only scope. It must be repaired in the existing nginx
 runtime ownership before the full runtime suite can be called green.
 
-The focused backend failure is different and is actionable for the outreach
-implementation. It reproduces in three consecutive runs:
-
-```text
-test_action_claim_lease_expiry_and_completion_identity
-ValueError: action task lease is stale or expired
-```
-
-The test successfully reclaims the expired lease as `worker-b`, but the final
-completion update does not match the row's persisted lease expiry in SQLite.
-No production workaround was added in Task 8; the owner of the persistence
-contract must fix and re-run this test before declaring the sequence ready.
+The backend persistence run is green after making
+`test_action_claim_lease_expiry_and_completion_identity` deterministic. Its
+second lease starts at the fixed `created_at + 2s` and the final completion
+uses `created_at + 3s`, which is within the ten-second lease. No production
+lease check was relaxed or changed.
 
 ## Local fake 50-profile / 10-slot stress
 
@@ -172,4 +160,3 @@ dependency directory created by `npm ci --ignore-scripts` was removed before
 the Task 8 commit. No pilot process, browser, WDA session, iPhone session,
 credential, cookie, profile path, screenshot, or provider payload was added to
 the repository.
-
