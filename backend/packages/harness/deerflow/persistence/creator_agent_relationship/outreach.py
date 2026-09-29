@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -337,10 +337,18 @@ class CreatorOutreachRepository:
             )
             if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
                 return None
+            active_sender = exists(
+                select(SenderAccountRow.sender_account_id).where(
+                    SenderAccountRow.owner_user_id == task.owner_user_id,
+                    SenderAccountRow.sender_account_id == task.sender_account_id,
+                    SenderAccountRow.status.in_(_ACTIVE_SENDER_STATES),
+                )
+            )
             stmt = (
                 update(CreatorOutreachActionTaskRow)
                 .where(
                     CreatorOutreachActionTaskRow.task_id == task_id,
+                    active_sender,
                     or_(
                         CreatorOutreachActionTaskRow.state == "pending",
                         and_(
@@ -603,10 +611,17 @@ class CreatorOutreachRepository:
         task_id: str,
         *,
         recoverable_error_codes: Iterable[str],
+        lease_owner: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         """Reset one explicitly unknown/recoverable task without duplicating verified work."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         task_id = _text(task_id, "task_id")
+        if (lease_owner is None) != (lease_token is None):
+            raise ValueError("lease owner and token must be supplied together")
+        if lease_owner is not None:
+            lease_owner = _text(lease_owner, "lease_owner")
+            lease_token = _text(lease_token, "lease_token")
         allowed = {_text(code, "error_code", 128) for code in recoverable_error_codes}
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
@@ -615,7 +630,8 @@ class CreatorOutreachRepository:
             if row.state == "completed":
                 raise ValueError("verified outreach actions cannot be retried")
             if row.state == "leased":
-                raise ValueError("action task is currently leased")
+                if row.lease_owner != lease_owner or row.lease_token != lease_token:
+                    raise ValueError("action task lease is owned by another worker")
             receipt = None
             if row.receipt_id is not None:
                 receipt = await session.get(
@@ -634,13 +650,39 @@ class CreatorOutreachRepository:
             )
             if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
                 raise ValueError("closed outreach sequences cannot be retried")
-            row.state = "pending"
-            row.lease_until = None
-            row.lease_owner = None
-            row.lease_token = None
-            row.error_code = None
-            row.updated_at = datetime.now(UTC)
+            now = datetime.now(UTC)
+            conditions = [
+                CreatorOutreachActionTaskRow.task_id == task_id,
+                CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+            ]
+            if row.state == "leased":
+                conditions.extend(
+                    [
+                        CreatorOutreachActionTaskRow.state == "leased",
+                        CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                        CreatorOutreachActionTaskRow.lease_token == lease_token,
+                        CreatorOutreachActionTaskRow.lease_until > now,
+                    ]
+                )
+            else:
+                conditions.append(CreatorOutreachActionTaskRow.state.in_(("pending", "failed")))
+            result = await session.execute(
+                update(CreatorOutreachActionTaskRow)
+                .where(*conditions)
+                .values(
+                    state="pending",
+                    lease_until=None,
+                    lease_owner=None,
+                    lease_token=None,
+                    error_code=None,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if not result.rowcount:
+                raise ValueError("action task lease changed before retry")
             await session.commit()
+            await session.refresh(row)
             return row.to_dict()
 
     async def set_sender_account_status(
@@ -672,11 +714,18 @@ class CreatorOutreachRepository:
         task_id: str,
         *,
         reason: str,
+        lease_owner: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
-        """Stop one task and record the bounded manual-takeover reason."""
+        """Stop one task or queue a takeover request without stealing a live lease."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         task_id = _text(task_id, "task_id")
         reason = _text(reason, "reason", 128)
+        if (lease_owner is None) != (lease_token is None):
+            raise ValueError("lease owner and token must be supplied together")
+        if lease_owner is not None:
+            lease_owner = _text(lease_owner, "lease_owner")
+            lease_token = _text(lease_token, "lease_token")
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             if row is None or row.owner_user_id != owner_user_id:
@@ -689,13 +738,63 @@ class CreatorOutreachRepository:
             )
             if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
                 raise ValueError("closed outreach sequences cannot be changed")
-            row.state = "failed"
-            row.error_code = reason
-            row.lease_until = None
-            row.lease_owner = None
-            row.lease_token = None
-            row.updated_at = datetime.now(UTC)
+            now = datetime.now(UTC)
+            if row.state == "leased" and (row.lease_owner != lease_owner or row.lease_token != lease_token):
+                result = await session.execute(
+                    update(CreatorOutreachActionTaskRow)
+                    .where(
+                        CreatorOutreachActionTaskRow.task_id == task_id,
+                        CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+                        CreatorOutreachActionTaskRow.state == "leased",
+                    )
+                    .values(
+                        payload_json={
+                            **(row.payload_json or {}),
+                            "manual_required": True,
+                            "manual_takeover_requested": True,
+                            "manual_takeover_reason": reason,
+                        },
+                        updated_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if not result.rowcount:
+                    raise ValueError("action task lease changed before takeover request")
+                await session.commit()
+                await session.refresh(row)
+                return row.to_dict()
+            conditions = [
+                CreatorOutreachActionTaskRow.task_id == task_id,
+                CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+            ]
+            if row.state == "leased":
+                conditions.extend(
+                    [
+                        CreatorOutreachActionTaskRow.state == "leased",
+                        CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                        CreatorOutreachActionTaskRow.lease_token == lease_token,
+                        CreatorOutreachActionTaskRow.lease_until > now,
+                    ]
+                )
+            else:
+                conditions.append(CreatorOutreachActionTaskRow.state.in_(("pending", "failed")))
+            result = await session.execute(
+                update(CreatorOutreachActionTaskRow)
+                .where(*conditions)
+                .values(
+                    state="failed",
+                    error_code=reason,
+                    lease_until=None,
+                    lease_owner=None,
+                    lease_token=None,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if not result.rowcount:
+                raise ValueError("action task lease changed before takeover")
             await session.commit()
+            await session.refresh(row)
             return row.to_dict()
 
     async def mark_action_unknown(
@@ -705,20 +804,27 @@ class CreatorOutreachRepository:
         *,
         receipt_id: str,
         reason: str,
+        lease_owner: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         """Persist an unverified provider result and keep the task retryable."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         task_id = _text(task_id, "task_id")
         receipt_id = _text(receipt_id, "receipt_id")
         reason = _text(reason, "reason", 500)
+        if (lease_owner is None) != (lease_token is None):
+            raise ValueError("lease owner and token must be supplied together")
+        if lease_owner is not None:
+            lease_owner = _text(lease_owner, "lease_owner")
+            lease_token = _text(lease_token, "lease_token")
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             if row is None or row.owner_user_id != owner_user_id:
                 raise ValueError("action task does not exist")
             if row.state == "completed":
                 raise ValueError("verified outreach actions cannot be marked unknown")
-            if row.state == "leased":
-                raise ValueError("leased action tasks require the worker lease to be released")
+            if row.state == "leased" and (row.lease_owner != lease_owner or row.lease_token != lease_token):
+                raise ValueError("action task lease is owned by another worker")
             sequence = await session.get(
                 CreatorOutreachSequenceRow,
                 (owner_user_id, row.creator_uid, row.sequence_no),
@@ -751,14 +857,40 @@ class CreatorOutreachRepository:
                 session.add(receipt)
             elif existing.payload_json != receipt.payload_json or existing.verified:
                 raise ValueError("receipt replay conflict")
-            row.state = "pending"
-            row.receipt_id = receipt_id
-            row.error_code = "provider_unknown"
-            row.lease_until = None
-            row.lease_owner = None
-            row.lease_token = None
-            row.updated_at = datetime.now(UTC)
+            now = datetime.now(UTC)
+            conditions = [
+                CreatorOutreachActionTaskRow.task_id == task_id,
+                CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+            ]
+            if row.state == "leased":
+                conditions.extend(
+                    [
+                        CreatorOutreachActionTaskRow.state == "leased",
+                        CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                        CreatorOutreachActionTaskRow.lease_token == lease_token,
+                        CreatorOutreachActionTaskRow.lease_until > now,
+                    ]
+                )
+            else:
+                conditions.append(CreatorOutreachActionTaskRow.state.in_(("pending", "failed")))
+            result = await session.execute(
+                update(CreatorOutreachActionTaskRow)
+                .where(*conditions)
+                .values(
+                    state="pending",
+                    receipt_id=receipt_id,
+                    error_code="provider_unknown",
+                    lease_until=None,
+                    lease_owner=None,
+                    lease_token=None,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if not result.rowcount:
+                raise ValueError("action task lease changed before unknown result")
             await session.commit()
+            await session.refresh(row)
             return row.to_dict()
 
     async def close_sequence(

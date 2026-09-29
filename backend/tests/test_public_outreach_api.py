@@ -295,3 +295,130 @@ async def test_admin_boundary_is_retained_on_management_writes(repo):
             non_admin,
         )
     assert getattr(error.value, "status_code", None) == 403
+
+
+@pytest.mark.asyncio
+async def test_paused_sender_cannot_claim_pending_action(repo):
+    await _bound(repo)
+    tasks = await _tasks(repo)
+    task_id = tasks[0]["task_id"]
+
+    await repo.set_sender_account_status("owner-a", "web-1", status="paused", reason="health check")
+    assert await repo.claim_action(task_id, lease_owner="worker-a") is None
+
+    await repo.set_sender_account_status("owner-a", "web-1", status="enabled", reason="recovered")
+    claimed = await repo.claim_action(task_id, lease_owner="worker-a")
+    assert claimed is not None
+    assert claimed["lease_owner"] == "worker-a"
+
+
+@pytest.mark.asyncio
+async def test_leased_controls_require_cas_lease_and_takeover_preserves_worker(repo):
+    await _bound(repo)
+    tasks = await _tasks(repo)
+    task_id = next(task["task_id"] for task in tasks if task["action"] == "comment")
+    claimed = await repo.claim_action(task_id, lease_owner="worker-a")
+    assert claimed is not None
+    lease = await repo.read_action_task(task_id)
+    assert lease is not None
+    lease_token = lease["lease_token"]
+    assert lease_token
+
+    with pytest.raises(ValueError, match="owned by another worker"):
+        await repo.retry_action(
+            "owner-a",
+            task_id,
+            recoverable_error_codes={"provider_unknown"},
+        )
+    with pytest.raises(ValueError, match="owned by another worker"):
+        await repo.mark_action_unknown(
+            "owner-a",
+            task_id,
+            receipt_id="unknown-without-lease",
+            reason="provider did not confirm",
+        )
+
+    requested = await repo.request_manual_takeover(
+        "owner-a",
+        task_id,
+        reason="operator needs review",
+    )
+    assert requested["state"] == "leased"
+    assert requested["lease_owner"] == "worker-a"
+    assert requested["lease_token"] == lease_token
+    assert requested["payload_json"]["manual_required"] is True
+
+    unknown = await repo.mark_action_unknown(
+        "owner-a",
+        task_id,
+        receipt_id="unknown-with-lease",
+        reason="worker readback unavailable",
+        lease_owner="worker-a",
+        lease_token=lease_token,
+    )
+    assert unknown["state"] == "pending"
+    assert unknown["lease_token"] is None
+
+    reclaimed = await repo.claim_action(task_id, lease_owner="worker-b")
+    assert reclaimed is not None
+    reclaimed_row = await repo.read_action_task(task_id)
+    assert reclaimed_row is not None
+    reclaimed_token = reclaimed_row["lease_token"]
+    assert reclaimed_token
+
+    with pytest.raises(ValueError, match="owned by another worker"):
+        await repo.retry_action(
+            "owner-a",
+            task_id,
+            recoverable_error_codes={"provider_unknown"},
+            lease_owner="worker-a",
+            lease_token=lease_token,
+        )
+    still_owned = await repo.read_action_task(task_id)
+    assert still_owned is not None
+    assert still_owned["lease_owner"] == "worker-b"
+
+    retried = await repo.retry_action(
+        "owner-a",
+        task_id,
+        recoverable_error_codes={"provider_unknown"},
+        lease_owner="worker-b",
+        lease_token=reclaimed_token,
+    )
+    assert retried["state"] == "pending"
+    assert retried["lease_token"] is None
+
+    takeover_task_id = next(task["task_id"] for task in tasks if task["action"] == "follow")
+    takeover_claim = await repo.claim_action(takeover_task_id, lease_owner="worker-c")
+    assert takeover_claim is not None
+    takeover_row = await repo.read_action_task(takeover_task_id)
+    assert takeover_row is not None
+    taken = await repo.request_manual_takeover(
+        "owner-a",
+        takeover_task_id,
+        reason="operator takes over",
+        lease_owner="worker-c",
+        lease_token=takeover_row["lease_token"],
+    )
+    assert taken["state"] == "failed"
+    assert taken["lease_owner"] is None
+
+
+@pytest.mark.asyncio
+async def test_task_responses_never_expose_lease_credentials(repo):
+    await _bound(repo)
+    created = await call_unwrapped(
+        create_outreach_tasks,
+        _Request(repo),
+        CreateOutreachTaskRequest(
+            creator_uid="creator-1",
+            sequence_no=1,
+            sender_account_id="web-1",
+        ),
+    )
+    task_id = created["tasks"][0]["task_id"]
+    claimed = await repo.claim_action(task_id, lease_owner="worker-private")
+    assert claimed is not None
+    response = await call_unwrapped(get_outreach_task, task_id, _Request(repo))
+    assert "lease_owner" not in response
+    assert "lease_token" not in response

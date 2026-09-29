@@ -97,10 +97,14 @@ class CreateOutreachTaskRequest(BaseModel):
 
 class RetryTaskRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
+    lease_owner: str | None = Field(default=None, min_length=1, max_length=128, exclude=True)
+    lease_token: str | None = Field(default=None, min_length=1, max_length=128, exclude=True)
 
 
 class ManualReasonRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
+    lease_owner: str | None = Field(default=None, min_length=1, max_length=128, exclude=True)
+    lease_token: str | None = Field(default=None, min_length=1, max_length=128, exclude=True)
 
 
 class CloseSequenceRequest(BaseModel):
@@ -211,7 +215,7 @@ def _task_response(task: dict[str, Any], receipts: list[dict[str, Any]], model: 
 
 
 def _public_task(task: dict[str, Any]) -> dict[str, Any]:
-    return {key: _redact(value, key=key) for key, value in task.items() if key != "owner_user_id"}
+    return {key: _redact(value, key=key) for key, value in task.items() if key not in {"owner_user_id", "lease_owner", "lease_token", "lease_until"}}
 
 
 async def _receipts(repository: CreatorOutreachRepository, task: dict[str, Any]) -> list[dict[str, Any]]:
@@ -367,6 +371,8 @@ async def retry_outreach_task(task_id: str, request: Request, body: RetryTaskReq
             owner_user_id,
             task["task_id"],
             recoverable_error_codes=_RECOVERABLE_ERRORS,
+            lease_owner=body.lease_owner if body else None,
+            lease_token=body.lease_token if body else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -426,6 +432,8 @@ async def request_manual_takeover(task_id: str, request: Request, body: ManualRe
             owner_user_id,
             task_id,
             reason=body.reason,
+            lease_owner=body.lease_owner,
+            lease_token=body.lease_token,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -446,6 +454,8 @@ async def mark_provider_unknown(task_id: str, request: Request, body: ManualReas
             task_id,
             receipt_id=f"unknown:{task['task_id']}:{task.get('attempt_count', 0)}",
             reason=body.reason,
+            lease_owner=body.lease_owner,
+            lease_token=body.lease_token,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
