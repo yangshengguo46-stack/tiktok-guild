@@ -1,5 +1,15 @@
 import { probeMcpServer } from './process.mjs';
 
+export const PUBLIC_OUTREACH_TOOL_NAMES = Object.freeze([
+  'public_outreach_accounts',
+  'public_outreach_tasks',
+]);
+
+export const PUBLIC_OUTREACH_CHILDREN = Object.freeze({
+  public_outreach_accounts: Object.freeze(['list', 'register', 'health', 'disable']),
+  public_outreach_tasks: Object.freeze(['enqueue', 'get', 'claim', 'complete', 'fail', 'reconcile']),
+});
+
 export async function inspectGatewayMcpConfig({ gatewayUrl, expectedServers, timeoutMs = 5000 }) {
   let response;
   let actual;
@@ -65,7 +75,11 @@ export async function inspectDirectMcpCatalog({ serverName, server, environment,
   if (new Set(names).size !== names.length) throw new Error(`${serverName} tools/list has duplicate raw tool names`);
   const missing = server.enabled_tools.filter((name) => !names.includes(name));
   if (missing.length) throw new Error(`${serverName} direct catalog drift: missing approved tools [${missing.join(', ')}]`);
-  return { detail: `${server.enabled_tools.length} approved tools discovered from ${serverName} (${names.length} raw tools); separate probe process, Gateway loading unverified` };
+  return {
+    toolCount: names.length,
+    approvedToolCount: server.enabled_tools.length,
+    detail: `${server.enabled_tools.length} approved tools discovered from ${serverName} (${names.length} raw tools); separate probe process, Gateway loading unverified`,
+  };
 }
 
 export async function inspectPublicOutreachCatalog({ server, environment, timeoutMs = 10000 }) {
@@ -75,8 +89,14 @@ export async function inspectPublicOutreachCatalog({ server, environment, timeou
     environment,
     timeoutMs,
   });
+  const approved = [...(server.enabled_tools ?? [])];
+  if (JSON.stringify(approved) !== JSON.stringify(PUBLIC_OUTREACH_TOOL_NAMES)) {
+    throw new Error(`public_outreach_operator allowlist must match the two approved tool families`);
+  }
   return {
     ...result,
+    toolCount: result.toolCount,
+    approvedToolCount: approved.length,
     detail: `${result.detail}; public outreach operator catalog is read-only until a native DeerFlow adapter is configured`,
   };
 }

@@ -20,7 +20,11 @@ import {
 import { runCommand } from '../src/process.mjs';
 import { loadRuntimeConfig, validateRuntimeConfig } from '../src/runtime-config.mjs';
 import { buildRuntimeEnvironment } from '../src/runtime-environment.mjs';
-import { inspectDirectMcpCatalog, inspectGatewayMcpConfig } from '../src/mcp-catalog.mjs';
+import {
+  inspectDirectMcpCatalog,
+  inspectGatewayMcpConfig,
+  inspectPublicOutreachCatalog,
+} from '../src/mcp-catalog.mjs';
 
 export const REQUIRED_DOCTOR_CHECKS = Object.freeze([
   'node',
@@ -44,6 +48,14 @@ export const REQUIRED_DOCTOR_CHECKS = Object.freeze([
 ]);
 export const LIVE_DOCTOR_CHECKS = Object.freeze([
   'gateway_mcp_config', 'guild_direct_catalog', 'broker_direct_catalog', 'tkdesk_direct_catalog',
+]);
+export const PUBLIC_OUTREACH_DOCTOR_CHECKS = Object.freeze([
+  'public_outreach_operator_root',
+  'public_outreach_config',
+  'public_outreach_playwright',
+  'public_outreach_appium',
+  'public_outreach_profile_root',
+  'public_outreach_devices',
 ]);
 
 const CREATOR_AGENT_PERSONA_IDS = Object.freeze([
@@ -99,6 +111,101 @@ function exactValues(actual, expected, label) {
 
 function boundedText(value, maximum) {
   return typeof value === 'string' && value.trim().length > 0 && [...value].length <= maximum;
+}
+
+async function readJsonFile(file, label) {
+  try {
+    return JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`${label} is unavailable: ${error.message}`);
+  }
+}
+
+async function inspectPublicOutreachPackage({ environment }) {
+  const operatorRoot = path.resolve(environment.PUBLIC_OUTREACH_OPERATOR_ROOT);
+  await requireDirectory(operatorRoot);
+  const packageJson = await readJsonFile(path.join(operatorRoot, 'package.json'), 'public outreach operator package');
+  if (packageJson.name !== 'deerflow-public-outreach-operator'
+    || packageJson.type !== 'module'
+    || packageJson.engines?.node !== '>=22.16') {
+    throw new Error('public outreach operator package metadata is not approved');
+  }
+  const expected = {
+    playwright: '1.59.1',
+    appium: '3.1.0',
+    'appium-xcuitest-driver': '12.13.3',
+  };
+  for (const [name, version] of Object.entries(expected)) {
+    if (packageJson.dependencies?.[name] !== version) {
+      throw new Error(`public outreach operator must pin ${name}@${version}`);
+    }
+  }
+  return { detail: `${operatorRoot}; Playwright ${expected.playwright}; Appium ${expected.appium}; XCUITest ${expected['appium-xcuitest-driver']}` };
+}
+
+async function inspectInstalledDependency({ operatorRoot, packageName, expectedVersion }) {
+  const result = await runCommand('npm', ['ls', '--omit=dev', '--json', '--depth=0', packageName], {
+    cwd: operatorRoot,
+  });
+  let document;
+  try {
+    document = JSON.parse(result.stdout || '{}');
+  } catch {
+    throw new Error(`${packageName} dependency check returned invalid npm JSON`);
+  }
+  const installed = document.dependencies?.[packageName]?.version;
+  if (result.code !== 0 || installed !== expectedVersion) {
+    throw new Error(`${packageName}@${expectedVersion} is not installed (found ${installed ?? 'missing'})`);
+  }
+  return { detail: `${packageName}@${installed}` };
+}
+
+async function existingAncestor(target) {
+  let current = path.resolve(target);
+  while (true) {
+    try {
+      const info = await lstat(current);
+      if (!info.isSymbolicLink()) return current;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+async function inspectWritableStateRoot(target, label) {
+  const ancestor = await existingAncestor(target);
+  if (!ancestor) throw new Error(`${label} has no existing parent`);
+  await access(ancestor, fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK);
+  return {
+    detail: path.resolve(target) === ancestor
+      ? `${label} is readable and writable`
+      : `${label} is not created; writable parent ${ancestor} is ready`,
+  };
+}
+
+async function inspectRegisteredDevices({ environment }) {
+  const root = path.resolve(environment.PUBLIC_OUTREACH_IOS_DEVICE_ROOT);
+  const file = path.join(root, 'devices.json');
+  let values;
+  try {
+    values = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { detail: `no registered iPhone at ${root}; live WDA pilot remains unavailable` };
+    }
+    throw new Error(`iPhone device registry is unavailable: ${error.message}`);
+  }
+  if (!Array.isArray(values)) throw new Error('iPhone device registry must contain an array');
+  const ready = values.filter((device) => device?.state === 'ready'
+    && device?.health === 'healthy'
+    && device?.health_detail?.ok === true
+    && device?.health_detail?.probe?.ready === true
+    && device?.health_detail?.probe?.device_verified === true
+    && device?.health_detail?.probe?.wda_verified === true);
+  return { detail: `${ready.length}/${values.length} registered iPhones satisfy the strict WDA health contract; read-only check` };
 }
 
 export async function inspectForkAncestor({ forkRoot, commit = DEERFLOW_COMMIT, run = runCommand }) {
@@ -379,8 +486,10 @@ function defaultAdapters(packageRoot, { gatewayUrl, environment, timeoutMs }) {
   const directCatalog = async (serverName) => {
     const config = await getConfig();
     return inspectDirectMcpCatalog({ serverName, server: config.extensions.mcpServers[serverName],
-      environment: buildRuntimeEnvironment({ packageRoot, environment }), timeoutMs });
+    environment: buildRuntimeEnvironment({ packageRoot, environment }), timeoutMs });
   };
+  const runtimeEnvironment = buildRuntimeEnvironment({ packageRoot, environment });
+  const operatorRoot = path.resolve(runtimeEnvironment.PUBLIC_OUTREACH_OPERATOR_ROOT);
 
   return {
     node: async () => {
@@ -437,11 +546,63 @@ function defaultAdapters(packageRoot, { gatewayUrl, environment, timeoutMs }) {
     guild_mcp: async () => ({ detail: (await getCatalogs()).guild }),
     broker_mcp: async () => ({ detail: (await getCatalogs()).broker }),
     tkdesk_mcp: async () => ({ detail: (await getCatalogs()).tkdesk }),
+    public_outreach_operator_root: async () => inspectPublicOutreachPackage({ environment: runtimeEnvironment }),
+    public_outreach_config: async () => {
+      const maxActive = Number(runtimeEnvironment.PUBLIC_OUTREACH_MAX_ACTIVE);
+      const wdaPort = Number(runtimeEnvironment.PUBLIC_OUTREACH_IOS_WDA_PORT);
+      const wdaTimeout = Number(runtimeEnvironment.PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS);
+      if (!Number.isInteger(maxActive) || maxActive < 1 || maxActive > 10) {
+        throw new Error('PUBLIC_OUTREACH_MAX_ACTIVE must be an integer between 1 and 10');
+      }
+      if (!Number.isInteger(wdaPort) || wdaPort < 1 || wdaPort > 65535) {
+        throw new Error('PUBLIC_OUTREACH_IOS_WDA_PORT must be a valid TCP port');
+      }
+      if (!Number.isInteger(wdaTimeout) || wdaTimeout < 1000 || wdaTimeout > 120000) {
+        throw new Error('PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS must be between 1000 and 120000');
+      }
+      if (runtimeEnvironment.PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE !== 'true') {
+        throw new Error('PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE must remain true');
+      }
+      return {
+        detail: `max_active=${maxActive}; profile_root=${runtimeEnvironment.PUBLIC_OUTREACH_PROFILE_ROOT}; ios_device_root=${runtimeEnvironment.PUBLIC_OUTREACH_IOS_DEVICE_ROOT}; WDA port=${wdaPort}`,
+      };
+    },
+    public_outreach_playwright: async () => inspectInstalledDependency({
+      operatorRoot,
+      packageName: 'playwright',
+      expectedVersion: '1.59.1',
+    }),
+    public_outreach_appium: async () => {
+      const appium = await inspectInstalledDependency({
+        operatorRoot,
+        packageName: 'appium',
+        expectedVersion: '3.1.0',
+      });
+      const xcuitest = await inspectInstalledDependency({
+        operatorRoot,
+        packageName: 'appium-xcuitest-driver',
+        expectedVersion: '12.13.3',
+      });
+      return { detail: `${appium.detail}; ${xcuitest.detail}; XCUITest driver install script is available` };
+    },
+    public_outreach_profile_root: async () => inspectWritableStateRoot(
+      runtimeEnvironment.PUBLIC_OUTREACH_PROFILE_ROOT,
+      'public outreach profile root',
+    ),
+    public_outreach_devices: async () => inspectRegisteredDevices({ environment: runtimeEnvironment }),
     gateway_mcp_config: async () => inspectGatewayMcpConfig({ gatewayUrl,
       expectedServers: (await getConfig()).extensions.mcpServers, timeoutMs }),
     guild_direct_catalog: () => directCatalog('guild_operator'),
     broker_direct_catalog: () => directCatalog('broker_operator'),
     tkdesk_direct_catalog: () => directCatalog('tkdesk'),
+    public_outreach_direct_catalog: async () => {
+      const config = await getConfig();
+      return inspectPublicOutreachCatalog({
+        server: config.extensions.mcpServers.public_outreach_operator,
+        environment: runtimeEnvironment,
+        timeoutMs,
+      });
+    },
   };
 }
 
@@ -451,7 +612,15 @@ export async function runDoctor({ packageRoot, adapters = {}, live = false,
   const resolvedRoot = path.resolve(packageRoot);
   const checks = [];
   const allAdapters = { ...defaultAdapters(resolvedRoot, { gatewayUrl, environment, timeoutMs }), ...adapters };
-  for (const name of [...REQUIRED_DOCTOR_CHECKS, ...(live ? LIVE_DOCTOR_CHECKS : [])]) {
+  const customAdapterNames = new Set(Object.keys(adapters));
+  const includePublicOutreach = Object.keys(adapters).length === 0
+    || PUBLIC_OUTREACH_DOCTOR_CHECKS.some((name) => customAdapterNames.has(name));
+  const names = [
+    ...REQUIRED_DOCTOR_CHECKS,
+    ...(includePublicOutreach ? PUBLIC_OUTREACH_DOCTOR_CHECKS : []),
+    ...(live ? [...LIVE_DOCTOR_CHECKS, ...(includePublicOutreach ? ['public_outreach_direct_catalog'] : [])] : []),
+  ];
+  for (const name of names) {
     const evidence = name === 'gateway_mcp_config' ? 'gateway-config'
       : LIVE_DOCTOR_CHECKS.includes(name) ? 'direct-discovery' : 'static';
     try {

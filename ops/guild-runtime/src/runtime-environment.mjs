@@ -1,10 +1,13 @@
 import path from 'node:path';
+import os from 'node:os';
 import { GUILD_EXTENSIONS_CONFIG } from './constants.mjs';
 
 export function buildRuntimeEnvironment({ packageRoot, environment = process.env }) {
   const root = path.resolve(packageRoot);
   const opsRoot = path.join(root, 'ops', 'guild-runtime');
   const pnpmBinRoot = path.join(opsRoot, '.runtime', 'tools', 'pnpm', 'node_modules', '.bin');
+  const home = environment.HOME ?? os.homedir();
+  const outreachStateRoot = path.join(home, '.codex', 'tiktok-live-public-outreach');
   return {
     ...environment,
     CI: 'true',
@@ -22,6 +25,24 @@ export function buildRuntimeEnvironment({ packageRoot, environment = process.env
       'product',
       'creator-agent-final-persona-rev1',
     ),
+    // Public outreach execution state is deliberately outside the repository.
+    // The operator owns profiles and devices; DeerFlow owns claims and receipts.
+    PUBLIC_OUTREACH_OPERATOR_ROOT: environment.PUBLIC_OUTREACH_OPERATOR_ROOT
+      ?? path.join(opsRoot, 'public-outreach-operator'),
+    PUBLIC_OUTREACH_PROFILE_ROOT: environment.PUBLIC_OUTREACH_PROFILE_ROOT
+      ?? path.join(outreachStateRoot, 'profiles'),
+    PUBLIC_OUTREACH_MAX_ACTIVE: environment.PUBLIC_OUTREACH_MAX_ACTIVE
+      ?? '10',
+    PUBLIC_OUTREACH_IOS_DEVICE_ROOT: environment.PUBLIC_OUTREACH_IOS_DEVICE_ROOT
+      ?? path.join(outreachStateRoot, 'ios-devices'),
+    PUBLIC_OUTREACH_IOS_WDA_BUNDLE_ID: environment.PUBLIC_OUTREACH_IOS_WDA_BUNDLE_ID
+      ?? '',
+    PUBLIC_OUTREACH_IOS_WDA_PORT: environment.PUBLIC_OUTREACH_IOS_WDA_PORT
+      ?? '8100',
+    PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS: environment.PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS
+      ?? '10000',
+    PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE: environment.PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE
+      ?? 'true',
     // The broker MCP is already isolated from the guild and collection
     // profiles. Keep these non-secret defaults in the runtime so `npm start`
     // does not silently launch an unconfigured broker; operators can still

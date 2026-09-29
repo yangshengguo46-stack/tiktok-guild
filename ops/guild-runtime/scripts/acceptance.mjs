@@ -3,11 +3,16 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { runCommand } from '../src/process.mjs';
 import { GUILD_EXTENSIONS_CONFIG } from '../src/constants.mjs';
-import { formatDoctorReport, inspectApprovedCatalogs, runDoctor } from './doctor.mjs';
+import {
+  formatDoctorReport,
+  inspectApprovedCatalogs,
+  runDoctor,
+} from './doctor.mjs';
+import { inspectPublicOutreachCatalog } from '../src/mcp-catalog.mjs';
 
 export async function runAcceptance({
   packageRoot,
@@ -23,10 +28,72 @@ export async function runAcceptance({
   assert.ok(runtimeMission.trim().length > 0, 'runtime guild mission is empty');
   assert.equal(existsSync(path.join(root, 'skills/public/guild-recruitment-lead/SKILL.md')), false);
   const extensions = JSON.parse(await readFile(path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG), 'utf8'));
-  assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'broker_operator', 'tkdesk']);
+  assert.deepEqual(Object.keys(extensions.mcpServers), [
+    'guild_operator',
+    'broker_operator',
+    'tkdesk',
+    'public_outreach_operator',
+  ]);
 
   const testResult = await runTests(process.execPath, ['--test'], { cwd: opsRoot });
   if (testResult.code !== 0) throw new Error(`Package tests failed: ${testResult.stderr || testResult.stdout}`);
+
+  const operatorRoot = path.resolve(extensions.mcpServers.public_outreach_operator.cwd);
+  const operatorTests = await runTests('npm', ['test'], { cwd: operatorRoot });
+  if (operatorTests.code !== 0) {
+    throw new Error(`Public outreach operator tests failed: ${operatorTests.stderr || operatorTests.stdout}`);
+  }
+
+  const fakeAdapterCalls = [];
+  const { createPublicOutreachRouter } = await import(
+    pathToFileURL(path.join(operatorRoot, 'src', 'router.mjs')),
+  );
+  const fakeAdapter = {
+    listSenderAccounts: async () => {
+      fakeAdapterCalls.push('listSenderAccounts');
+      return [];
+    },
+    enqueueAction: async (params) => {
+      fakeAdapterCalls.push('enqueueAction');
+      return {
+        task_id: params.task_id ?? 'acceptance-task',
+        sender_account_id: params.sender_account_id ?? 'acceptance-account',
+        channel: params.channel ?? 'web',
+        creator_uid: params.creator_uid ?? 'acceptance-creator',
+        action: params.action ?? 'like',
+        idempotency_key: params.idempotency_key ?? 'acceptance-idempotency',
+      };
+    },
+  };
+  const fakeRouter = createPublicOutreachRouter({ adapter: fakeAdapter });
+  const fakeList = await fakeRouter({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'public_outreach_accounts', arguments: { child: 'list' } },
+  });
+  assert.equal(fakeList.result.structuredContent.status, 'ok');
+  const fakeEnqueue = await fakeRouter({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: {
+      name: 'public_outreach_tasks',
+      arguments: {
+        child: 'enqueue',
+        params: {
+          task_id: 'acceptance-task',
+          sender_account_id: 'acceptance-account',
+          channel: 'web',
+          creator_uid: 'acceptance-creator',
+          action: 'like',
+          idempotency_key: 'acceptance-idempotency',
+        },
+      },
+    },
+  });
+  assert.equal(fakeEnqueue.result.structuredContent.status, 'ok');
+  assert.deepEqual(fakeAdapterCalls, ['listSenderAccounts', 'enqueueAction']);
 
   const doctorReport = await doctor({ packageRoot: root, live });
   if (!doctorReport.ok) {
@@ -38,13 +105,20 @@ export async function runAcceptance({
   const guild = JSON.parse(await readFile(path.join(opsRoot, 'fixtures', 'mcp', 'guild-tools.json'), 'utf8'));
   const broker = JSON.parse(await readFile(path.join(opsRoot, 'fixtures', 'mcp', 'broker-tools.json'), 'utf8'));
   const tkdesk = JSON.parse(await readFile(path.join(opsRoot, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
+  const publicOutreach = await inspectPublicOutreachCatalog({
+    server: extensions.mcpServers.public_outreach_operator,
+    environment: process.env,
+  });
 
   return {
     ok: true,
-    mcpServers: 3,
+    mcpServers: 4,
     guildTools: guild.tools.length,
     brokerTools: broker.tools.length,
     tkdeskTools: tkdesk.tools.length,
+    publicOutreachTools: publicOutreach.approvedToolCount,
+    publicOutreachCatalog: publicOutreach.toolCount,
+    publicOutreachFakeAdapter: 'verified-no-provider-writes',
     catalogEvidence: 'static-approved-snapshots',
     nativeGuildLead: true,
     ...(live ? { runtimeEvidence: doctorReport.checks.filter(({ evidence }) => evidence && evidence !== 'static'),

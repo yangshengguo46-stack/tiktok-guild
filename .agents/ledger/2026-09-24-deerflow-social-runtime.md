@@ -8,8 +8,34 @@
 
 实施分支：`codex/deerflow-social-runtime`
 
-状态：Task 1–10 实施完成，已通过独立复审并完成本地 fast-forward；现场试运行第一批完成，本地 auth gate 已暂时停用
+状态：原生 Social Runtime 已完成；双通道公开建联 Task 1–7 已实施并完成本地合同验证，真实 TikTok provider 仍为 `unverified-external`
 当前写入者：`/root`
+
+## 2026-09-29 双通道公开建联运行合同
+
+- DeerFlow 是唯一业务控制面和业务台账。`public-outreach-operator` 是执行壳，不创建第二套
+  claim、关系、task 或 receipt 数据库。
+- 公开动作固定为 `like -> comment -> follow`，随后才允许同一 sender 执行 message；同一
+  sequence 不能静默切换 Web/iPhone sender。
+- Web 使用普通 TikTok 账号的持久 profile，最多 50 个登记 profile、每批最多 10 个 active
+  lease；iPhone 使用一台真实设备一个 active XCUITest session。
+- 只有 provider read-back 形成的 verified receipt 才能推进关系状态。聊天气泡、草稿、按钮
+  点击、截图或 unknown provider 结果都不算回执，也不应阻塞真实 verified inbound reply。
+- profile、cookies、WDA bundle/session、设备登记和失败证据存放在 Git 外部；运行时环境只传递
+  路径、并发和 WDA 连接参数。禁止代理轮换、指纹伪装、验证码绕过和其他规避检测逻辑。
+
+## 2026-09-29 双通道验证门禁
+
+- `ops/guild-runtime` 现在登记第四个直接 MCP：`public_outreach_operator`；已有
+  `guild_operator`、`broker_operator`、`tkdesk` allowlist 不扩权。
+- `doctor` 只读检查 operator 包、Playwright/Appium/XCUITest 依赖、profile 根目录可用性、
+  iPhone 登记和严格 WDA health contract；不会创建目录、启动浏览器/Appium 或触发 TikTok
+  写入。
+- `acceptance --static` 使用 fake DeerFlow adapter、operator `initialize/tools/list` 和离线
+  Node tests，验证四个 MCP 和工具计数；不连接真实手机、不打开真实 TikTok 页面。
+- recovery 依据是 profile lease、session 过期、WDA probe、device offline、provider unknown
+  和 manual takeover 的明确错误码；未知结果保持 `manual_required`/`unknown`，不能自动重试
+  或推进 `public_touched/contacted`。
 
 ## 本地运行时初始化（2026-09-24 19:08 CST）
 
@@ -92,6 +118,13 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 | 8 | 完成 | 默认 Chat 中的认证管理工具完成；ignored start config 已从不受支持的 `gpt-5.4` 改为 `gpt-6-sol`，真实模型传输成功；第 6 次输出触发严格 expression parser，第 7 次最终 probe 超时，未激活。 |
 | 9 | 完成 | fork-native bootstrap/start/doctor/acceptance、两个直接 MCP 静态合同和开发评测加载完成。 |
 | 10 | 完成 | 隔离副本迁移、SOUL 保留、定向/离线/整库门禁、独立复审和本地 fast-forward 完成。 |
+| Dual-Channel 1 | 完成 | 原生 sender/action task 合同与幂等约束完成；无外部写入。 |
+| Dual-Channel 2 | 完成 | 版本化 `public-outreach-operator` MCP shell、Web/iPhone receipt envelope 和四 MCP 注册完成。 |
+| Dual-Channel 3 | 完成 | Playwright profile registry、10 槽位 pool、顺序公开动作与人工接管边界完成。 |
+| Dual-Channel 4 | 完成 | Appium/XCUITest device registry、WDA 严格健康检查和单设备 session 完成。 |
+| Dual-Channel 5 | 完成 | Web/iPhone 统一接入 `gray -> public_touched -> contacted -> replied`，气泡/草稿不抑制真实回复。 |
+| Dual-Channel 6 | 完成 | 原生 API 与公开建联 workbench 完成；provider 未配置时 fail closed。 |
+| Dual-Channel 7 | 完成 | 运行时环境、只读 doctor、fake acceptance、四 MCP catalog 与恢复手册完成；真实 provider 仍未验收。 |
 
 ## Task 10 迁移纠正
 
