@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import { createProfileRegistry } from './profile-registry.mjs';
 
 function isRecord(value) {
@@ -10,6 +12,8 @@ export function createPlaywrightPool({
   launchPersistentContext,
   leaseTtlMs = 15 * 60 * 1000,
   registry = null,
+  ownerId = crypto.randomUUID(),
+  heartbeatIntervalMs = Math.max(1, Math.floor(leaseTtlMs / 3)),
 } = {}) {
   if (!Number.isInteger(maxActive) || maxActive < 1 || maxActive > 10) {
     throw new RangeError('maxActive must be between 1 and 10.');
@@ -17,7 +21,8 @@ export function createPlaywrightPool({
   if (typeof launchPersistentContext !== 'function') {
     throw new TypeError('launchPersistentContext is required.');
   }
-  const profiles = registry ?? createProfileRegistry({ profileRoot, leaseTtlMs });
+  const profiles = registry ?? createProfileRegistry({ profileRoot, leaseTtlMs, ownerId });
+  const poolOwnerId = registry?.ownerId ?? ownerId;
   const active = new Map();
   let closed = false;
 
@@ -52,6 +57,7 @@ export function createPlaywrightPool({
         const stale = [...active.values()].find((lease) => lease.account.sender_account_id === senderAccountId);
         if (!stale) return;
         active.delete(stale.lease_id);
+        clearInterval(stale._heartbeat);
         await stale.context?.close?.();
       }));
     }
@@ -89,12 +95,54 @@ export function createPlaywrightPool({
           sender_account_id: account.sender_account_id,
           channel: 'web',
         });
+        let lost = false;
+        let heartbeatBusy = false;
+        const heartbeat = setInterval(async () => {
+          if (lost || heartbeatBusy) return;
+          heartbeatBusy = true;
+          try {
+            const renewed = await profiles.renew({
+              lease_id: lease.lease_id,
+              sender_account_id: account.sender_account_id,
+              owner_id: poolOwnerId,
+            }, { leaseTtlMs });
+            if (!renewed.ok) {
+              lost = true;
+              await context.close?.();
+            }
+          } finally {
+            heartbeatBusy = false;
+          }
+        }, heartbeatIntervalMs);
+        heartbeat.unref?.();
         const activeLease = {
           ...lease,
           account: { ...account },
           context,
           userDataDir: account.userDataDir,
+          owner_id: poolOwnerId,
+          lost: () => lost,
+          assertLease: async () => {
+            if (lost) return { ok: false, error_code: 'lease_lost' };
+            const result = await profiles.validateLease({
+              lease_id: lease.lease_id,
+              sender_account_id: account.sender_account_id,
+              owner_id: poolOwnerId,
+            });
+            if (!result.ok) lost = true;
+            return result;
+          },
+          renew: async () => {
+            const result = await profiles.renew({
+              lease_id: lease.lease_id,
+              sender_account_id: account.sender_account_id,
+              owner_id: poolOwnerId,
+            }, { leaseTtlMs });
+            if (!result.ok) lost = true;
+            return result;
+          },
           persistManualTakeover: (details) => profiles.recordManualTakeover(account.sender_account_id, details),
+          _heartbeat: heartbeat,
         };
         active.set(lease.lease_id, activeLease);
         return { ...activeLease };
@@ -116,13 +164,21 @@ export function createPlaywrightPool({
     const leaseId = typeof input === 'string' ? input : input?.lease_id;
     const lease = active.get(leaseId);
     if (!lease) {
-      return profiles.release(input);
+      return profiles.release({
+        ...(typeof input === 'object' ? input : { lease_id: input }),
+        owner_id: poolOwnerId,
+      });
     }
     active.delete(leaseId);
+    clearInterval(lease._heartbeat);
     try {
       await lease.context?.close?.();
     } finally {
-      return profiles.release({ lease_id: leaseId, sender_account_id: lease.account.sender_account_id });
+      return profiles.release({
+        lease_id: leaseId,
+        sender_account_id: lease.account.sender_account_id,
+        owner_id: poolOwnerId,
+      });
     }
   }
 
@@ -132,10 +188,15 @@ export function createPlaywrightPool({
     const leases = [...active.values()];
     active.clear();
     await Promise.allSettled(leases.map(async (lease) => {
+      clearInterval(lease._heartbeat);
       try {
         await lease.context?.close?.();
       } finally {
-        await profiles.release({ lease_id: lease.lease_id, sender_account_id: lease.account.sender_account_id });
+        await profiles.release({
+          lease_id: lease.lease_id,
+          sender_account_id: lease.account.sender_account_id,
+          owner_id: poolOwnerId,
+        });
       }
     }));
   }

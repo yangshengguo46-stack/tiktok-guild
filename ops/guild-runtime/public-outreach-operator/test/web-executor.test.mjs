@@ -7,6 +7,7 @@ import test from 'node:test';
 import { executeWebAction } from '../src/web/tiktok-web-executor.mjs';
 import { FAKE_LOCATORS } from '../src/web/page-objects.mjs';
 import { createPlaywrightPool } from '../src/web/playwright-pool.mjs';
+import { createProfileRegistry } from '../src/web/profile-registry.mjs';
 
 process.env.PUBLIC_OUTREACH_FAKE_BROWSER = '1';
 
@@ -312,6 +313,63 @@ test('pool lease manual takeover persists paused/manual-required state in the re
   assert.equal(health.account.status, 'paused');
   assert.equal(health.account.manual_takeover.task_id, result.manual_takeover.task.task_id);
   await pool.close();
+});
+
+test('executor refuses an old lease after another owner fences it out', async () => {
+  const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'public-outreach-fence-'));
+  let current = 1000;
+  let ownerAlive = true;
+  const registryA = createProfileRegistry({
+    profileRoot,
+    clock: () => current,
+    ownerId: 'executor-owner-a',
+    pid: 3111,
+    ownerAlive: () => ownerAlive,
+  });
+  const registryB = createProfileRegistry({
+    profileRoot,
+    clock: () => current,
+    ownerId: 'executor-owner-b',
+    pid: 3222,
+    ownerAlive: () => ownerAlive,
+  });
+  const launch = async () => ({
+    async newPage() {
+      return new FakePage({ creatorUid: 'creator_fenced' });
+    },
+    async close() {},
+  });
+  const poolA = createPlaywrightPool({
+    profileRoot,
+    ownerId: 'executor-owner-a',
+    leaseTtlMs: 100,
+    heartbeatIntervalMs: 100_000,
+    registry: registryA,
+    launchPersistentContext: launch,
+  });
+  const poolB = createPlaywrightPool({
+    profileRoot,
+    ownerId: 'executor-owner-b',
+    leaseTtlMs: 100,
+    heartbeatIntervalMs: 100_000,
+    registry: registryB,
+    launchPersistentContext: launch,
+  });
+  await poolA.register({ sender_account_id: 'fenced_executor' });
+  const oldLease = await poolA.claim('fenced_executor');
+  current = 1200;
+  ownerAlive = false;
+  assert.equal((await poolB.claim('fenced_executor')).ok, true);
+  const result = await executeWebAction({
+    account: oldLease,
+    creator: { creator_uid: 'creator_fenced' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.error_code, 'lease_lost');
+  await poolA.close();
+  await poolB.close();
 });
 
 test('manual takeover remains deterministic when hooks are absent or throw', async () => {

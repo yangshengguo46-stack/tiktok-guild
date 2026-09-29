@@ -134,6 +134,14 @@ async function pageFor(account) {
   throw new WebActionError('unknown', 'No browser page or persistent context is available.');
 }
 
+async function assertLease(account) {
+  if (typeof account?.assertLease !== 'function') return;
+  const result = await account.assertLease();
+  if (result && result.ok === false) {
+    throw new WebActionError(result.error_code ?? 'lease_lost', 'Browser lease is no longer owned by this operator.');
+  }
+}
+
 export async function executeWebAction({
   account,
   creator = {},
@@ -149,6 +157,8 @@ export async function executeWebAction({
       lease_id: account.lease_id,
       userDataDir: account.userDataDir,
       persistManualTakeover: account.persistManualTakeover,
+      assertLease: account.assertLease,
+      renew: account.renew,
     }
     : resolvedAccount;
   if (!executionAccount || typeof executionAccount !== 'object') {
@@ -172,6 +182,7 @@ export async function executeWebAction({
   let browserPage;
   let ownedPage = false;
   try {
+    await assertLease(executionAccount);
     ({ page: browserPage, owned: ownedPage } = await pageFor(executionAccount));
     const pageObjects = createTikTokPageObjects({
       page: browserPage,
@@ -182,6 +193,7 @@ export async function executeWebAction({
     const receipts = [];
     for (const currentAction of actions) {
       if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
+      await assertLease(executionAccount);
       const result = await pageObjects.run(currentAction, { ...payload, creator });
       if (!result || !result.evidence) throw new WebActionError('unknown', 'Action completed without read-back evidence.');
       receipts.push(receiptFor({

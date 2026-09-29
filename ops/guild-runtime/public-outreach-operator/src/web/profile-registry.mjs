@@ -5,6 +5,16 @@ import crypto from 'node:crypto';
 const MAX_PROFILES = 50;
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
+function defaultOwnerAlive(lock) {
+  if (!lock?.owner_id || !Number.isInteger(lock.pid) || lock.pid <= 0) return true;
+  try {
+    process.kill(lock.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 function nowMs(clock) {
   return typeof clock === 'function' ? clock() : Date.now();
 }
@@ -62,6 +72,9 @@ export function createProfileRegistry({
   maxProfiles = MAX_PROFILES,
   leaseTtlMs = 15 * 60 * 1000,
   clock = () => Date.now(),
+  ownerId = crypto.randomUUID(),
+  pid = process.pid,
+  ownerAlive = defaultOwnerAlive,
 } = {}) {
   if (typeof profileRoot !== 'string' || !profileRoot) throw new TypeError('profileRoot is required.');
   if (!Number.isInteger(maxProfiles) || maxProfiles < 1 || maxProfiles > MAX_PROFILES) {
@@ -186,20 +199,27 @@ export function createProfileRegistry({
     const { readdir } = await import('node:fs/promises');
     const entries = await readdir(path.join(root, 'locks'), { withFileTypes: true });
     const recovered = [];
+    const blocked = [];
     const now = nowMs(clock);
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.lock')) continue;
       const file = path.join(root, 'locks', entry.name);
       const lock = await readJson(file);
       if (lock?.lease_until && lock.lease_until <= now) {
+        const alive = ownerAlive(lock);
+        if (alive) {
+          blocked.push({ sender_account_id: entry.name.slice(0, -5), lock });
+          continue;
+        }
         await rm(file, { force: true });
         recovered.push(entry.name.slice(0, -5));
       }
     }
+    recovered.blocked = blocked;
     return recovered;
   }
 
-  async function acquire(input, { leaseTtlMs: requestedTtlMs = leaseTtlMs } = {}) {
+  async function acquire(input, { leaseTtlMs: requestedTtlMs = leaseTtlMs, owner_id: requestedOwnerId = ownerId } = {}) {
     await ensureRoot();
     const accountId = typeof input === 'string' ? input : input?.sender_account_id ?? input?.account_id;
     const account = await load(accountId);
@@ -209,7 +229,15 @@ export function createProfileRegistry({
     const token = crypto.randomUUID();
     const acquiredAt = nowMs(clock);
     const leaseUntil = acquiredAt + Math.max(1, requestedTtlMs);
-    const lock = { token, sender_account_id: account.sender_account_id, acquired_at: acquiredAt, lease_until: leaseUntil };
+    const lock = {
+      token,
+      owner_id: requestedOwnerId,
+      pid,
+      sender_account_id: account.sender_account_id,
+      acquired_at: acquiredAt,
+      heartbeat_at: acquiredAt,
+      lease_until: leaseUntil,
+    };
     try {
       const handle = await open(lockPath(root, account.sender_account_id), 'wx');
       await handle.writeFile(`${JSON.stringify(lock)}\n`, 'utf8');
@@ -218,26 +246,77 @@ export function createProfileRegistry({
       if (error?.code === 'EEXIST') {
         const current = await readJson(lockPath(root, account.sender_account_id));
         if (current?.lease_until && current.lease_until <= acquiredAt) {
+          const alive = ownerAlive(current);
+          if (alive) {
+            return { ok: false, error_code: 'profile_in_use', account, lease: current, reason: 'owner_heartbeat_expired' };
+          }
           await rm(lockPath(root, account.sender_account_id), { force: true });
-          return acquire(account.sender_account_id, { leaseTtlMs: requestedTtlMs });
+          return acquire(account.sender_account_id, { leaseTtlMs: requestedTtlMs, owner_id: requestedOwnerId });
         }
         return { ok: false, error_code: 'profile_in_use', account, lease: current };
       }
       throw error;
     }
-    return { ok: true, lease_id: token, lease_until: leaseUntil, account: { ...account } };
+    return {
+      ok: true,
+      lease_id: token,
+      owner_id: requestedOwnerId,
+      pid,
+      heartbeat_at: acquiredAt,
+      lease_until: leaseUntil,
+      account: { ...account },
+    };
+  }
+
+  async function findLease(input) {
+    const leaseId = typeof input === 'string' ? input : input?.lease_id;
+    const accountId = typeof input === 'object' ? input?.sender_account_id ?? input?.account_id : null;
+    if (!leaseId) return null;
+    const entries = accountId ? [accountId] : (await list()).map((account) => account.sender_account_id);
+    for (const id of entries) {
+      const lock = await readJson(lockPath(root, id));
+      if (lock?.token === leaseId) return { id, lock };
+    }
+    return null;
+  }
+
+  async function validateLease(input) {
+    await ensureRoot();
+    const owner = typeof input === 'object' ? input?.owner_id ?? input?.ownerId : null;
+    if (!owner) return { ok: false, error_code: 'owner_required' };
+    const found = await findLease(input);
+    if (!found || found.lock.owner_id !== owner) return { ok: false, error_code: 'lease_lost' };
+    return { ok: true, sender_account_id: found.id, lease: found.lock };
+  }
+
+  async function renew(input, { leaseTtlMs: requestedTtlMs = leaseTtlMs } = {}) {
+    await ensureRoot();
+    const owner = typeof input === 'object' ? input?.owner_id ?? input?.ownerId : null;
+    if (!owner) return { ok: false, error_code: 'owner_required' };
+    const found = await findLease(input);
+    if (!found || found.lock.owner_id !== owner) return { ok: false, error_code: 'lease_lost' };
+    const now = nowMs(clock);
+    const updated = {
+      ...found.lock,
+      heartbeat_at: now,
+      lease_until: now + Math.max(1, requestedTtlMs),
+    };
+    await writeFile(lockPath(root, found.id), `${JSON.stringify(updated)}\n`, 'utf8');
+    return { ok: true, sender_account_id: found.id, lease: updated };
   }
 
   async function release(input) {
     await ensureRoot();
     const leaseId = typeof input === 'string' ? input : input?.lease_id;
     if (!leaseId) return { ok: false, error_code: 'lease_token_required' };
+    const owner = typeof input === 'object' ? input?.owner_id ?? input?.ownerId : null;
+    if (!owner) return { ok: false, error_code: 'owner_required' };
     const accountId = typeof input === 'object' ? input?.sender_account_id ?? input?.account_id : null;
     const entries = accountId ? [accountId] : (await list()).map((account) => account.sender_account_id);
     for (const id of entries) {
       const file = lockPath(root, id);
       const lock = await readJson(file);
-      if (!lock || (leaseId && lock.token !== leaseId)) continue;
+      if (!lock || lock.token !== leaseId || lock.owner_id !== owner) continue;
       await rm(file, { force: true });
       return { ok: true, sender_account_id: id };
     }
@@ -285,6 +364,10 @@ export function createProfileRegistry({
     acquire,
     release,
     recoverExpired,
+    ownerId,
+    pid,
+    validateLease,
+    renew,
     recordManualTakeover,
   });
 }

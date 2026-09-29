@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -102,7 +102,7 @@ test('close and reopen preserves login storage and never shares profile director
 test('expired leases are recovered before a new batch claims a slot', async () => {
   const profileRoot = await tempRoot();
   let current = 1000;
-  const registry = createProfileRegistry({ profileRoot, clock: () => current });
+  const registry = createProfileRegistry({ profileRoot, clock: () => current, ownerAlive: () => false });
   const pool = createPlaywrightPool({
     profileRoot,
     maxActive: 1,
@@ -118,6 +118,38 @@ test('expired leases are recovered before a new batch claims a slot', async () =
   assert.equal(second.ok, true);
   assert.notEqual(second.lease_id, first.lease_id);
   await pool.close();
+});
+
+test('an expired lease with a live owner stays fenced until it renews or releases', async () => {
+  const profileRoot = await tempRoot();
+  let current = 1000;
+  const registry = createProfileRegistry({ profileRoot, clock: () => current, ownerId: 'live-owner', ownerAlive: () => true });
+  const otherRegistry = createProfileRegistry({ profileRoot, clock: () => current, ownerId: 'other-owner', ownerAlive: () => true });
+  const pool = createPlaywrightPool({
+    profileRoot,
+    maxActive: 1,
+    leaseTtlMs: 100,
+    heartbeatIntervalMs: 100_000,
+    registry,
+    launchPersistentContext: fakeLauncher([]),
+  });
+  const otherPool = createPlaywrightPool({
+    profileRoot,
+    maxActive: 1,
+    leaseTtlMs: 100,
+    heartbeatIntervalMs: 100_000,
+    registry: otherRegistry,
+    launchPersistentContext: fakeLauncher([]),
+  });
+  await pool.register(account('live-expiring'));
+  const first = await pool.claim('live-expiring');
+  current = 1200;
+  const blocked = await otherPool.claim('live-expiring');
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error_code, 'profile_in_use');
+  assert.equal((await first.renew()).ok, true);
+  await pool.close();
+  await otherPool.close();
 });
 
 test('disabled or unhealthy accounts are excluded from automatic claims', async () => {
@@ -190,4 +222,61 @@ test('concurrent registration preserves the exact 50-profile cap', async () => {
   assert.equal(results.filter((result) => result.error_code === 'profile_limit_exceeded').length, 1);
   assert.equal((await pool.health()).accounts.length, 50);
   await pool.close();
+});
+
+test('cross-process owner fencing prevents stale lease double ownership', async () => {
+  const profileRoot = await tempRoot();
+  let current = 1000;
+  let ownerAlive = true;
+  const registryA = createProfileRegistry({
+    profileRoot,
+    clock: () => current,
+    ownerId: 'owner-a',
+    pid: 1111,
+    ownerAlive: () => ownerAlive,
+  });
+  const registryB = createProfileRegistry({
+    profileRoot,
+    clock: () => current,
+    ownerId: 'owner-b',
+    pid: 2222,
+    ownerAlive: () => ownerAlive,
+  });
+  const poolA = createPlaywrightPool({
+    profileRoot,
+    ownerId: 'owner-a',
+    maxActive: 1,
+    leaseTtlMs: 100,
+    heartbeatIntervalMs: 100_000,
+    registry: registryA,
+    launchPersistentContext: fakeLauncher([]),
+  });
+  const poolB = createPlaywrightPool({
+    profileRoot,
+    ownerId: 'owner-b',
+    maxActive: 1,
+    leaseTtlMs: 100,
+    heartbeatIntervalMs: 100_000,
+    registry: registryB,
+    launchPersistentContext: fakeLauncher([]),
+  });
+  await poolA.register(account('fenced'));
+  const oldLease = await poolA.claim('fenced');
+  const persistedLock = JSON.parse(await readFile(path.join(profileRoot, 'locks', 'fenced.lock'), 'utf8'));
+  assert.equal(persistedLock.owner_id, 'owner-a');
+  assert.equal(persistedLock.pid, 1111);
+  assert.equal(persistedLock.token, oldLease.lease_id);
+  assert.equal(typeof persistedLock.heartbeat_at, 'number');
+  current = 1200;
+  const stillOwned = await poolB.claim('fenced');
+  assert.equal(stillOwned.ok, false);
+  assert.equal(stillOwned.error_code, 'profile_in_use');
+
+  ownerAlive = false;
+  const newLease = await poolB.claim('fenced');
+  assert.equal(newLease.ok, true);
+  assert.equal((await oldLease.assertLease()).error_code, 'lease_lost');
+  assert.equal((await oldLease.renew()).error_code, 'lease_lost');
+  await poolA.close();
+  await poolB.close();
 });
