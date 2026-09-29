@@ -1,0 +1,17 @@
+{
+  "name": "deerflow-public-outreach-operator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Versioned execution shell for native DeerFlow public outreach tasks.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "dependencies": {
+    "appium": "3.1.0",
+    "playwright": "1.59.1"
+  }
+}

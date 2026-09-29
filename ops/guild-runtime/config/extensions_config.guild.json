@@ -81,6 +81,21 @@
         "commit_handoff",
         "audit_events"
       ]
+    },
+    "public_outreach_operator": {
+      "enabled": true,
+      "required": true,
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/yangyucheng/Documents/ChatGPT/Tiktok公会/ops/guild-runtime/public-outreach-operator/src/server.mjs"
+      ],
+      "cwd": "/Users/yangyucheng/Documents/ChatGPT/Tiktok公会/ops/guild-runtime/public-outreach-operator",
+      "tool_name_prefix": false,
+      "enabled_tools": [
+        "public_outreach_accounts",
+        "public_outreach_tasks"
+      ]
     }
   }
 }

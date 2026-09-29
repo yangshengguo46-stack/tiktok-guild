@@ -67,3 +67,16 @@ export async function inspectDirectMcpCatalog({ serverName, server, environment,
   if (missing.length) throw new Error(`${serverName} direct catalog drift: missing approved tools [${missing.join(', ')}]`);
   return { detail: `${server.enabled_tools.length} approved tools discovered from ${serverName} (${names.length} raw tools); separate probe process, Gateway loading unverified` };
 }
+
+export async function inspectPublicOutreachCatalog({ server, environment, timeoutMs = 10000 }) {
+  const result = await inspectDirectMcpCatalog({
+    serverName: 'public_outreach_operator',
+    server,
+    environment,
+    timeoutMs,
+  });
+  return {
+    ...result,
+    detail: `${result.detail}; public outreach operator catalog is read-only until a native DeerFlow adapter is configured`,
+  };
+}

@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
 
-import { inspectDirectMcpCatalog, inspectGatewayMcpConfig } from '../src/mcp-catalog.mjs';
+import { inspectDirectMcpCatalog, inspectGatewayMcpConfig, inspectPublicOutreachCatalog } from '../src/mcp-catalog.mjs';
 import { buildRuntimeEnvironment } from '../src/runtime-environment.mjs';
 
 async function catalogFixture(t, names, checkEnvironment = false) {
@@ -47,6 +48,18 @@ test('direct discovery rejects duplicate raw names before applying the allowlist
   const server = await catalogFixture(t, ['broker_workspace', 'broker_messaging', 'broker_messaging']);
   await assert.rejects(inspectDirectMcpCatalog({ serverName: 'broker_operator', server, environment: process.env }),
     /duplicate raw tool names/u);
+});
+
+test('public outreach catalog discovery lists the versioned shell without starting a provider', async () => {
+  const server = {
+    command: process.execPath,
+    args: [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public-outreach-operator/src/server.mjs')],
+    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public-outreach-operator'),
+    enabled_tools: ['public_outreach_accounts', 'public_outreach_tasks'],
+  };
+  const result = await inspectPublicOutreachCatalog({ server, environment: process.env });
+  assert.match(result.detail, /2 approved tools.*2 raw tools/u);
+  assert.match(result.detail, /read-only until a native DeerFlow adapter is configured/u);
 });
 
 test('Gateway catalog errors do not echo an invalid response body', async (t) => {
