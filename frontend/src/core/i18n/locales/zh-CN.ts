@@ -381,6 +381,49 @@ export const zhCN: Translations = {
   guildWorkbench: {
     title: "公会工作台",
     overviewUnavailable: "公会概览数据尚未接入。",
+    publicOutreach: {
+      title: "主播公开建联工作台",
+      description: "查看账号池、执行批次、当前动作和已验证回执。",
+      operatorUnavailable: "公开建联执行器尚未配置。",
+      reload: "刷新",
+      creatorUid: "主播 UID",
+      sequenceNo: "序列号",
+      loadTasks: "加载任务",
+      accountPool: {
+        title: "账号池",
+        web: "网页账号",
+        ios: "iPhone 账号",
+        healthy: "健康",
+        attention: "需处理",
+        active: "工作中",
+        batchCapacity: "网页批次容量",
+        iosReadiness: "iPhone 就绪",
+        registered: "已登记",
+        maximum: "上限",
+        ready: "就绪",
+        pause: "暂停",
+        resume: "恢复",
+      },
+      taskList: {
+        title: "建联任务",
+        empty: "输入主播 UID 和序列号查看任务。",
+        action: "动作",
+        state: "状态",
+        receipt: "回执",
+        takeover: "人工接管",
+        verified: "已验证",
+        unknown: "待核验",
+      },
+      receipts: {
+        title: "回执证据",
+        empty: "选择任务查看回执。",
+        verified: "已验证",
+        unknown: "未知",
+        source: "来源",
+      },
+    },
+  } as unknown as Translations["guildWorkbench"] & {
+    publicOutreach: Record<string, unknown>;
   },
   // Sidebar projects section
   projects: {

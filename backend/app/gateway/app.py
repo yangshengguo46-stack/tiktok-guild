@@ -35,6 +35,7 @@ from app.gateway.routers import (
     project_documents,
     project_thread_files,
     projects,
+    public_outreach,
     runs,
     scheduled_tasks,
     skills,
@@ -888,6 +889,9 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Console API (cross-thread observability) is mounted at /api/console
     app.include_router(console.router)
+
+    # Public creator outreach control plane and workbench API.
+    app.include_router(public_outreach.router)
 
     # MCP API is mounted at /api/mcp
     app.include_router(mcp.router)

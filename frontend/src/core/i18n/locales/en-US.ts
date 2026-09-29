@@ -407,6 +407,50 @@ export const enUS: Translations = {
   guildWorkbench: {
     title: "Guild workbench",
     overviewUnavailable: "Guild overview data is not connected yet.",
+    publicOutreach: {
+      title: "Creator outreach workbench",
+      description:
+        "Track account pools, action batches, current steps, and verified receipts.",
+      operatorUnavailable: "The public outreach operator is not configured.",
+      reload: "Refresh",
+      creatorUid: "Creator UID",
+      sequenceNo: "Sequence",
+      loadTasks: "Load tasks",
+      accountPool: {
+        title: "Account pool",
+        web: "Web accounts",
+        ios: "iPhone accounts",
+        healthy: "Healthy",
+        attention: "Needs attention",
+        active: "active",
+        batchCapacity: "Web batch capacity",
+        iosReadiness: "iPhone readiness",
+        registered: "registered",
+        maximum: "maximum",
+        ready: "ready",
+        pause: "Pause",
+        resume: "Resume",
+      },
+      taskList: {
+        title: "Outreach tasks",
+        empty: "Enter a creator UID and sequence to inspect tasks.",
+        action: "Action",
+        state: "State",
+        receipt: "Receipt",
+        takeover: "Takeover",
+        verified: "Verified",
+        unknown: "Unknown",
+      },
+      receipts: {
+        title: "Receipt evidence",
+        empty: "Select a task to inspect its receipts.",
+        verified: "Verified",
+        unknown: "Unknown",
+        source: "Source",
+      },
+    },
+  } as unknown as Translations["guildWorkbench"] & {
+    publicOutreach: Record<string, unknown>;
   },
   // Sidebar projects section
   projects: {
