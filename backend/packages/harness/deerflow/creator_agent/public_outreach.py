@@ -212,7 +212,7 @@ class PublicOutreachWorkflow:
         provider_ref = result.get("provider_ref") if isinstance(result, dict) else None
         if not isinstance(provider_ref, str) or not provider_ref:
             provider_ref = None
-        receipt_id = provider_ref or f"unknown:{task['task_id']}:{task.get('attempt_count', 0)}:{error_code}"
+        receipt_id = f"unknown:{task['task_id'][:64]}:{task.get('attempt_count', 0)}:{error_code[:32]}"
         diagnostic = {
             "receipt_type": "provider_unknown",
             "action": task["action"],
@@ -222,6 +222,8 @@ class PublicOutreachWorkflow:
             "message": _diagnostic_message(result),
             "manual_required": True,
         }
+        if provider_ref is not None:
+            diagnostic["provider_ref"] = provider_ref
         kind = "dm_receipt" if task["action"] == "message" else "public_action_receipt"
         stored = None
         try:
@@ -231,7 +233,7 @@ class PublicOutreachWorkflow:
                 sequence_no=task["sequence_no"],
                 receipt_id=receipt_id,
                 kind=kind,
-                provider_ref=provider_ref,
+                provider_ref=None,
                 verification_source="operator_unknown",
                 payload=diagnostic,
                 verified=False,
@@ -282,8 +284,6 @@ class PublicOutreachWorkflow:
         claim: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if task["state"] == "completed":
-            if task.get("receipt_id") not in (None, receipt_id):
-                raise ValueError("task receipt replay conflict")
             return task
         claim = claim or await self._claim_for_result(task)
         if claim is None:
@@ -406,13 +406,29 @@ class PublicOutreachWorkflow:
         except ValueError:
             return await self._record_unknown_result(task, receipt)
         verified = True
-        stored = await self._store_receipt(
-            task,
-            receipt,
-            kind="public_action_receipt",
-            verified=verified,
-            payload={**payload, _ACTION_GROUP_KEY: group},
-        )
+        stored_payload = {**payload, _ACTION_GROUP_KEY: group}
+        try:
+            stored = await self._store_receipt(
+                task,
+                receipt,
+                kind="public_action_receipt",
+                verified=verified,
+                payload=stored_payload,
+            )
+        except ValueError:
+            if len(items) <= 1:
+                raise
+            aggregate_receipt = {
+                **receipt,
+                "receipt_id": f"aggregate:{_receipt_id(receipt, payload)}",
+            }
+            stored = await self._store_receipt(
+                task,
+                aggregate_receipt,
+                kind="public_action_receipt",
+                verified=verified,
+                payload=stored_payload,
+            )
         completed: list[dict[str, Any]] = []
         if verified:
             action_tasks = await self.repository.list_action_tasks(
