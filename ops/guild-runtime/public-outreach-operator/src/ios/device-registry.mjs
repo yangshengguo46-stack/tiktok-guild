@@ -239,21 +239,13 @@ export function createDeviceRegistry({
         message: error instanceof Error ? error.message : 'WebDriverAgent health check failed.',
       };
     }
-    if (result?.ok === true && !isVerifiedWdaHealth(result)) {
+    if (!isVerifiedWdaHealth(result)) {
       return {
-        ...result,
+        ...(result && typeof result === 'object' ? result : {}),
         ok: false,
         state: 'manual_required',
         error_code: 'wda_unavailable',
-        message: 'Injected health checker did not satisfy the strict WDA health contract.',
-      };
-    }
-    if (!result || typeof result !== 'object') {
-      return {
-        ok: false,
-        state: 'manual_required',
-        error_code: 'wda_unavailable',
-        message: 'Health checker returned no result.',
+        message: 'Health checker did not satisfy the strict WDA health contract.',
       };
     }
     return result;
@@ -335,8 +327,23 @@ export function createDeviceRegistry({
       if (device.state !== 'ready' && device.state !== 'paired') {
         return { ok: false, error_code: 'device_unavailable', device: { ...device } };
       }
+      const health = await evaluateHealth(device);
+      if (!health.ok) {
+        const blocked = {
+          ...device,
+          state: 'manual_required',
+          health: 'wda_unavailable',
+          health_detail: health,
+          updated_at: nowIso(clock),
+        };
+        memory.set(deviceRef, blocked);
+        await flush();
+        return { ok: false, error_code: 'wda_unavailable', device: { ...blocked } };
+      }
       const claimed = {
         ...device,
+        health: 'healthy',
+        health_detail: health,
         state: 'busy',
         active_session_id: sessionId,
         updated_at: nowIso(clock),

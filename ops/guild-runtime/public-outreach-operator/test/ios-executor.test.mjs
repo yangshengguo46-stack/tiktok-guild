@@ -249,13 +249,14 @@ test('missing WDA, locked, offline, and unpaired devices fail closed with explic
     prerequisites: { ...readyPrerequisites, locked: true },
   });
   assert.equal((await locked.registerDevice(device())).device.state, 'manual_required');
-  assert.equal((await locked.get('iphone-001')).health, 'device_locked');
+  assert.equal((await locked.get('iphone-001')).health, 'wda_unavailable');
 
   const offline = await createDeviceRegistry({
     rootDir: await mkdtemp(path.join(os.tmpdir(), 'ios-offline-')),
     prerequisites: { ...readyPrerequisites, online: false },
   });
-  assert.equal((await offline.registerDevice(device())).device.state, 'offline');
+  assert.equal((await offline.registerDevice(device())).device.state, 'manual_required');
+  assert.equal((await offline.get('iphone-001')).health, 'wda_unavailable');
 
   const unpaired = await createDeviceRegistry({
     rootDir: await mkdtemp(path.join(os.tmpdir(), 'ios-unpaired-')),
@@ -304,6 +305,21 @@ test('registry rejects an injected ok response that bypasses the strict WDA cont
   assert.equal(refreshed.ok, false);
   assert.equal(refreshed.device.state, 'manual_required');
   assert.equal(refreshed.device.health, 'wda_unavailable');
+});
+
+test('registry rejects non-ok ready and paired health states before persistence or claim', async () => {
+  for (const reportedState of ['ready', 'paired']) {
+    const devices = createDeviceRegistry({
+      rootDir: await mkdtemp(path.join(os.tmpdir(), `ios-invalid-${reportedState}-`)),
+      healthChecker: async () => ({ ok: false, state: reportedState }),
+    });
+    const registered = await devices.registerDevice(device());
+    assert.equal(registered.device.state, 'manual_required');
+    assert.equal(registered.device.health, 'wda_unavailable');
+    const claim = await devices.claim('iphone-001', { sessionId: `invalid-${reportedState}` });
+    assert.equal(claim.ok, false);
+    assert.equal(claim.error_code, 'wda_unavailable');
+  }
 });
 
 test('session uses accessibility locators, launches TikTok, and closes its lease', async () => {
