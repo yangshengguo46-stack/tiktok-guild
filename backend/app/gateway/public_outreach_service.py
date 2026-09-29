@@ -142,6 +142,7 @@ class PublicOutreachService:
         if task["state"] == "leased":
             await self.repository.release_expired_action_leases()
             task = await self.repository.read_action_task(task_id)
+        task = await self.repository.reconcile_verified_terminal(owner_user_id, task_id) or task
         if task["state"] == "completed":
             return await self.workflow._duplicate_result(task)
         if await self.repository.contact_prohibited(owner_user_id, task["sender_account_id"], task["creator_uid"]):

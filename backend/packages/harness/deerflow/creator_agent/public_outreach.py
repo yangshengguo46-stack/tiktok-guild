@@ -266,6 +266,7 @@ class PublicOutreachWorkflow:
         }
 
     async def _duplicate_result(self, task: dict[str, Any]) -> dict[str, Any]:
+        task = await self.repository.reconcile_verified_terminal(task["owner_user_id"], task["task_id"]) or task
         return {
             "status": "duplicate",
             "advanced": False,
@@ -486,7 +487,7 @@ class PublicOutreachWorkflow:
             owner_user_id=task["owner_user_id"],
             creator_uid=task["creator_uid"],
         )
-        advanced = False
+        advanced = verified and model is not None and task["action"] == "follow" and model["claim"]["status"] == "public_touched"
         if verified and model is not None and model["claim"]["status"] == "gray":
             public_tasks = [
                 row
@@ -583,13 +584,14 @@ class PublicOutreachWorkflow:
             }
         if verified:
             completed.append(await self._complete_task(task, receipt_id=stored["receipt_id"], claim=_claim))
+            model = await self.repository.read_model(owner_user_id=task["owner_user_id"], creator_uid=task["creator_uid"])
         elif _claim is not None:
             await self.repository.release_action_claim(
                 task_id,
                 lease_owner=_claim["lease_owner"],
                 lease_token=_claim["lease_token"],
             )
-        advanced = False
+        advanced = verified and model is not None and model["claim"]["status"] == "contacted"
         if verified and model is not None and model["claim"]["status"] == "public_touched":
             await self.repository.advance_state(
                 owner_user_id=task["owner_user_id"],

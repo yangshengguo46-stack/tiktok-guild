@@ -48,6 +48,7 @@ _MAX_WEB_SENDER_ACCOUNTS = 50
 _MAX_ACTIVE_SENDER_ACCOUNTS = 10
 _ATTEMPT_STARTED = "_external_attempt_started"
 _ATTEMPT_TOKEN = "_external_attempt_token"
+_ACTION_GROUP_KEY = "action_group"
 _RESERVED_PAYLOAD_FIELDS = frozenset({_ATTEMPT_STARTED, _ATTEMPT_TOKEN, "manual_required", "manual_takeover_requested", "manual_takeover_reason"})
 
 
@@ -543,6 +544,8 @@ class CreatorOutreachRepository:
                 raise ValueError("action task has no active lease")
             if row.lease_owner != lease_owner or row.lease_token != lease_token:
                 raise ValueError("action task lease is stale or owned by another worker")
+            if (row.payload_json or {}).get(_ATTEMPT_STARTED) and row.receipt_id != receipt_id:
+                raise ValueError("dispatched action completion must use its bound verified receipt")
             stmt = (
                 update(CreatorOutreachActionTaskRow)
                 .where(
@@ -566,6 +569,132 @@ class CreatorOutreachRepository:
             result = await session.execute(stmt)
             if not result.rowcount:
                 raise ValueError("action task lease is stale or expired")
+            await session.refresh(row)
+            if row.action in {"follow", "message"} and (row.payload_json or {}).get(_ATTEMPT_STARTED):
+                await self._advance_verified_terminal(session, row, now=now)
+            await session.commit()
+            await session.refresh(row)
+            return row.to_dict()
+
+    async def _verified_terminal_receipt(self, session: AsyncSession, task: CreatorOutreachActionTaskRow) -> CreatorOutreachReceiptRow:
+        """Validate the stored worker-bound proof without accepting caller receipt data."""
+        payload = task.payload_json or {}
+        if not payload.get(_ATTEMPT_STARTED) or not payload.get(_ATTEMPT_TOKEN) or not task.receipt_id:
+            raise ValueError("terminal action has no bound worker proof")
+        receipt = await session.get(CreatorOutreachReceiptRow, (task.owner_user_id, task.creator_uid, task.sequence_no, task.receipt_id))
+        expected_kind = "dm_receipt" if task.action == "message" else "public_action_receipt"
+        if receipt is None or not receipt.verified or receipt.kind != expected_kind or not receipt.provider_ref:
+            raise ValueError("terminal action requires a verified provider receipt")
+        proof = receipt.payload_json or {}
+        group = payload.get(_ACTION_GROUP_KEY)
+        if not isinstance(group, str) or not group or proof.get(_ACTION_GROUP_KEY) != group:
+            raise ValueError("terminal receipt action group differs from native task")
+        if proof.get("receipt_type") != expected_kind or proof.get("sender_account_id") != task.sender_account_id or proof.get("creator_uid") != task.creator_uid:
+            raise ValueError("terminal receipt identity or kind differs from native task")
+        items = proof.get("actions") if isinstance(proof.get("actions"), list) else [proof]
+        if not any(
+            isinstance(item, dict)
+            and item.get("action") == task.action
+            and item.get("sender_account_id", task.sender_account_id) == task.sender_account_id
+            and item.get("creator_uid", task.creator_uid) == task.creator_uid
+            and item.get(_ACTION_GROUP_KEY, group) == group
+            and item.get("receipt_type", expected_kind) == expected_kind
+            and item.get("verified", True) is True
+            for item in items
+        ):
+            raise ValueError("terminal receipt has no matching verified action")
+        return receipt
+
+    async def _advance_verified_terminal(self, session: AsyncSession, task: CreatorOutreachActionTaskRow, *, now: datetime, historical_completion: bool = False) -> bool:
+        if task.action not in {"follow", "message"}:
+            return False
+        await self._verified_terminal_receipt(session, task)
+        claim = await session.get(CreatorClaimRow, (task.owner_user_id, task.creator_uid))
+        sequence = await session.get(CreatorOutreachSequenceRow, (task.owner_user_id, task.creator_uid, task.sequence_no))
+        sender = await session.get(SenderAccountRow, (task.owner_user_id, task.sender_account_id))
+        if claim is None or sequence is None or sender is None or sequence.sender_account_id != task.sender_account_id:
+            raise ValueError("terminal proof has no matching native owner, sender and sequence")
+        source, target = ("gray", "public_touched") if task.action == "follow" else ("public_touched", "contacted")
+        if claim.status == target and sequence.status == target:
+            return False
+        later = {"contacted", "replied", "closed"} if task.action == "follow" else {"replied", "closed"}
+        if historical_completion and claim.status == sequence.status and claim.status in later:
+            return False
+        expected_sequence = "pending" if source == "gray" else source
+        if claim.status != source or sequence.status != expected_sequence:
+            raise ValueError("terminal proof cannot advance a closed or inconsistent sequence")
+        if await session.scalar(select(_no_contact(task))):
+            raise ValueError("native do_not_contact prevents terminal advancement")
+        public_tasks = list(
+            await session.scalars(
+                select(CreatorOutreachActionTaskRow).where(
+                    CreatorOutreachActionTaskRow.owner_user_id == task.owner_user_id,
+                    CreatorOutreachActionTaskRow.creator_uid == task.creator_uid,
+                    CreatorOutreachActionTaskRow.sequence_no == task.sequence_no,
+                    CreatorOutreachActionTaskRow.action.in_(("like", "comment", "follow")),
+                )
+            )
+        )
+        if {row.action for row in public_tasks} != {"like", "comment", "follow"} or any(
+            row.state != "completed" or row.sender_account_id != task.sender_account_id or (row.payload_json or {}).get(_ACTION_GROUP_KEY) != (task.payload_json or {}).get(_ACTION_GROUP_KEY) for row in public_tasks
+        ):
+            raise ValueError("terminal public actions are incomplete or have a different sender or group")
+        claim_update = await session.execute(
+            update(CreatorClaimRow)
+            .where(
+                CreatorClaimRow.owner_user_id == task.owner_user_id,
+                CreatorClaimRow.creator_uid == task.creator_uid,
+                CreatorClaimRow.status == source,
+                ~_no_contact(task),
+            )
+            .values(status=target, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        sequence_update = await session.execute(
+            update(CreatorOutreachSequenceRow)
+            .where(
+                CreatorOutreachSequenceRow.owner_user_id == task.owner_user_id,
+                CreatorOutreachSequenceRow.creator_uid == task.creator_uid,
+                CreatorOutreachSequenceRow.sequence_no == task.sequence_no,
+                CreatorOutreachSequenceRow.sender_account_id == task.sender_account_id,
+                CreatorOutreachSequenceRow.status == expected_sequence,
+            )
+            .values(status=target, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if claim_update.rowcount != 1 or sequence_update.rowcount != 1:
+            raise ValueError("terminal sequence changed during verified finalization")
+        return True
+
+    async def reconcile_verified_terminal(self, owner_user_id: str, task_id: str) -> dict[str, Any] | None:
+        """Finish only a durable worker-proven terminal action, without provider I/O."""
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, _text(task_id, "task_id"))
+            if row is None or row.owner_user_id != _text(owner_user_id, "owner_user_id"):
+                return None
+            if row.action not in {"follow", "message"} or row.state not in {"completed", "failed"} or not row.receipt_id or not (row.payload_json or {}).get(_ATTEMPT_STARTED):
+                return row.to_dict()
+            await self._verified_terminal_receipt(session, row)
+            now = datetime.now(UTC)
+            historical_completion = row.state == "completed"
+            if row.state == "failed":
+                result = await session.execute(
+                    update(CreatorOutreachActionTaskRow)
+                    .where(
+                        CreatorOutreachActionTaskRow.task_id == task_id,
+                        CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+                        CreatorOutreachActionTaskRow.state == "failed",
+                        CreatorOutreachActionTaskRow.receipt_id == row.receipt_id,
+                        CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_(True),
+                        ~_no_contact(row),
+                    )
+                    .values(state="completed", error_code=None, payload_json={key: value for key, value in (row.payload_json or {}).items() if key != "manual_required"}, updated_at=now)
+                    .execution_options(synchronize_session=False)
+                )
+                if result.rowcount != 1:
+                    raise ValueError("verified terminal action changed during reconciliation")
+                await session.refresh(row)
+            await self._advance_verified_terminal(session, row, now=now, historical_completion=historical_completion)
             await session.commit()
             await session.refresh(row)
             return row.to_dict()
@@ -749,17 +878,31 @@ class CreatorOutreachRepository:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             if row is None or row.owner_user_id != owner_user_id:
                 raise ValueError("action task does not exist")
-            if row.state == "completed":
-                raise ValueError("completed action payload cannot be changed")
+            if row.state != "pending":
+                raise ValueError("only pending action payloads can be changed")
             sequence = await session.get(
                 CreatorOutreachSequenceRow,
                 (owner_user_id, row.creator_uid, row.sequence_no),
             )
             if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
                 raise ValueError("closed outreach sequences cannot be changed")
-            row.payload_json = {**(row.payload_json or {}), **payload}
-            row.updated_at = datetime.now(UTC)
+            result = await session.execute(
+                update(CreatorOutreachActionTaskRow)
+                .where(
+                    CreatorOutreachActionTaskRow.task_id == task_id,
+                    CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+                    CreatorOutreachActionTaskRow.state == "pending",
+                    CreatorOutreachActionTaskRow.updated_at == row.updated_at,
+                    CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_not(True),
+                    CreatorOutreachActionTaskRow.payload_json["manual_required"].as_boolean().is_not(True),
+                )
+                .values(payload_json={**(row.payload_json or {}), **payload}, updated_at=datetime.now(UTC))
+                .execution_options(synchronize_session=False)
+            )
+            if not result.rowcount:
+                raise ValueError("action payload changed or dispatch started; reload before updating")
             await session.commit()
+            await session.refresh(row)
             return row.to_dict()
 
     async def retry_action(

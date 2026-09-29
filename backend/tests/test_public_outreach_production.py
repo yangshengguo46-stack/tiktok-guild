@@ -13,12 +13,13 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.gateway.public_outreach_service import NodeExecutorTransport, PublicOutreachService
 from deerflow.creator_agent.public_outreach import PublicOutreachWorkflow
 from deerflow.persistence.base import Base
 from deerflow.persistence.creator_agent_relationship import CreatorOutreachRepository
+from deerflow.persistence.creator_agent_relationship.model import CreatorClaimRow, CreatorOutreachActionTaskRow, CreatorOutreachReceiptRow, CreatorOutreachSequenceRow
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKER = ROOT / "ops/guild-runtime/public-outreach-operator/src/execution-worker.mjs"
@@ -418,6 +419,365 @@ async def test_capacity_keeps_unconfirmed_browser_cleanup_occupied_after_owner_d
     transport = NodeExecutorTransport(worker_path=WORKER, config_path=None, runtime_root=tmp_path)
     service = PublicOutreachService(repo, transport, config={})
     assert await service.capacity() == {"active": 2, "active_limit": 10}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("newer", ["dispatched", "ordinary_pending"])
+async def test_ordinary_payload_stale_read_cannot_erase_dispatch_or_newer_text(tmp_path, newer):
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+
+    class DelayedUserRead(AsyncSession):
+        async def get(self, entity, *args, **kwargs):
+            row = await super().get(entity, *args, **kwargs)
+            if entity is CreatorOutreachActionTaskRow and asyncio.current_task().get_name() == "old-caller":
+                entered.set()
+                await resume.wait()
+            return row
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'stale.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    repo = CreatorOutreachRepository(async_sessionmaker(engine, class_=DelayedUserRead, expire_on_commit=False))
+    try:
+        tasks = await bound(repo)
+        task = tasks[0]
+        if newer == "dispatched":
+            claim = await repo.claim_action(task["task_id"], lease_owner="native-worker")
+        stale = asyncio.create_task(repo.update_action_payload("owner", task["task_id"], {"comment": "old ordinary text"}), name="old-caller")
+        await asyncio.wait_for(entered.wait(), 5)
+        if newer == "dispatched":
+            await repo.mark_external_attempt_started(task["task_id"], lease_owner=claim["lease_owner"], lease_token=claim["lease_token"])
+        else:
+            await repo.update_action_payload("owner", task["task_id"], {"comment": "newer ordinary text"})
+        resume.set()
+        with pytest.raises(ValueError, match="pending|changed|dispatch"):
+            await stale
+        current = await repo.read_action_task(task["task_id"])
+        if newer == "dispatched":
+            assert current["payload_json"]["_external_attempt_started"] is True
+            await repo.release_expired_action_leases(now=datetime.now(UTC) + timedelta(seconds=301))
+            terminal = await repo.read_action_task(task["task_id"])
+            assert terminal["state"] == "failed"
+            assert terminal["payload_json"]["manual_required"] is True
+            assert (await repo.read_sender_account("owner", "sender"))["status"] == "paused"
+            assert await repo.claim_action(task["task_id"], lease_owner="blind-replay") is None
+        else:
+            assert current["payload_json"]["comment"] == "newer ordinary text"
+    finally:
+        resume.set()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["follow", "message"])
+@pytest.mark.parametrize("phase", ["before_commit", "after_commit"])
+async def test_verified_terminal_cancellation_replays_only_native_bookkeeping(repo, tmp_path, provider, action, phase, monkeypatch):
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    service = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=tmp_path / "runtime"), config=config(url))
+    target_index = 2 if action == "follow" else 3
+    target = tasks[target_index]
+    expected_status = "public_touched" if action == "follow" else "contacted"
+    original_complete = repo.complete_action
+    entered = asyncio.Event()
+    target_action = "follow-button" if action == "follow" else "message-submit"
+    try:
+        for prior in tasks[:target_index]:
+            assert (await service.execute_task("owner", prior["task_id"]))["task"]["state"] == "completed"
+
+        async def complete(*args, **kwargs):
+            if args[0] != target["task_id"]:
+                return await original_complete(*args, **kwargs)
+            if phase == "before_commit":
+                entered.set()
+                await asyncio.Event().wait()
+            result = await original_complete(*args, **kwargs)
+            entered.set()
+            await asyncio.Event().wait()
+            return result
+
+        monkeypatch.setattr(repo, "complete_action", complete)
+        execution = asyncio.create_task(service.execute_task("owner", target["task_id"]))
+        await asyncio.wait_for(entered.wait(), 5)
+        await service.cancel_task(target["task_id"])
+        if phase == "after_commit":
+            assert (await execution)["status"] == "duplicate"
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await execution
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        proof = await repo.read_action_receipt("owner", target["task_id"])
+        assert proof["verified"] is True
+        if phase == "after_commit":
+            assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
+        replay = await service.execute_task("owner", target["task_id"])
+        assert replay["status"] == "duplicate"
+        assert replay["task"]["state"] == "completed"
+        assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
+        assert state["actions"].count(target_action) == 1
+        assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
+        assert state["actions"].count(target_action) == 1
+    finally:
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["follow", "message"])
+@pytest.mark.parametrize("phase", ["before_commit", "after_commit"])
+async def test_verified_terminal_hard_exit_restarts_without_provider_replay(repo, tmp_path, provider, action, phase):
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    runtime = tmp_path / "runtime"
+    target_index = 2 if action == "follow" else 3
+    target = tasks[target_index]
+    expected_status = "public_touched" if action == "follow" else "contacted"
+    service = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=runtime), config=config(url))
+    for prior in tasks[:target_index]:
+        assert (await service.execute_task("owner", prior["task_id"]))["task"]["state"] == "completed"
+    await service.close()
+    pid_file = tmp_path / "worker.pid"
+    child_file = tmp_path / "terminal-exit.py"
+    child_file.write_text("""import asyncio,json,os,sys
+from pathlib import Path
+from sqlalchemy.ext.asyncio import create_async_engine,async_sessionmaker
+from app.gateway.public_outreach_service import NodeExecutorTransport,PublicOutreachService
+from deerflow.persistence.creator_agent_relationship import CreatorOutreachRepository
+async def main():
+    db,config_path,worker,runtime,task_id,pid_file,phase=sys.argv[1:]
+    engine=create_async_engine('sqlite+aiosqlite:///'+db)
+    repo=CreatorOutreachRepository(async_sessionmaker(engine,expire_on_commit=False))
+    transport=NodeExecutorTransport(worker_path=Path(worker),config_path=Path(config_path),runtime_root=Path(runtime))
+    service=PublicOutreachService(repo,transport,config=json.loads(Path(config_path).read_text()))
+    original=repo.complete_action
+    async def exit_at_boundary(*args,**kwargs):
+        if phase=='after_commit':await original(*args,**kwargs)
+        Path(pid_file).write_text(str(transport.process.pid))
+        os._exit(12)
+    repo.complete_action=exit_at_boundary
+    await service.execute_task('owner',task_id)
+asyncio.run(main())
+""")
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(child_file),
+        str(repo.session_factory.kw["bind"].url.database),
+        str(source),
+        str(WORKER),
+        str(runtime),
+        target["task_id"],
+        str(pid_file),
+        phase,
+        cwd=ROOT / "backend",
+        env={**os.environ, "PYTHONPATH": str(ROOT / "backend")},
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        output = await asyncio.wait_for(child.communicate(), 10)
+        assert child.returncode == 12, output
+        proof = await repo.read_action_receipt("owner", target["task_id"])
+        assert proof["verified"] is True
+        if phase == "before_commit":
+            await repo.release_expired_action_leases(now=datetime.now(UTC) + timedelta(seconds=301))
+            assert (await repo.read_action_task(target["task_id"]))["state"] == "failed"
+        else:
+            assert (await repo.read_action_task(target["task_id"]))["state"] == "completed"
+            assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
+        restarted = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=runtime), config=config(url))
+        try:
+            assert (await restarted.execute_task("owner", target["task_id"]))["status"] == "duplicate"
+            assert restarted.transport.process is None
+            assert (await repo.read_action_task(target["task_id"]))["state"] == "completed"
+            assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
+        finally:
+            await restarted.close()
+        assert state["actions"].count("follow-button" if action == "follow" else "message-submit") == 1
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+        if pid_file.exists():
+            pid = int(pid_file.read_text())
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            await asyncio.sleep(0.1)
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["follow", "message"])
+async def test_reviewer_web_worker_final_action_cancel_after_commit_has_advanced_native_claim(repo, tmp_path, monkeypatch, action):
+    tasks = await bound(repo, "web")
+    configuration = config("http://127.0.0.1:1")
+    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web"}
+    source = tmp_path / "web-config.json"
+    source.write_text(json.dumps(configuration))
+    worker = ROOT / "ops/guild-runtime/public-outreach-operator/fixtures/web-worker.mjs"
+    transport = NodeExecutorTransport(worker_path=worker, config_path=source, runtime_root=tmp_path / "runtime", node=shutil.which("node"))
+    service = PublicOutreachService(repo, transport, config=configuration)
+    target_index = 2 if action == "follow" else 3
+    target = tasks[target_index]
+    expected_status = "public_touched" if action == "follow" else "contacted"
+    calls = []
+    original_execute = transport.execute
+    original_complete = repo.complete_action
+    entered = asyncio.Event()
+
+    async def counted_execute(**kwargs):
+        calls.append(kwargs["action"])
+        return await original_execute(**kwargs)
+
+    async def after_commit(*args, **kwargs):
+        result = await original_complete(*args, **kwargs)
+        if args[0] == target["task_id"]:
+            entered.set()
+            await asyncio.Event().wait()
+        return result
+
+    monkeypatch.setattr(transport, "execute", counted_execute)
+    try:
+        for prior in tasks[:target_index]:
+            assert (await service.execute_task("owner", prior["task_id"]))["task"]["state"] == "completed"
+        monkeypatch.setattr(repo, "complete_action", after_commit)
+        execution = asyncio.create_task(service.execute_task("owner", target["task_id"]))
+        await asyncio.wait_for(entered.wait(), 5)
+        await service.cancel_task(target["task_id"])
+        assert (await execution)["status"] == "duplicate"
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        assert (await repo.read_action_receipt("owner", target["task_id"]))["verified"] is True
+        assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
+        assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
+        assert calls.count(action) == 1
+        if action == "follow":
+            assert (await service.execute_task("owner", tasks[3]["task_id"]))["task"]["state"] == "completed"
+            assert calls.count("message") == 1
+            assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
+    finally:
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["follow", "message"])
+async def test_terminal_exception_after_durable_completion_replays_without_provider(repo, tmp_path, provider, monkeypatch, action):
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    service = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=tmp_path / "runtime"), config=config(url))
+    target_index = 2 if action == "follow" else 3
+    target = tasks[target_index]
+    expected_status = "public_touched" if action == "follow" else "contacted"
+    original_complete = repo.complete_action
+    try:
+        for prior in tasks[:target_index]:
+            await service.execute_task("owner", prior["task_id"])
+
+        async def interrupted(*args, **kwargs):
+            result = await original_complete(*args, **kwargs)
+            if args[0] == target["task_id"]:
+                raise RuntimeError("response lost after native commit")
+            return result
+
+        monkeypatch.setattr(repo, "complete_action", interrupted)
+        assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
+        assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
+        assert state["actions"].count("follow-button" if action == "follow" else "message-submit") == 1
+    finally:
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_unbound_caller_receipt_cannot_finalize_terminal_action(repo):
+    tasks = await bound(repo)
+    follow = tasks[2]
+    await repo.record_receipt(
+        owner_user_id="owner",
+        creator_uid="creator",
+        sequence_no=1,
+        receipt_id="caller-proof",
+        kind="public_action_receipt",
+        provider_ref="caller-ref",
+        verification_source="provider_readback",
+        payload={"receipt_type": "public_action_receipt", "action": "follow", "sender_account_id": "sender", "creator_uid": "creator", "action_group": follow["payload_json"]["action_group"]},
+        verified=True,
+    )
+    assert (await repo.reconcile_verified_terminal("owner", follow["task_id"]))["state"] == "pending"
+    assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == "gray"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["no_contact", "closed", "sender_mismatch", "receipt_kind", "receipt_group"])
+async def test_terminal_proof_recovery_fails_closed_on_native_scope_and_evidence(repo, tmp_path, provider, monkeypatch, boundary):
+    from deerflow.persistence.creator_agent_relationship import CreatorAgentRelationshipRepository
+
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    service = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=tmp_path / "runtime"), config=config(url))
+    target = tasks[2]
+    entered = asyncio.Event()
+    original_complete = repo.complete_action
+    try:
+        for prior in tasks[:2]:
+            await service.execute_task("owner", prior["task_id"])
+
+        async def before_commit(*args, **kwargs):
+            if args[0] == target["task_id"]:
+                entered.set()
+                await asyncio.Event().wait()
+            return await original_complete(*args, **kwargs)
+
+        monkeypatch.setattr(repo, "complete_action", before_commit)
+        execution = asyncio.create_task(service.execute_task("owner", target["task_id"]))
+        await asyncio.wait_for(entered.wait(), 5)
+        await service.cancel_task(target["task_id"])
+        with pytest.raises(asyncio.CancelledError):
+            await execution
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        proof = await repo.read_action_receipt("owner", target["task_id"])
+        assert proof["verified"] is True
+        if boundary == "no_contact":
+            await CreatorAgentRelationshipRepository(repo.session_factory).record_evidence(
+                owner_user_id="owner", account_id="sender", creator_uid="creator", event={"event_id": "late-refusal", "source_kind": "creator_message", "source_ref": "terminal-negative", "text": "stop", "do_not_contact": True}
+            )
+        else:
+            async with repo.session_factory() as session:
+                if boundary == "closed":
+                    (await session.get(CreatorClaimRow, ("owner", "creator"))).status = "closed"
+                    (await session.get(CreatorOutreachSequenceRow, ("owner", "creator", 1))).status = "closed"
+                elif boundary == "sender_mismatch":
+                    (await session.get(CreatorOutreachSequenceRow, ("owner", "creator", 1))).sender_account_id = "other"
+                else:
+                    receipt = await session.get(CreatorOutreachReceiptRow, ("owner", "creator", 1, proof["receipt_id"]))
+                    if boundary == "receipt_kind":
+                        receipt.kind = "dm_receipt"
+                    else:
+                        receipt.payload_json = {**receipt.payload_json, "action_group": "other-group"}
+                await session.commit()
+        with pytest.raises(ValueError):
+            await service.execute_task("owner", target["task_id"])
+        assert (await repo.read_action_task(target["task_id"]))["state"] == "failed"
+        assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] in {"gray", "closed"}
+        assert state["actions"].count("follow-button") == 1
+    finally:
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        await service.close()
 
 
 @pytest.mark.asyncio
