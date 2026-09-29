@@ -16,6 +16,7 @@ import {
   inspectNativeSocialRuntime,
   inspectPersonaCatalog,
   inspectPinnedPnpm,
+  inspectXcuitestDriverRegistration,
   runDoctor,
 } from '../scripts/doctor.mjs';
 import { createServer } from 'node:http';
@@ -116,6 +117,37 @@ test('live doctor marks public outreach catalog evidence as direct discovery', a
   const check = report.checks.find(({ name }) => name === 'public_outreach_direct_catalog');
   assert.equal(check?.ok, true);
   assert.equal(check?.evidence, 'direct-discovery');
+});
+
+test('doctor accepts a registered XCUITest driver from the Appium JSON catalog', async () => {
+  const result = await inspectXcuitestDriverRegistration({
+    operatorRoot: '/fixture/operator',
+    run: async (command, args, options) => {
+      assert.match(command, /node_modules[\\/]\.bin[\\/]appium$/u);
+      assert.deepEqual(args, ['driver', 'list', '--json']);
+      assert.equal(options.cwd, '/fixture/operator');
+      return {
+        code: 0,
+        stdout: JSON.stringify({ xcuitest: { installed: true, version: '12.13.3' } }),
+        stderr: '',
+      };
+    },
+  });
+  assert.deepEqual(result, { detail: 'xcuitest@12.13.3 registered in the Appium driver catalog' });
+});
+
+test('doctor keeps an unregistered XCUITest driver unavailable', async () => {
+  await assert.rejects(
+    inspectXcuitestDriverRegistration({
+      operatorRoot: '/fixture/operator',
+      run: async () => ({
+        code: 0,
+        stdout: JSON.stringify({ xcuitest: { installed: false } }),
+        stderr: '',
+      }),
+    }),
+    /registration_required.*npm run ios:install-driver/u,
+  );
 });
 
 test('fork inspection checks ancestry instead of requiring HEAD to equal the pin', async () => {

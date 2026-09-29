@@ -6,7 +6,7 @@
   "description": "Versioned execution shell for native DeerFlow public outreach tasks.",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "ios:install-driver": "appium driver install --source=npm appium-xcuitest-driver@12.13.3"
+    "ios:install-driver": "node scripts/register-xcuitest-driver.mjs"
   },
   "engines": {
     "node": ">=22.16"

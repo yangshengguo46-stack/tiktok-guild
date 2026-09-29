@@ -58,6 +58,7 @@ cd ops/guild-runtime
 npm ci
 cd public-outreach-operator
 npm ci --ignore-scripts
+npm run ios:install-driver
 cd ..
 npm run bootstrap
 npm run doctor
@@ -66,7 +67,10 @@ npm start
 
 `public-outreach-operator` 使用提交的 `package-lock.json` 固定 Playwright、Appium 和
 XCUITest driver 版本；`npm ci --ignore-scripts` 只安装 Node 依赖，不登录 TikTok、不启动
-浏览器或手机。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
+浏览器或手机。随后必须执行一次 `npm run ios:install-driver`，把 XCUITest 注册到 Appium
+driver catalog；命令是幂等的，已注册正确版本时会直接通过。static doctor 会检查
+`appium driver list --json`，driver 未注册时明确报告 `registration_required`，不会把 npm
+包存在误报成可用的 iPhone 通道。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
 当前开发与验收阶段，`npm start` 会临时注入 `DEER_FLOW_AUTH_DISABLED=1`，使用 DeerFlow 内置的本地 synthetic admin，因而不会被 `/setup` 的账号密码注册页拦住。账号、密码、会话和数据库实现均保留；出厂部署前移除该启动注入即可恢复正常认证。后端在 `DEER_FLOW_ENV=production` 或 `ENVIRONMENT=production` 时会忽略此开关，并在本地生效时输出明确警告，因此不要把这个本地模式暴露到共享或生产环境。
 
@@ -77,7 +81,7 @@ XCUITest driver 版本；`npm ci --ignore-scripts` 只安装 Node 依赖，不�
 TKDesk 的 `reopen_login` 是采集子后台恢复工具：经明确授权后，只在已核验的专用 Chrome 中打开固定官方后台页；保留进程、登录资料与人工标签。DeerFlow 的工具白名单已包含它，但调用前仍须验证线路和身份；它只负责名单和 `userId`，公会长消息发送归 `guild_operator`，经纪人消息发送归 `broker_operator`。
 
 `doctor` 是只读的：它验证 fork 祖先、原生 social 模块和 0026 migration、附件 manifest/六份 `1.0.1` 人格、数据库 revision、四个 MCP 配置，以及
-public outreach operator 的包元数据、Playwright/Appium/XCUITest 依赖、profile 根目录权限和已登记设备的严格 WDA 健康状态。它不启动 MCP server，
+public outreach operator 的包元数据、Playwright/Appium/XCUITest 依赖、Appium driver catalog 注册状态、profile 根目录权限和已登记设备的严格 WDA 健康状态。它不启动 MCP server，
 不创建或迁移数据库，不创建 profile 或设备目录，也不调用 TikTok 业务写工具。没有登记 iPhone
 时会明确报告 live pilot 尚未就绪；这不等同于设备已通过现场验收。
 
@@ -85,6 +89,10 @@ public outreach operator 的包元数据、Playwright/Appium/XCUITest 依赖、p
 协议、探测 public outreach operator 的 `initialize`/`tools/list`，并回报四个 MCP 和工具数量。
 fake adapter 只在内存中返回合同数据，acceptance 不启动真实浏览器、不连接 iPhone、不启动
 WebDriverAgent，也不向 TikTok 写入。
+
+`doctor --live` 会额外探测已注册的 public outreach MCP catalog，并把这项证据标为
+`direct-discovery`。Appium CLI 不可用时报告 `unavailable`，XCUITest 未注册时报告
+`registration_required`；这两种状态都不会把 iPhone 通道标成 ready。
 
 ## 恢复手册
 

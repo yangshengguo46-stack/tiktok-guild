@@ -29,8 +29,9 @@
 - `ops/guild-runtime` 现在登记第四个直接 MCP：`public_outreach_operator`；已有
   `guild_operator`、`broker_operator`、`tkdesk` allowlist 不扩权。
 - `doctor` 只读检查 operator 包、Playwright/Appium/XCUITest 依赖、profile 根目录可用性、
-  iPhone 登记和严格 WDA health contract；不会创建目录、启动浏览器/Appium 或触发 TikTok
-  写入。
+  Appium XCUITest driver catalog 注册、iPhone 登记和严格 WDA health contract；不会创建
+  目录、启动浏览器/Appium session 或触发 TikTok 写入。`npm ci --ignore-scripts` 后仍须
+  显式执行 `npm run ios:install-driver`；未注册状态是 `registration_required`，不算 ready。
 - `acceptance --static` 使用 fake DeerFlow adapter、operator `initialize/tools/list` 和离线
   Node tests，验证四个 MCP 和工具计数；不连接真实手机、不打开真实 TikTok 页面。
 - recovery 依据是 profile lease、session 过期、WDA probe、device offline、provider unknown
@@ -47,6 +48,9 @@
 - `public_outreach_direct_catalog` 只在 live doctor 中运行，并标记为 `direct-discovery`；
   static doctor 不把 provider catalog 探测当作静态证据。真实 TikTok provider、真实 iPhone
   WDA 和外部写入仍为 `unverified-external`。
+- Appium driver registration 使用 operator 内的幂等脚本和 `appium driver list --json`
+  回读；Appium CLI 不可用报告 `unavailable`，XCUITest 未注册报告
+  `registration_required`，两者都阻止把 iPhone channel 报为 ready。
 
 ## 本地运行时初始化（2026-09-24 19:08 CST）
 

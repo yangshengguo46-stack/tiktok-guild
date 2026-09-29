@@ -58,6 +58,7 @@ export const PUBLIC_OUTREACH_DOCTOR_CHECKS = Object.freeze([
   'public_outreach_config',
   'public_outreach_playwright',
   'public_outreach_appium',
+  'public_outreach_xcuitest_registration',
   'public_outreach_profile_root',
   'public_outreach_devices',
 ]);
@@ -162,6 +163,48 @@ async function inspectInstalledDependency({ operatorRoot, packageName, expectedV
     throw new Error(`${packageName}@${expectedVersion} is not installed (found ${installed ?? 'missing'})`);
   }
   return { detail: `${packageName}@${installed}` };
+}
+
+export async function inspectXcuitestDriverRegistration({ operatorRoot, run = runCommand }) {
+  const appiumBinary = path.join(
+    operatorRoot,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'appium.cmd' : 'appium',
+  );
+  let result;
+  try {
+    result = await run(appiumBinary, ['driver', 'list', '--json'], {
+      cwd: operatorRoot,
+      timeoutMs: 30_000,
+    });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error('Appium CLI is unavailable; run npm ci --ignore-scripts first');
+    }
+    throw new Error(`Appium driver registry is unavailable: ${error.message}`);
+  }
+  if (result.code !== 0) {
+    const diagnostic = result.stderr?.trim() || result.stdout?.trim() || `exit ${result.code}`;
+    throw new Error(`XCUITest driver registration unavailable: ${diagnostic.slice(0, 512)}`);
+  }
+  const text = String(result.stdout ?? '').trim();
+  const start = text.indexOf('{');
+  if (start < 0) throw new Error('XCUITest driver registration unavailable: Appium returned no JSON');
+  let catalog;
+  try {
+    catalog = JSON.parse(text.slice(start));
+  } catch {
+    throw new Error('XCUITest driver registration unavailable: Appium returned invalid JSON');
+  }
+  const driver = catalog?.xcuitest;
+  if (driver?.installed !== true) {
+    throw new Error('XCUITest driver registration_required: run npm run ios:install-driver');
+  }
+  if (driver.version !== '12.13.3') {
+    throw new Error(`XCUITest driver version mismatch: found ${driver.version ?? 'unknown'}, expected 12.13.3`);
+  }
+  return { detail: `xcuitest@${driver.version} registered in the Appium driver catalog` };
 }
 
 async function existingAncestor(target) {
@@ -589,6 +632,7 @@ function defaultAdapters(packageRoot, { gatewayUrl, environment, timeoutMs }) {
       });
       return { detail: `${appium.detail}; ${xcuitest.detail}; XCUITest driver install script is available` };
     },
+    public_outreach_xcuitest_registration: async () => inspectXcuitestDriverRegistration({ operatorRoot }),
     public_outreach_profile_root: async () => inspectWritableStateRoot(
       runtimeEnvironment.PUBLIC_OUTREACH_PROFILE_ROOT,
       'public outreach profile root',

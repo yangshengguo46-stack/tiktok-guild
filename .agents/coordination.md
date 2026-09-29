@@ -40,7 +40,8 @@ Broker Operator 继续只代表公会后台经纪人消息线路，TKDesk 继续
 ## 双通道运行门禁
 
 1. 启动前使用 `npm run doctor` 做只读检查：operator 包元数据、Playwright/Appium/XCUITest
-   依赖、profile 父目录权限、iPhone 登记状态和四个 MCP 配置。
+   依赖、Appium XCUITest driver catalog 注册、profile 父目录权限、iPhone 登记状态和四个
+   MCP 配置。`npm ci --ignore-scripts` 后必须显式执行 `npm run ios:install-driver`。
 2. CI 与 `npm run acceptance -- --static` 只允许 fake adapter、MCP `tools/list` 和离线测试；
    不启动真实浏览器、不连接 iPhone、不调用 TikTok 写工具。
 3. iPhone 只有在 macOS/Xcode、已签名 WDA、配对/在线/解锁和严格 WDA probe 全部满足时才可
@@ -50,8 +51,8 @@ Broker Operator 继续只代表公会后台经纪人消息线路，TKDesk 继续
 5. 真实 provider 仍是单账号、单设备、明确授权的现场 pilot；离线合同、catalog 连通和
    acceptance 结果不升级为 TikTok 外部完成。
 
-Task 7 review 修复已完成：四 MCP runtime validator、operator lockfile、doctor/acceptance
-证据语义和现有 ops 测试均已对齐。runtime 相关 ops 测试 97 passed，doctor static 全部
+Task 7 review 修复已完成：四 MCP runtime validator、operator lockfile、Appium driver
+registration gate、doctor/acceptance 证据语义和现有 ops 测试均已对齐。runtime 相关 ops 测试 97 passed，doctor static 全部
 通过；当前完整 ops 测试和 CLI acceptance 仍被既有 `docker/nginx/nginx.local.conf` 的
 日志文件断言阻塞，该文件不属于本批修复范围。live provider、真实设备和真实 TikTok 写入
 仍需要单独授权，不由这些静态门禁推断。
