@@ -169,11 +169,7 @@ test('lock heartbeat keeps a slow health probe exclusive past the lease interval
       await new Promise((resolve) => setTimeout(resolve, 180));
       healthFinished = true;
     }
-    return {
-      ok: true,
-      state: 'ready',
-      probe: { ready: true, device_verified: true, wda_verified: true },
-    };
+    return strictHealth();
   };
   const options = {
     rootDir,
@@ -292,6 +288,22 @@ test('missing WDA, locked, offline, and unpaired devices fail closed with explic
   })({ device: { ...device(), platform: 'darwin' } });
   assert.equal(verifiedProbe.ok, true);
   assert.equal(verifiedProbe.state, 'ready');
+});
+
+test('registry rejects an injected ok response that bypasses the strict WDA contract', async () => {
+  const devices = createDeviceRegistry({
+    rootDir: await mkdtemp(path.join(os.tmpdir(), 'ios-injected-health-')),
+    healthChecker: async () => ({ ok: true, state: 'ready' }),
+  });
+  const registered = await devices.registerDevice(device());
+  assert.equal(registered.ok, true);
+  assert.equal(registered.device.state, 'manual_required');
+  assert.equal(registered.device.health, 'wda_unavailable');
+  assert.equal((await devices.get('iphone-001')).state, 'manual_required');
+  const refreshed = await devices.health('iphone-001');
+  assert.equal(refreshed.ok, false);
+  assert.equal(refreshed.device.state, 'manual_required');
+  assert.equal(refreshed.device.health, 'wda_unavailable');
 });
 
 test('session uses accessibility locators, launches TikTok, and closes its lease', async () => {

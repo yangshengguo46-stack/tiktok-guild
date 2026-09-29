@@ -6,6 +6,7 @@ import os from 'node:os';
 import {
   IOS_DEVICE_STATES,
   createWdaHealthChecker,
+  isVerifiedWdaHealth,
   stateFromPrerequisites,
 } from './wda-health.mjs';
 
@@ -226,6 +227,38 @@ export function createDeviceRegistry({
     }
   }
 
+  async function evaluateHealth(device, driver = null) {
+    let result;
+    try {
+      result = await checker({ device, driver });
+    } catch (error) {
+      return {
+        ok: false,
+        state: 'manual_required',
+        error_code: 'wda_unavailable',
+        message: error instanceof Error ? error.message : 'WebDriverAgent health check failed.',
+      };
+    }
+    if (result?.ok === true && !isVerifiedWdaHealth(result)) {
+      return {
+        ...result,
+        ok: false,
+        state: 'manual_required',
+        error_code: 'wda_unavailable',
+        message: 'Injected health checker did not satisfy the strict WDA health contract.',
+      };
+    }
+    if (!result || typeof result !== 'object') {
+      return {
+        ok: false,
+        state: 'manual_required',
+        error_code: 'wda_unavailable',
+        message: 'Health checker returned no result.',
+      };
+    }
+    return result;
+  }
+
   async function registerDevice(input) {
     const normalized = normalizeDevice(input);
     return serialize(async () => {
@@ -238,7 +271,7 @@ export function createDeviceRegistry({
         registered_at: existing?.registered_at ?? nowIso(clock),
         updated_at: nowIso(clock),
       };
-      const health = await checker({ device: merged, driver: input.driver ?? null });
+      const health = await evaluateHealth(merged, input.driver ?? null);
       const state = health.ok ? 'ready' : health.state;
       const result = {
         ...merged,
@@ -272,10 +305,10 @@ export function createDeviceRegistry({
       const current = memory.get(deviceRef);
       if (!current) return { ok: false, error_code: 'device_not_found' };
       const merged = { ...current, ...patch, device_ref: current.device_ref };
-      const result = await checker({ device: merged, driver: patch.driver ?? null });
+      const result = await evaluateHealth(merged, patch.driver ?? null);
       const updated = {
         ...merged,
-        state: current.state === 'busy' ? 'busy' : result.ok ? 'ready' : result.state,
+        state: result.ok && current.state === 'busy' ? 'busy' : result.ok ? 'ready' : result.state,
         health: result.ok ? 'healthy' : result.error_code,
         health_detail: result,
         updated_at: nowIso(clock),
