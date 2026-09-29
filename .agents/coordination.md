@@ -83,3 +83,7 @@ registration gate、doctor/acceptance 证据语义和现有 ops 测试均已对�
   的 task 完成和关系推进同原生事务，已存 proof 的中断尝试只能作原生结算，不能再调用
   provider。根 Agent backend focused 124、operator 71 通过；限定独立复审 **CLEAN**，
   原三场景正向复现 exit 0、窄后端 20 passed。该结论仅为本地软件边界，不是 pilot 许可。
+- 2026-09-30 首次尝试打开专用 Playwright 登录窗口时，用户反馈 TikTok 显示“访问频繁”。
+  已立即关闭窗口、释放 profile 锁并禁用本地 `web:pilot_001` 资源；没有点赞、评论、
+  关注或私信。成因未确认，Web 登录试跑路径暂停，不重试或规避平台提示；此现象不算
+  已完成单账号 Web pilot。

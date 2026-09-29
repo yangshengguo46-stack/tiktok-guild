@@ -198,6 +198,8 @@ Task 8 local stress and contract parity do not complete its real pilots. Current
 
 The final scoped reviewer replayed the earlier three failure observations as positive assertions at `d4fd1444a`: stale ordinary payload update is rejected and cannot erase a dispatched fence; expiry requires manual review and refuses blind claim; FOLLOW and DM reach both the correct claim and sequence status after terminal cancellation while retaining proof and submitting to the provider only once. The independent narrow suite was 20 passed. This closes local software findings, not Step 8's external pilots or the historical nginx acceptance failure.
 
+2026-09-30 Web 登录预检：打开独立 Playwright Chromium 的 TikTok 登录页供用户手动登录后，用户反馈“访问频繁”。已立即关闭窗口、释放锁、禁用该本地资源；未执行 Task 8 的公开动作/私信。平台原因没有证据，暂停这条登录试跑路径，不反复尝试或规避提示。Step 8.3 保持 unchecked；详见既有台账与证据。
+
 ## Acceptance Criteria
 
 - A single creator claim has at most one active sender sequence, regardless of whether the sender is web or iPhone.

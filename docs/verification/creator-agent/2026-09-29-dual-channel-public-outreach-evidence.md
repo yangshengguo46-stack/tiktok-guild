@@ -312,3 +312,19 @@ only once. FOLLOW then allowed a verified DM. Independent narrow backend:
 **20 passed, 35 deselected**. This is a local software acceptance result;
 full runtime static acceptance is still not green, and no real TikTok provider
 or iPhone receipt has been verified.
+
+## 2026-09-30 Web login preflight stopped
+
+A separate headed Playwright Chromium profile opened only the TikTok login URL
+for the user's manual sign-in. The user reported the page showed “访问频繁”
+during login. No captured platform diagnostics establish whether the cause was
+the account, network, browser automation, or another factor. The script did
+not fill credentials or perform a public action or DM. The window was closed
+immediately after the report. Local verification found no profile lock and no
+associated browser process; resource `web:pilot_001` is `disabled` with
+`unknown` health. Its local profile directory remains outside Git.
+
+This observation blocks further Playwright login attempts in the present
+pilot window. It supplies no verified TikTok identity, receipt or single-
+account outreach result. The Web pilot and subsequent scale gates stay
+unchecked; no retry, proxy change or challenge workaround was attempted.

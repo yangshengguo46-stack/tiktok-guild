@@ -31,6 +31,17 @@ Gateway requires native persistence and initializes its executor in lifespan. Th
 
 ## Provider entry and current pilot blockers
 
+**Observed login stop (2026-09-30):** A user manually tried the dedicated
+headed Playwright TikTok login window and reported “访问频繁”. We closed the
+context, confirmed the browser process and profile lock were gone, and left
+the local resource disabled. The cause is unverified; a persistent profile
+does not establish that TikTok accepts this browser for login. Do not retry
+that login path, rotate network identities or work around the warning as part
+of this pilot. First reconcile the account's normal access through the
+platform's official client and review this observation before any later
+single-account Web pilot. No provider action or receipt resulted from this
+login preflight.
+
 Install the pinned operator dependencies, Playwright Chromium and, for iOS, the pinned Appium/XCUITest driver using the existing ops installation flow. These deployment steps are separate from offline tests. The production Web caller uses actual `chromium.launchPersistentContext`, navigates a new blank page to the fixed `https://www.tiktok.com/` origin, then verifies the logged-in sender before navigating to the native creator handoff. The sender must match the native account's `external_ref` by canonical handle or UID; owner and target cannot come from model parameters. Creator URL/handle comes only from the native handoff, and URL navigation is limited to HTTPS TikTok profile URLs.
 
 For iOS the private sender binding additionally supplies `appium_url`, `wda_url`, optional `bundle_id`, and a `device` object with `udid`, `platform_version` and `wda_bundle_id`. The shipped HTTP client uses W3C session creation and element commands, Appium `mobile: activateApp`, `mobile: deepLink`, `mobile: deviceInfo` and `mobile: isLocked`, and DELETE session cleanup. It accepts semantic accessibility id, XPath, iOS predicate and iOS class-chain locators consistently in single and collection reads. It proves the actual session's iOS/XCUITest capabilities and device UDID, then checks the signed WDA build bundle identifier, build time and iOS status. Config booleans cannot substitute for those responses. A failed session or health check prevents platform writes.

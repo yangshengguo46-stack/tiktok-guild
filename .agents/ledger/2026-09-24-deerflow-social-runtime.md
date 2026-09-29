@@ -313,3 +313,17 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
   提交后取消时 claim 与 sequence 分别同达 `public_touched`/`contacted`、proof 保留、
   每目标 provider 仅提交一次、FOLLOW 后 DM 可 verified。独立脚本 3 场景 exit 0，
   窄后端 **20 passed**。这是本地软件限定验收，不能升级为 live provider/device 已通过。
+
+## 2026-09-30 Web 登录预检现场反馈
+
+- 用户要求打开一个窗口手动登录 TikTok。根 Agent 使用已安装的 pinned Playwright
+  Chromium，打开单独持久 profile 的 `https://www.tiktok.com/login`；本地资源别名
+  `web:pilot_001`，只导航登录页，脚本没有填账号、提交表单或执行任何公开动作/私信。
+  用户随后反馈页面在登录时显示“访问频繁”。没有获取页面诊断、实际登录结果或平台
+  风控原因的可验证证据，不能把它归因于账号、网络或自动化指纹中的任一种。
+- 收到反馈后立即正常关闭该 Chromium context，原进程退出；核对该 profile 的锁不存在、
+  关联浏览器进程为 0、资源状态 `disabled`/`unknown`。本地 profile 目录仍保留，不在
+  Git 中；没有继续导航、反复登录、切换代理或处理验证挑战。
+- 这次仅是登录预检受阻，不是 Task 8 的单账号 Web 行为 pilot；Web provider 身份/
+  新回执映射继续 `unverified-external`。暂停 Playwright 登录路径及后续写入测试，先通过
+  用户正常使用的官方渠道核对账号状态并评估本次提示，再决定是否另行安排受控试跑。
