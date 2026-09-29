@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -115,6 +115,7 @@ class CreatorOutreachRepository:
             if value is not None:
                 _text(value, field, limit)
         async with self.session_factory() as session:
+            await self._lock_sender_owner(session, owner_user_id)
             existing = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
             if existing is not None:
                 expected = (channel, external_ref, profile_ref, device_ref, status, capabilities, last_health_at)
@@ -193,6 +194,8 @@ class CreatorOutreachRepository:
             limit = active_limit
         if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("limit must be a positive integer")
+        if active_only and limit is not None and limit > _MAX_ACTIVE_SENDER_ACCOUNTS:
+            raise ValueError("active sender batch cannot exceed 10 accounts")
         stmt = select(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id)
         if channel is not None:
             stmt = stmt.where(SenderAccountRow.channel == channel)
@@ -257,6 +260,9 @@ class CreatorOutreachRepository:
                 if actual != expected:
                     raise ValueError("action idempotency replay conflict")
                 return existing.to_dict()
+            sender = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
+            if sender is None:
+                raise ValueError("sender account must be registered before enqueueing actions")
             sequence = await session.get(CreatorOutreachSequenceRow, (owner_user_id, creator_uid, sequence_no))
             if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
                 raise ValueError("an active bound sequence is required")
@@ -304,15 +310,15 @@ class CreatorOutreachRepository:
         *,
         lease_seconds: int = 60,
         now: datetime | None = None,
-        lease_owner: str | None = None,
+        lease_owner: str,
     ) -> dict[str, Any] | None:
         task_id = _text(task_id, "task_id")
         if type(lease_seconds) is not int or lease_seconds <= 0:
             raise ValueError("lease_seconds must be a positive integer")
-        if lease_owner is not None:
-            _text(lease_owner, "lease_owner")
+        lease_owner = _text(lease_owner, "lease_owner")
         now = now or datetime.now(UTC)
         lease_until = now + timedelta(seconds=lease_seconds)
+        lease_token = uuid4().hex
         stmt = (
             update(CreatorOutreachActionTaskRow)
             .where(
@@ -331,9 +337,12 @@ class CreatorOutreachRepository:
             .values(
                 state="leased",
                 lease_until=lease_until,
+                lease_owner=lease_owner,
+                lease_token=lease_token,
                 attempt_count=CreatorOutreachActionTaskRow.attempt_count + 1,
                 updated_at=now,
             )
+            .execution_options(synchronize_session=False)
         )
         async with self.session_factory() as session:
             result = await session.execute(stmt)
@@ -352,10 +361,16 @@ class CreatorOutreachRepository:
         receipt_id: str | None = None,
         receipt: dict[str, Any] | None = None,
         now: datetime | None = None,
+        lease_owner: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         task_id = _text(task_id, "task_id")
         sender_account_id = _text(sender_account_id, "sender_account_id")
         idempotency_key = _text(idempotency_key, "idempotency_key", 255)
+        if lease_owner is None or lease_token is None:
+            raise ValueError("an active lease owner and token are required")
+        lease_owner = _text(lease_owner, "lease_owner")
+        lease_token = _text(lease_token, "lease_token")
         if receipt is not None:
             receipt = _bounded(receipt, field="receipt")
             receipt_id = receipt_id or receipt.get("receipt_id")
@@ -367,18 +382,35 @@ class CreatorOutreachRepository:
                 raise ValueError("action task does not exist")
             if row.sender_account_id != sender_account_id or row.idempotency_key != idempotency_key:
                 raise ValueError("action completion identity does not match task")
-            if row.state == "completed":
-                if row.receipt_id != receipt_id:
-                    raise ValueError("completed action replay conflict")
-                return row.to_dict()
-            if row.state not in ("pending", "leased"):
-                raise ValueError("action task is not completable")
-            row.state = "completed"
-            row.lease_until = None
-            row.receipt_id = receipt_id
-            row.error_code = None
-            row.updated_at = now
+            if row.state != "leased":
+                raise ValueError("action task has no active lease")
+            if row.lease_owner != lease_owner or row.lease_token != lease_token:
+                raise ValueError("action task lease is stale or owned by another worker")
+            stmt = (
+                update(CreatorOutreachActionTaskRow)
+                .where(
+                    CreatorOutreachActionTaskRow.task_id == task_id,
+                    CreatorOutreachActionTaskRow.state == "leased",
+                    CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                    CreatorOutreachActionTaskRow.lease_token == lease_token,
+                    CreatorOutreachActionTaskRow.lease_until > now,
+                )
+                .values(
+                    state="completed",
+                    lease_until=None,
+                    lease_owner=None,
+                    lease_token=None,
+                    receipt_id=receipt_id,
+                    error_code=None,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            result = await session.execute(stmt)
+            if not result.rowcount:
+                raise ValueError("action task lease is stale or expired")
             await session.commit()
+            await session.refresh(row)
             return row.to_dict()
 
     async def fail_action(
@@ -386,36 +418,57 @@ class CreatorOutreachRepository:
         task_id: str,
         *,
         error_code: str,
-        sender_account_id: str | None = None,
-        idempotency_key: str | None = None,
+        sender_account_id: str,
+        idempotency_key: str,
         now: datetime | None = None,
+        lease_owner: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         task_id = _text(task_id, "task_id")
         error_code = _text(error_code, "error_code", 128)
-        if sender_account_id is not None:
-            sender_account_id = _text(sender_account_id, "sender_account_id")
-        if idempotency_key is not None:
-            idempotency_key = _text(idempotency_key, "idempotency_key", 255)
+        sender_account_id = _text(sender_account_id, "sender_account_id")
+        idempotency_key = _text(idempotency_key, "idempotency_key", 255)
+        if lease_owner is None or lease_token is None:
+            raise ValueError("an active lease owner and token are required")
+        lease_owner = _text(lease_owner, "lease_owner")
+        lease_token = _text(lease_token, "lease_token")
         now = now or datetime.now(UTC)
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             if row is None:
                 raise ValueError("action task does not exist")
-            if sender_account_id is not None and row.sender_account_id != sender_account_id:
+            if row.sender_account_id != sender_account_id:
                 raise ValueError("action failure identity does not match task")
-            if idempotency_key is not None and row.idempotency_key != idempotency_key:
+            if row.idempotency_key != idempotency_key:
                 raise ValueError("action failure identity does not match task")
-            if row.state == "failed":
-                if row.error_code != error_code:
-                    raise ValueError("failed action replay conflict")
-                return row.to_dict()
-            if row.state == "completed":
-                raise ValueError("completed action cannot fail")
-            row.state = "failed"
-            row.lease_until = None
-            row.error_code = error_code
-            row.updated_at = now
+            if row.state != "leased":
+                raise ValueError("action task has no active lease")
+            if row.lease_owner != lease_owner or row.lease_token != lease_token:
+                raise ValueError("action task lease is stale or owned by another worker")
+            stmt = (
+                update(CreatorOutreachActionTaskRow)
+                .where(
+                    CreatorOutreachActionTaskRow.task_id == task_id,
+                    CreatorOutreachActionTaskRow.state == "leased",
+                    CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                    CreatorOutreachActionTaskRow.lease_token == lease_token,
+                    CreatorOutreachActionTaskRow.lease_until > now,
+                )
+                .values(
+                    state="failed",
+                    lease_until=None,
+                    lease_owner=None,
+                    lease_token=None,
+                    error_code=error_code,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            result = await session.execute(stmt)
+            if not result.rowcount:
+                raise ValueError("action task lease is stale or expired")
             await session.commit()
+            await session.refresh(row)
             return row.to_dict()
 
     async def release_expired_action_leases(self, *, now: datetime | None = None) -> int:
@@ -429,7 +482,8 @@ class CreatorOutreachRepository:
                     CreatorOutreachActionTaskRow.lease_until <= now,
                 ),
             )
-            .values(state="pending", lease_until=None, updated_at=now)
+            .values(state="pending", lease_until=None, lease_owner=None, lease_token=None, updated_at=now)
+            .execution_options(synchronize_session=False)
         )
         async with self.session_factory() as session:
             result = await session.execute(stmt)
@@ -441,6 +495,15 @@ class CreatorOutreachRepository:
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             return row.to_dict() if row is not None else None
+
+    @staticmethod
+    async def _lock_sender_owner(session: AsyncSession, owner_user_id: str) -> None:
+        """Serialize sender-capacity checks across workers for one owner."""
+        dialect = session.get_bind().dialect.name
+        if dialect == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:owner_user_id))"), {"owner_user_id": owner_user_id})
+        elif dialect == "sqlite":
+            await session.execute(text("BEGIN IMMEDIATE"))
 
     async def import_handoff(
         self,
@@ -539,6 +602,9 @@ class CreatorOutreachRepository:
         creator_uid = _text(creator_uid, "creator_uid")
         sender_account_id = _text(sender_account_id, "sender_account_id")
         async with self.session_factory() as session:
+            sender = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
+            if sender is None:
+                raise ValueError("sender account must be registered before binding a sequence")
             claim = await session.get(CreatorClaimRow, (owner_user_id, creator_uid))
             if claim is None:
                 raise ValueError("creator must be claimed before sequence binding")

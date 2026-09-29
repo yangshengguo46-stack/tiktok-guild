@@ -39,6 +39,8 @@ async def test_claim_is_global_across_sender_accounts_and_other_creators_are_all
     other = await repo.claim_creator(owner_user_id="guild", creator_uid="c-2", batch_id="b")
     assert first["claim"]["creator_uid"] == second["claim"]["creator_uid"] == "c-1"
     assert other["claim"]["creator_uid"] == "c-2"
+    await repo.register_sender_account("guild", "sender-a", "web")
+    await repo.register_sender_account("guild", "sender-b", "web")
     assert await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender-a")
     with pytest.raises(ValueError):
         await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender-b")
@@ -53,6 +55,7 @@ async def test_chat_bubble_cannot_advance_and_verified_facts_are_required(repo):
         await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="fake", next_status="public_touched")
     with pytest.raises(ValueError):
         await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="fake", next_status="contacted")
+    await repo.register_sender_account("guild", "sender", "web")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender")
     await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r1", kind="public_action_receipt", provider_ref="p1", verification_source="provider_readback", payload={"action": "like"}, verified=True)
     await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r1", next_status="public_touched")
@@ -67,6 +70,7 @@ async def test_chat_bubble_cannot_advance_and_verified_facts_are_required(repo):
 @pytest.mark.asyncio
 async def test_receipt_idempotency_and_replay_conflict(repo):
     await repo.claim_creator(owner_user_id="guild", creator_uid="c-1")
+    await repo.register_sender_account("guild", "sender", "web")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender")
     first = await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", verification_source="provider_readback", payload={"x": 1}, verified=True)
     duplicate = await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", verification_source="provider_readback", payload={"x": 1}, verified=True)
@@ -79,6 +83,8 @@ async def test_receipt_idempotency_and_replay_conflict(repo):
 @pytest.mark.asyncio
 async def test_closed_claim_cannot_rebind_sender(repo):
     await repo.claim_creator(owner_user_id="guild", creator_uid="c-1")
+    await repo.register_sender_account("guild", "sender-a", "web")
+    await repo.register_sender_account("guild", "sender-b", "web")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender-a")
     for receipt_id, kind, next_status in (
         ("like", "public_action_receipt", "public_touched"),
