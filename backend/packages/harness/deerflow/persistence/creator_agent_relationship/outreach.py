@@ -24,8 +24,8 @@ from deerflow.persistence.creator_agent_relationship.model import (
 _MAX_JSON_BYTES = 32_768
 _ALLOWED_STATES = ("gray", "public_touched", "contacted", "replied", "closed")
 _ALLOWED_TRANSITIONS = {
-    "gray": {"public_touched"},
-    "public_touched": {"contacted"},
+    "gray": {"public_touched", "replied"},
+    "public_touched": {"contacted", "replied"},
     "contacted": {"replied"},
     "replied": {"closed"},
     "closed": set(),
@@ -211,6 +211,13 @@ class CreatorOutreachRepository:
         async with self.session_factory() as session:
             rows = (await session.execute(stmt)).scalars().all()
             return [row.to_dict() for row in rows]
+
+    async def read_sender_account(self, owner_user_id: str, sender_account_id: str) -> dict[str, Any] | None:
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        sender_account_id = _text(sender_account_id, "sender_account_id")
+        async with self.session_factory() as session:
+            row = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
+            return row.to_dict() if row is not None else None
 
     async def enqueue_action(
         self,
@@ -490,11 +497,84 @@ class CreatorOutreachRepository:
             await session.commit()
             return int(result.rowcount or 0)
 
+    async def release_action_claim(
+        self,
+        task_id: str,
+        *,
+        lease_owner: str,
+        lease_token: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Return a leased action to pending after an unverified provider result."""
+        task_id = _text(task_id, "task_id")
+        lease_owner = _text(lease_owner, "lease_owner")
+        lease_token = _text(lease_token, "lease_token")
+        now = now or datetime.now(UTC)
+        stmt = (
+            update(CreatorOutreachActionTaskRow)
+            .where(
+                CreatorOutreachActionTaskRow.task_id == task_id,
+                CreatorOutreachActionTaskRow.state == "leased",
+                CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                CreatorOutreachActionTaskRow.lease_token == lease_token,
+            )
+            .values(
+                state="pending",
+                lease_until=None,
+                lease_owner=None,
+                lease_token=None,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        async with self.session_factory() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+            if not result.rowcount:
+                row = await session.get(CreatorOutreachActionTaskRow, task_id)
+                if row is None:
+                    raise ValueError("action task does not exist")
+                return row.to_dict()
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None:
+                raise ValueError("action task does not exist")
+            return row.to_dict()
+
     async def read_action_task(self, task_id: str) -> dict[str, Any] | None:
         task_id = _text(task_id, "task_id")
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             return row.to_dict() if row is not None else None
+
+    async def list_action_tasks(
+        self,
+        owner_user_id: str,
+        creator_uid: str,
+        sequence_no: int,
+        *,
+        action: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read the durable action set for one creator sequence in order."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        creator_uid = _text(creator_uid, "creator_uid")
+        if type(sequence_no) is not int or sequence_no < 1:
+            raise ValueError("sequence_no must be a positive integer")
+        if action is not None and action not in _ACTION_KINDS:
+            raise ValueError("unsupported outreach action")
+        stmt = (
+            select(CreatorOutreachActionTaskRow)
+            .where(
+                CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+                CreatorOutreachActionTaskRow.creator_uid == creator_uid,
+                CreatorOutreachActionTaskRow.sequence_no == sequence_no,
+            )
+            .order_by(CreatorOutreachActionTaskRow.created_at, CreatorOutreachActionTaskRow.task_id)
+        )
+        if action is not None:
+            stmt = stmt.where(CreatorOutreachActionTaskRow.action == action)
+        async with self.session_factory() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+            return [row.to_dict() for row in rows]
 
     @staticmethod
     async def _lock_sender_owner(session: AsyncSession, owner_user_id: str) -> None:

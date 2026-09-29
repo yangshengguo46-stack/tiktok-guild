@@ -68,6 +68,51 @@ async def test_chat_bubble_cannot_advance_and_verified_facts_are_required(repo):
 
 
 @pytest.mark.asyncio
+async def test_verified_inbound_reply_can_advance_after_public_touch_without_dm(repo):
+    await repo.claim_creator(owner_user_id="guild", creator_uid="c-1")
+    await repo.register_sender_account("guild", "sender", "web")
+    await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender")
+    await repo.record_receipt(
+        owner_user_id="guild",
+        creator_uid="c-1",
+        sequence_no=1,
+        receipt_id="public",
+        kind="public_action_receipt",
+        provider_ref="provider-public",
+        verification_source="provider_readback",
+        payload={"action": "follow", "sender_account_id": "sender"},
+        verified=True,
+    )
+    await repo.advance_state(
+        owner_user_id="guild",
+        creator_uid="c-1",
+        sequence_no=1,
+        receipt_id="public",
+        next_status="public_touched",
+    )
+    await repo.record_receipt(
+        owner_user_id="guild",
+        creator_uid="c-1",
+        sequence_no=1,
+        receipt_id="inbound",
+        kind="verified_inbound",
+        provider_ref="provider-inbound",
+        verification_source="provider_readback",
+        payload={"message_id": "m-1", "sender_account_id": "sender"},
+        verified=True,
+    )
+    await repo.advance_state(
+        owner_user_id="guild",
+        creator_uid="c-1",
+        sequence_no=1,
+        receipt_id="inbound",
+        next_status="replied",
+    )
+    read = await repo.read_model(owner_user_id="guild", creator_uid="c-1")
+    assert read["claim"]["status"] == "replied"
+
+
+@pytest.mark.asyncio
 async def test_receipt_idempotency_and_replay_conflict(repo):
     await repo.claim_creator(owner_user_id="guild", creator_uid="c-1")
     await repo.register_sender_account("guild", "sender", "web")
