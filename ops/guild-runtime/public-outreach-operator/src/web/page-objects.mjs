@@ -60,6 +60,11 @@ function locatorFor(page, selector) {
   return first(page.locator(selector));
 }
 
+function collectionFor(page, selector) {
+  if (!page || typeof page.locator !== 'function') return null;
+  return page.locator(selector);
+}
+
 async function visible(locator) {
   if (!locator) return false;
   if (typeof locator.isVisible === 'function') return Boolean(await locator.isVisible());
@@ -100,6 +105,27 @@ async function click(locator) {
   await locator.click();
 }
 
+async function receiptSnapshot(locator) {
+  if (!locator) return { count: null, identity: null, marker: null, text: '' };
+  const count = typeof locator.count === 'function' ? Number(await locator.count()) : null;
+  const latest = locator?.last ?? locator;
+  const identity = await attribute(latest, 'data-receipt-id')
+    ?? await attribute(latest, 'data-action-id')
+    ?? await attribute(latest, 'data-comment-id')
+    ?? await attribute(latest, 'data-message-id');
+  const marker = await attribute(latest, 'data-receipt-marker')
+    ?? await attribute(latest, 'data-provider-marker');
+  return { count, identity, marker, text: await text(latest) };
+}
+
+function freshReceipt(before, after, expectedText) {
+  const countAdvanced = Number.isFinite(before.count) && Number.isFinite(after.count) && after.count > before.count;
+  const identityChanged = Boolean(after.identity) && after.identity !== before.identity;
+  const markerChanged = Boolean(after.marker) && after.marker !== before.marker;
+  const expectedContent = typeof expectedText === 'string' && after.text.includes(expectedText);
+  return (countAdvanced || identityChanged || markerChanged) && expectedContent;
+}
+
 async function fill(locator, value) {
   if (!locator || typeof locator.fill !== 'function') throw new WebActionError('selector_missing', 'Required input control is missing.');
   await locator.fill(value);
@@ -112,14 +138,6 @@ async function checkGate(page, locators) {
   if (await visible(locatorFor(page, locators.challenge))) {
     throw new WebActionError('challenge', 'The provider presented a challenge requiring manual takeover.');
   }
-}
-
-async function receiptVisible(page, selector, expectedText = null) {
-  const locator = locatorFor(page, selector);
-  if (!await visible(locator)) return false;
-  if (!expectedText) return true;
-  const content = (await text(locator)).trim();
-  return content.includes(expectedText);
 }
 
 export class TikTokWebPageObjects {
@@ -200,12 +218,14 @@ export class TikTokWebPageObjects {
     await checkGate(this.page, this.locators);
     const control = locatorFor(this.page, this.locators.likeButton);
     if (!await visible(control)) throw new WebActionError('selector_missing', 'Like control is missing.');
-    if (!await isActive(control)) {
-      await click(control);
-      if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
+    const beforeActive = await isActive(control);
+    if (beforeActive) throw new WebActionError('already_state', 'Like was already active before this action.');
+    await click(control);
+    if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
+    if (beforeActive || !await isActive(control)) {
+      throw new WebActionError('unknown', 'Like click did not produce a verified state transition.');
     }
-    if (!await isActive(control)) throw new WebActionError('unknown', 'Like click did not produce a verified active state.');
-    return { action: 'like', evidence: `${LOCATOR_VERSION}:like`, state: 'active' };
+    return { action: 'like', evidence: `${LOCATOR_VERSION}:like-transition`, state: 'active', transition: { before: false, after: true } };
   }
 
   async comment(commentText) {
@@ -215,25 +235,30 @@ export class TikTokWebPageObjects {
     await checkGate(this.page, this.locators);
     const input = locatorFor(this.page, this.locators.commentInput);
     const submit = locatorFor(this.page, this.locators.commentSubmit);
+    const receipt = collectionFor(this.page, this.locators.commentReceipt);
+    const before = await receiptSnapshot(receipt);
     await fill(input, commentText);
     await click(submit);
     if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
-    if (!await receiptVisible(this.page, this.locators.commentReceipt, commentText)) {
-      throw new WebActionError('unknown', 'Comment was not verified by a provider read-back.');
+    const after = await receiptSnapshot(receipt);
+    if (!freshReceipt(before, after, commentText)) {
+      throw new WebActionError('unknown', 'Comment did not produce a fresh provider receipt.');
     }
-    return { action: 'comment', evidence: `${LOCATOR_VERSION}:comment`, state: 'visible', text: commentText };
+    return { action: 'comment', evidence: `${LOCATOR_VERSION}:comment-receipt`, state: 'visible', text: commentText };
   }
 
   async follow() {
     await checkGate(this.page, this.locators);
     const control = locatorFor(this.page, this.locators.followButton);
     if (!await visible(control)) throw new WebActionError('selector_missing', 'Follow control is missing.');
-    if (!await isActive(control)) {
-      await click(control);
-      if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
+    const beforeActive = await isActive(control);
+    if (beforeActive) throw new WebActionError('already_state', 'Follow was already active before this action.');
+    await click(control);
+    if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
+    if (beforeActive || !await isActive(control)) {
+      throw new WebActionError('unknown', 'Follow click did not produce a verified state transition.');
     }
-    if (!await isActive(control)) throw new WebActionError('unknown', 'Follow click did not produce a verified active state.');
-    return { action: 'follow', evidence: `${LOCATOR_VERSION}:follow`, state: 'active' };
+    return { action: 'follow', evidence: `${LOCATOR_VERSION}:follow-transition`, state: 'active', transition: { before: false, after: true } };
   }
 
   async message(messageText) {
@@ -243,13 +268,16 @@ export class TikTokWebPageObjects {
     await checkGate(this.page, this.locators);
     const input = locatorFor(this.page, this.locators.messageInput);
     const submit = locatorFor(this.page, this.locators.messageSubmit);
+    const receipt = collectionFor(this.page, this.locators.messageReceipt);
+    const before = await receiptSnapshot(receipt);
     await fill(input, messageText);
     await click(submit);
     if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
-    if (!await receiptVisible(this.page, this.locators.messageReceipt, messageText)) {
-      throw new WebActionError('unknown', 'Message was not verified by a provider read-back.');
+    const after = await receiptSnapshot(receipt);
+    if (!freshReceipt(before, after, messageText)) {
+      throw new WebActionError('unknown', 'Message did not produce a fresh provider receipt.');
     }
-    return { action: 'message', evidence: `${LOCATOR_VERSION}:message`, state: 'visible', text: messageText };
+    return { action: 'message', evidence: `${LOCATOR_VERSION}:message-receipt`, state: 'visible', text: messageText };
   }
 
   async run(action, payload = {}) {

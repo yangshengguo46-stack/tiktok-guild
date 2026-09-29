@@ -32,6 +32,10 @@ class FakeLocator {
     return this.text;
   }
 
+  async count() {
+    return this.countValue ?? (this.visible ? 1 : 0);
+  }
+
   async click() {
     await this.onClick?.(this);
   }
@@ -51,6 +55,8 @@ class FakePage {
     creatorUid = 'creator_001',
     creatorHandle = 'creator',
     searchable = false,
+    existingComment = null,
+    existingMessage = null,
   } = {}) {
     this.controls = new Map();
     this.controls.set(FAKE_LOCATORS.loginRequired, new FakeLocator({ visible: login }));
@@ -67,14 +73,21 @@ class FakePage {
       attributes: { 'aria-pressed': 'false' },
       onClick: async (locator) => { locator.attributes['aria-pressed'] = 'true'; },
     }));
-    const commentReceipt = new FakeLocator();
+    const commentReceipt = new FakeLocator({
+      visible: existingComment !== null,
+      text: existingComment ?? '',
+      attributes: existingComment !== null ? { 'data-receipt-id': 'old-comment' } : {},
+    });
     this.controls.set(FAKE_LOCATORS.commentReceipt, commentReceipt);
     this.controls.set(FAKE_LOCATORS.commentInput, new FakeLocator({ visible: true }));
     this.controls.set(FAKE_LOCATORS.commentSubmit, new FakeLocator({
       visible: true,
       onClick: async () => {
+        const previousCount = commentReceipt.countValue ?? (commentReceipt.visible ? 1 : 0);
         commentReceipt.visible = true;
         commentReceipt.text = this.controls.get(FAKE_LOCATORS.commentInput).value;
+        commentReceipt.countValue = previousCount + 1;
+        commentReceipt.attributes['data-receipt-id'] = `comment-${commentReceipt.countValue}`;
       },
     }));
     this.controls.set(FAKE_LOCATORS.followButton, new FakeLocator({
@@ -82,14 +95,21 @@ class FakePage {
       attributes: { 'aria-pressed': 'false' },
       onClick: async (locator) => { locator.attributes['aria-pressed'] = 'true'; },
     }));
-    const messageReceipt = new FakeLocator();
+    const messageReceipt = new FakeLocator({
+      visible: existingMessage !== null,
+      text: existingMessage ?? '',
+      attributes: existingMessage !== null ? { 'data-receipt-id': 'old-message' } : {},
+    });
     this.controls.set(FAKE_LOCATORS.messageReceipt, messageReceipt);
     this.controls.set(FAKE_LOCATORS.messageInput, new FakeLocator({ visible: true }));
     this.controls.set(FAKE_LOCATORS.messageSubmit, new FakeLocator({
       visible: true,
       onClick: async () => {
+        const previousCount = messageReceipt.countValue ?? (messageReceipt.visible ? 1 : 0);
         messageReceipt.visible = true;
         messageReceipt.text = this.controls.get(FAKE_LOCATORS.messageInput).value;
+        messageReceipt.countValue = previousCount + 1;
+        messageReceipt.attributes['data-receipt-id'] = `message-${messageReceipt.countValue}`;
       },
     }));
   }
@@ -151,6 +171,57 @@ test('message is optional and still requires message read-back', async () => {
   assert.equal(result.verified, true);
   assert.equal(result.receipt_payload.receipt_type, 'dm_receipt');
   assert.equal(result.receipt_payload.action, 'message');
+});
+
+test('stale existing comment or message text without a fresh marker is unknown', async () => {
+  const commentPage = new FakePage({ existingComment: 'already posted' });
+  commentPage.controls.get(FAKE_LOCATORS.commentReceipt).count = undefined;
+  commentPage.controls.get(FAKE_LOCATORS.commentSubmit).onClick = async () => {};
+  const comment = await executeWebAction({
+    account: account(commentPage),
+    creator: { creator_uid: 'creator_001' },
+    action: 'comment',
+    payload: { comment: 'already posted', testOnly: true },
+  });
+  assert.equal(comment.verified, false);
+  assert.equal(comment.error_code, 'unknown');
+  assert.equal(comment.manual_takeover.status, 'manual_required');
+
+  const messagePage = new FakePage({ existingMessage: 'already sent' });
+  messagePage.controls.get(FAKE_LOCATORS.messageReceipt).count = undefined;
+  messagePage.controls.get(FAKE_LOCATORS.messageSubmit).onClick = async () => {};
+  const message = await executeWebAction({
+    account: account(messagePage),
+    creator: { creator_uid: 'creator_001' },
+    action: 'message',
+    payload: { message: 'already sent', testOnly: true },
+  });
+  assert.equal(message.verified, false);
+  assert.equal(message.error_code, 'unknown');
+});
+
+test('pre-existing like and follow state returns bounded already_state', async () => {
+  const likePage = new FakePage();
+  likePage.controls.get(FAKE_LOCATORS.likeButton).attributes['aria-pressed'] = 'true';
+  const like = await executeWebAction({
+    account: account(likePage),
+    creator: { creator_uid: 'creator_001' },
+    action: 'like',
+    payload: { testOnly: true },
+  });
+  assert.equal(like.verified, false);
+  assert.equal(like.error_code, 'already_state');
+
+  const followPage = new FakePage();
+  followPage.controls.get(FAKE_LOCATORS.followButton).attributes['aria-pressed'] = 'true';
+  const follow = await executeWebAction({
+    account: account(followPage),
+    creator: { creator_uid: 'creator_001' },
+    action: 'follow',
+    payload: { testOnly: true },
+  });
+  assert.equal(follow.verified, false);
+  assert.equal(follow.error_code, 'already_state');
 });
 
 test('login and challenge states pause the account and request manual takeover', async () => {
@@ -311,7 +382,10 @@ test('pool lease manual takeover persists paused/manual-required state in the re
   assert.equal(result.manual_takeover.task.status, 'manual_required');
   const health = await pool.health('persisted');
   assert.equal(health.account.status, 'paused');
-  assert.equal(health.account.manual_takeover.task_id, result.manual_takeover.task.task_id);
+  assert.equal(health.account.manual_takeover.status, 'manual_required');
+  assert.equal(health.account.manual_takeover.error_code, 'login_required');
+  assert.equal(health.account.manual_takeover.task_id, undefined);
+  assert.equal(result.manual_takeover.task.task_id, 'manual-takeover:persisted:login_required');
   await pool.close();
 });
 

@@ -340,10 +340,16 @@ export function createProfileRegistry({
       created_at: recordedAt,
     };
     if (!account) return task;
+    const persistedState = {
+      status: 'manual_required',
+      error_code: errorCode,
+      reason: details.message ?? errorCode,
+      recorded_at: recordedAt,
+    };
     const updated = {
       ...account,
       status: 'paused',
-      manual_takeover: task,
+      manual_takeover: persistedState,
       updated_at: recordedAt,
     };
     await writeFile(metadataPath(root, senderAccountId), `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
