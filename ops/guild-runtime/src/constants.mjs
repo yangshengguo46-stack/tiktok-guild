@@ -6,8 +6,14 @@ export const GUILD_EXTENSIONS_CONFIG = 'extensions_config.guild.json';
 export const GUILD_OPERATOR_ROOT = '/Users/yangyucheng/plugins/tiktok-live-guild-operator';
 export const BROKER_OPERATOR_ROOT = '/Users/yangyucheng/plugins/tiktok-live-broker-operator';
 export const TKDESK_ROOT = '/Users/yangyucheng/plugins/tkdesk-agent';
+export const PUBLIC_OUTREACH_OPERATOR_ROOT = '/Users/yangyucheng/Documents/ChatGPT/Tiktok公会/ops/guild-runtime/public-outreach-operator';
 
-export const MCP_SERVER_NAMES = Object.freeze(['guild_operator', 'broker_operator', 'tkdesk']);
+export const MCP_SERVER_NAMES = Object.freeze([
+  'guild_operator',
+  'broker_operator',
+  'tkdesk',
+  'public_outreach_operator',
+]);
 export const GUILD_TOOL_NAMES = Object.freeze([
   'guild_workspace',
   'guild_creators',
@@ -58,4 +64,8 @@ export const TKDESK_TOOL_NAMES = Object.freeze([
   'prepare_handoff',
   'commit_handoff',
   'audit_events',
+]);
+export const PUBLIC_OUTREACH_TOOL_NAMES = Object.freeze([
+  'public_outreach_accounts',
+  'public_outreach_tasks',
 ]);

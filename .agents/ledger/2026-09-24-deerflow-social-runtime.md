@@ -36,13 +36,25 @@
 - recovery 依据是 profile lease、session 过期、WDA probe、device offline、provider unknown
   和 manual takeover 的明确错误码；未知结果保持 `manual_required`/`unknown`，不能自动重试
   或推进 `public_touched/contacted`。
+- Task 7 review 修复验证（2026-09-29）：runtime 相关 `ops/guild-runtime npm test` 97 passed；
+  `npm run doctor -- --static` 全部通过；acceptance 的 runtime contract 返回
+  `ok: true`，4 MCP、Guild 9 tools、Broker 2 tools、TKDesk 34 tools、public outreach
+  2 tool families；CLI acceptance 被既有 nginx 日志文件断言阻塞。operator
+  `npm ci --ignore-scripts && npm test` 43 passed。
+- 完整 ops 测试的唯一剩余失败是既有 `docker/nginx/nginx.local.conf` 与
+  `test/nginx-log.test.mjs` 的日志输出合同不一致；该 Docker 配置不属于双通道 runtime
+  修复范围，不能把它记为 public outreach 回归。
+- `public_outreach_direct_catalog` 只在 live doctor 中运行，并标记为 `direct-discovery`；
+  static doctor 不把 provider catalog 探测当作静态证据。真实 TikTok provider、真实 iPhone
+  WDA 和外部写入仍为 `unverified-external`。
 
 ## 本地运行时初始化（2026-09-24 19:08 CST）
 
 - 已按唯一入口顺序重新执行 `npm run bootstrap -> npm run doctor -> npm run acceptance`；bootstrap
   幂等完成，固定上游仍为 `769589e8daee14c2587a634b6b43bd96471a41a1`，固定 pnpm 为 `10.26.2`。
-- `doctor`：15/15；`acceptance`：`ok: true`，2 个 MCP、Guild 8 tools、TKDesk 28 tools，
-  `nativeGuildLead: true`。
+- 历史现场基线（2026-09-24）：`doctor` 15/15；`acceptance` `ok: true`，当时为 2 个 MCP、
+  Guild 8 tools、TKDesk 28 tools。双通道接入后的当前静态配置是 4 个 MCP、Guild 9 tools、
+  Broker 2 tools、TKDesk 34 tools、public outreach 2 tool families。
 - 原生数据库当前为 `0026_social_runtime`；关系、事件、人格 profile、绑定和出站表均为 0 行，
   这是首次初始化的空状态，不代表任何主播事实或平台动作。
 - 原生 `SOUL.md` 保持已核对的 Social Kernel（SHA-256：

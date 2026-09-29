@@ -56,12 +56,17 @@ WebDriverAgent、已配对且在线的 iPhone，以及返回 `ready=true`、`dev
 cd /Users/yangyucheng/Documents/ChatGPT/Tiktok公会
 cd ops/guild-runtime
 npm ci
+cd public-outreach-operator
+npm ci --ignore-scripts
+cd ..
 npm run bootstrap
 npm run doctor
 npm start
 ```
 
-`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
+`public-outreach-operator` 使用提交的 `package-lock.json` 固定 Playwright、Appium 和
+XCUITest driver 版本；`npm ci --ignore-scripts` 只安装 Node 依赖，不登录 TikTok、不启动
+浏览器或手机。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
 当前开发与验收阶段，`npm start` 会临时注入 `DEER_FLOW_AUTH_DISABLED=1`，使用 DeerFlow 内置的本地 synthetic admin，因而不会被 `/setup` 的账号密码注册页拦住。账号、密码、会话和数据库实现均保留；出厂部署前移除该启动注入即可恢复正常认证。后端在 `DEER_FLOW_ENV=production` 或 `ENVIRONMENT=production` 时会忽略此开关，并在本地生效时输出明确警告，因此不要把这个本地模式暴露到共享或生产环境。
 
@@ -126,10 +131,10 @@ provider diagnostic 和 manual takeover 原因，由人工确认平台状态后�
 
 ## 第一个安全提示
 
-> 作为默认 Lead，请使用 Guild Operator 和 TKDesk 的当前事实，说明每项事实的来源、时间、作用域和缺失数据。发消息必须绑定一个已核验的发送 profile、一个精确主播 `userId` 和明确内容，并保留平台回执与会话回读；不要把草稿或 MCP 连通写成已发送。关注、评论、送礼、发布仍不在此运行时能力内；后台分组、经纪人和邀约卡写入必须逐步取得用户授权，并保留平台回执与读回证据。
+> 作为默认 Lead，请使用 Guild Operator 和 TKDesk 的当前事实，说明每项事实的来源、时间、作用域和缺失数据。发消息、点赞、评论和关注必须绑定已核验的 sender、精确主播 `userId` 和明确 action，并保留平台回执与读回证据；不要把草稿、聊天气泡、按钮点击或 MCP 连通写成已完成。公开建联由 `public_outreach_operator` 按 `like -> comment -> follow -> message` 顺序执行；后台分组、经纪人和邀约卡写入必须逐步取得用户授权，并保留平台回执与读回证据。
 
 `backend/.deer-flow/` 是原生本机状态目录，不纳入 Git。已核对的当前能力与缺口见 [CreatorAgent 能力矩阵](../../docs/verification/creator-agent/capability-matrix.md)。
 
-TKDesk 采集启动先执行 `initialize_collection_backstage`（邀请查询界面一次随机字母测试，人工验证、共享额度、无真实邀约）和 `prepare_discovery_live`（专用发现窗口进入 LIVE 后暂停并延迟复查）。两项 `ready: true` 后启动采集；详见插件对应 skill。工具目录与启用清单为33项。
+TKDesk 采集启动先执行 `initialize_collection_backstage`（邀请查询界面一次随机字母测试，人工验证、共享额度、无真实邀约）和 `prepare_discovery_live`（专用发现窗口进入 LIVE 后暂停并延迟复查）。两项 `ready: true` 后启动采集；详见插件对应 skill。当前 TKDesk 工具目录与启用清单为 34 项。
 
 当前部署关闭 TikHub 榜单来源，使用原生榜单。新增的 `creator_research_status` 与 `research_candidate` 提供可选公开主页/近期作品研究，均由现有 TKDesk daemon 执行。默认缓存读取、明确授权后最多两次固定付费查询；每日请求预算、缓存和不重试未知请求的记录保存在 TKDesk 现有 SQLite 中。没有 TikHub 也能正常采集、核验和沟通。密钥仅在本机私有 provider 配置中，不进入 DeerFlow MCP 配置。

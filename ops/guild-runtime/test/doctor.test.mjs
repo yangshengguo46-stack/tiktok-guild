@@ -96,6 +96,28 @@ test('live doctor rejects the running configuration when broker is missing', asy
   assert.match(report.checks.find(({ name }) => name === 'gateway_mcp_config')?.detail ?? '', /missing.*broker_operator/iu);
 });
 
+test('live doctor marks public outreach catalog evidence as direct discovery', async () => {
+  const adapters = Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, async () => ({ detail: 'static fixture' })]));
+  for (const name of [
+    'public_outreach_operator_root',
+    'public_outreach_config',
+    'public_outreach_playwright',
+    'public_outreach_appium',
+    'public_outreach_profile_root',
+    'public_outreach_devices',
+    'public_outreach_direct_catalog',
+    'guild_direct_catalog',
+    'broker_direct_catalog',
+    'tkdesk_direct_catalog',
+  ]) {
+    adapters[name] = async () => ({ detail: 'direct fixture' });
+  }
+  const report = await runDoctor({ packageRoot: FORK_ROOT, live: true, adapters });
+  const check = report.checks.find(({ name }) => name === 'public_outreach_direct_catalog');
+  assert.equal(check?.ok, true);
+  assert.equal(check?.evidence, 'direct-discovery');
+});
+
 test('fork inspection checks ancestry instead of requiring HEAD to equal the pin', async () => {
   const calls = [];
   const result = await inspectForkAncestor({

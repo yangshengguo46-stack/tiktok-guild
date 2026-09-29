@@ -49,3 +49,9 @@ Broker Operator 继续只代表公会后台经纪人消息线路，TKDesk 继续
    进入人工接管；恢复后只重试未验证 action，不能重复 verified action。
 5. 真实 provider 仍是单账号、单设备、明确授权的现场 pilot；离线合同、catalog 连通和
    acceptance 结果不升级为 TikTok 外部完成。
+
+Task 7 review 修复已完成：四 MCP runtime validator、operator lockfile、doctor/acceptance
+证据语义和现有 ops 测试均已对齐。runtime 相关 ops 测试 97 passed，doctor static 全部
+通过；当前完整 ops 测试和 CLI acceptance 仍被既有 `docker/nginx/nginx.local.conf` 的
+日志文件断言阻塞，该文件不属于本批修复范围。live provider、真实设备和真实 TikTok 写入
+仍需要单独授权，不由这些静态门禁推断。

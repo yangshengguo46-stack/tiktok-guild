@@ -11,7 +11,8 @@ const OPS_ROOT = path.join(FORK_ROOT, 'ops', 'guild-runtime');
 function validExists(target) {
   return target === '/Users/yangyucheng/plugins/tiktok-live-guild-operator/src/server.mjs'
     || target === '/Users/yangyucheng/plugins/tiktok-live-broker-operator/src/server.mjs'
-    || target === '/Users/yangyucheng/plugins/tkdesk-agent/scripts/launch_mcp';
+    || target === '/Users/yangyucheng/plugins/tkdesk-agent/scripts/launch_mcp'
+    || target === '/Users/yangyucheng/Documents/ChatGPT/Tiktok公会/ops/guild-runtime/public-outreach-operator/src/server.mjs';
 }
 
 test('runtime config resolves the DeerFlow fork root and ops-owned state', async () => {
@@ -33,7 +34,12 @@ test('accepts the direct guild, broker, and collection runtime without patch or 
   const result = validateRuntimeConfig(config, { exists: validExists, nodeVersion: '22.16.0' });
 
   assert.equal(result.valid, true);
-  assert.deepEqual(Object.keys(result.config.extensions.mcpServers), ['guild_operator', 'broker_operator', 'tkdesk']);
+  assert.deepEqual(Object.keys(result.config.extensions.mcpServers), [
+    'guild_operator',
+    'broker_operator',
+    'tkdesk',
+    'public_outreach_operator',
+  ]);
   assert.equal(Object.hasOwn(result.config.manifest, 'product_patches'), false);
   assert.equal(Object.hasOwn(result.config.manifest, 'runtime_root'), false);
 });
@@ -76,7 +82,7 @@ test('rejects an extra MCP server or an approved-server write tool', async () =>
 });
 
 test('rejects an approved MCP server when it is disabled', async () => {
-  for (const serverName of ['guild_operator', 'broker_operator', 'tkdesk']) {
+  for (const serverName of ['guild_operator', 'broker_operator', 'tkdesk', 'public_outreach_operator']) {
     const config = await loadRuntimeConfig({ packageRoot: FORK_ROOT });
     config.extensions.mcpServers[serverName].enabled = false;
     assert.throws(

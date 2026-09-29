@@ -10,6 +10,8 @@ import {
   GUILD_EXTENSIONS_CONFIG,
   GUILD_TOOL_NAMES,
   MCP_SERVER_NAMES,
+  PUBLIC_OUTREACH_OPERATOR_ROOT,
+  PUBLIC_OUTREACH_TOOL_NAMES,
   TKDESK_ROOT,
   TKDESK_TOOL_NAMES,
 } from './constants.mjs';
@@ -100,9 +102,17 @@ export function validateRuntimeConfig(config, { exists, nodeVersion }) {
     throw new Error('TKDesk command must point directly to the existing plugin launcher.');
   }
   exactValues(tkdesk.enabled_tools, TKDESK_TOOL_NAMES, 'TKDesk tools');
-  if (guild.enabled !== true || broker.enabled !== true || tkdesk.enabled !== true
-    || !guild.required || !broker.required || !tkdesk.required
-    || guild.tool_name_prefix !== false || broker.tool_name_prefix !== false || tkdesk.tool_name_prefix !== false) {
+  const publicOutreach = servers.public_outreach_operator;
+  if (publicOutreach.command !== 'node'
+    || publicOutreach.cwd !== PUBLIC_OUTREACH_OPERATOR_ROOT
+    || publicOutreach.args?.[0] !== `${PUBLIC_OUTREACH_OPERATOR_ROOT}/src/server.mjs`) {
+    throw new Error('Public outreach operator command must point directly to the versioned operator shell.');
+  }
+  exactValues(publicOutreach.enabled_tools, PUBLIC_OUTREACH_TOOL_NAMES, 'Public outreach tools');
+  if (guild.enabled !== true || broker.enabled !== true || tkdesk.enabled !== true || publicOutreach.enabled !== true
+    || !guild.required || !broker.required || !tkdesk.required || !publicOutreach.required
+    || guild.tool_name_prefix !== false || broker.tool_name_prefix !== false
+    || tkdesk.tool_name_prefix !== false || publicOutreach.tool_name_prefix !== false) {
     throw new Error('Approved MCP servers must be enabled, required, and expose stable unprefixed tool names.');
   }
   const forbidden = [...guild.enabled_tools, ...broker.enabled_tools, ...tkdesk.enabled_tools]
@@ -111,7 +121,7 @@ export function validateRuntimeConfig(config, { exists, nodeVersion }) {
     throw new Error(`Approved MCP allowlists contain forbidden outreach tools: ${forbidden.join(', ')}`);
   }
 
-  for (const executable of [guild.args[0], broker.args[0], tkdesk.command]) {
+  for (const executable of [guild.args[0], broker.args[0], tkdesk.command, publicOutreach.args[0]]) {
     if (!exists(executable)) throw new Error(`Required plugin executable does not exist: ${executable}`);
   }
 

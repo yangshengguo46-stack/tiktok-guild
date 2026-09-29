@@ -47,7 +47,11 @@ export const REQUIRED_DOCTOR_CHECKS = Object.freeze([
   'tkdesk_mcp',
 ]);
 export const LIVE_DOCTOR_CHECKS = Object.freeze([
-  'gateway_mcp_config', 'guild_direct_catalog', 'broker_direct_catalog', 'tkdesk_direct_catalog',
+  'gateway_mcp_config',
+  'guild_direct_catalog',
+  'broker_direct_catalog',
+  'tkdesk_direct_catalog',
+  'public_outreach_direct_catalog',
 ]);
 export const PUBLIC_OUTREACH_DOCTOR_CHECKS = Object.freeze([
   'public_outreach_operator_root',
@@ -618,7 +622,9 @@ export async function runDoctor({ packageRoot, adapters = {}, live = false,
   const names = [
     ...REQUIRED_DOCTOR_CHECKS,
     ...(includePublicOutreach ? PUBLIC_OUTREACH_DOCTOR_CHECKS : []),
-    ...(live ? [...LIVE_DOCTOR_CHECKS, ...(includePublicOutreach ? ['public_outreach_direct_catalog'] : [])] : []),
+    ...(live
+      ? LIVE_DOCTOR_CHECKS.filter((name) => includePublicOutreach || name !== 'public_outreach_direct_catalog')
+      : []),
   ];
   for (const name of names) {
     const evidence = name === 'gateway_mcp_config' ? 'gateway-config'

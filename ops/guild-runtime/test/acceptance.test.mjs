@@ -39,7 +39,7 @@ test('the package leaves the active skills path to the start environment', async
   assert.equal(Object.hasOwn(config.skills, 'path'), false);
 });
 
-test('the native runtime has one Lead, three direct MCPs, and no layered runtime', async () => {
+test('the native runtime has one Lead, four direct MCPs, and no layered runtime', async () => {
   const extensions = JSON.parse(await readFile(path.join(OPS_ROOT, 'config', 'extensions_config.guild.json'), 'utf8'));
   const configText = await readFile(path.join(OPS_ROOT, 'config', 'config.yaml'), 'utf8');
   const manifestText = await readFile(path.join(OPS_ROOT, 'config', 'local-manifest.json'), 'utf8');
@@ -52,7 +52,12 @@ test('the native runtime has one Lead, three direct MCPs, and no layered runtime
   assert.equal('cases_path' in manifest, false);
   assert.equal('product_patches' in manifest, false);
   assert.equal('runtime_root' in manifest, false);
-  assert.deepEqual(Object.keys(extensions.mcpServers), ['guild_operator', 'broker_operator', 'tkdesk']);
+  assert.deepEqual(Object.keys(extensions.mcpServers), [
+    'guild_operator',
+    'broker_operator',
+    'tkdesk',
+    'public_outreach_operator',
+  ]);
   assert.deepEqual(extensions.mcpServers.guild_operator.enabled_tools, [
     'guild_workspace',
     'guild_creators',
@@ -67,6 +72,10 @@ test('the native runtime has one Lead, three direct MCPs, and no layered runtime
   assert.deepEqual(extensions.mcpServers.broker_operator.enabled_tools, [
     'broker_workspace',
     'broker_messaging',
+  ]);
+  assert.deepEqual(extensions.mcpServers.public_outreach_operator.enabled_tools, [
+    'public_outreach_accounts',
+    'public_outreach_tasks',
   ]);
   const tkdeskCatalog = JSON.parse(await readFile(path.join(OPS_ROOT, 'fixtures', 'mcp', 'tkdesk-tools.json'), 'utf8'));
   assert.deepEqual(extensions.mcpServers.tkdesk.enabled_tools, tkdeskCatalog.tools.map(({ name }) => name));
@@ -120,10 +129,13 @@ test('offline acceptance composes config, doctor, and catalog evidence with a cu
 
   assert.deepEqual(report, {
     ok: true,
-    mcpServers: 3,
+    mcpServers: 4,
     guildTools: 9,
     brokerTools: broker.tools.length,
     tkdeskTools: tkdesk.tools.length,
+    publicOutreachTools: 2,
+    publicOutreachCatalog: 2,
+    publicOutreachFakeAdapter: 'verified-no-provider-writes',
     catalogEvidence: 'static-approved-snapshots',
     nativeGuildLead: true,
   });
