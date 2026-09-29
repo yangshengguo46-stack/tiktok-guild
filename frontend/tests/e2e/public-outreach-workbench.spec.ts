@@ -76,6 +76,68 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
       },
     }),
   );
+  await page.route(
+    "**/api/public-outreach/tasks/task-like-001/retry",
+    (route) =>
+      route.fulfill({
+        json: {
+          task_id: "task-like-001",
+          creator_uid: "creator-001",
+          sequence_no: 1,
+          sender_account_id: "web:ordinary-001",
+          action: "like",
+          current_action: "like",
+          state: "pending",
+          receipt_state: "verified",
+          attempt_count: 1,
+          receipts: [],
+        },
+      }),
+  );
+  await page.route(
+    "**/api/public-outreach/tasks/task-like-001/takeover",
+    (route) =>
+      route.fulfill({
+        json: {
+          task_id: "task-like-001",
+          creator_uid: "creator-001",
+          sequence_no: 1,
+          sender_account_id: "web:ordinary-001",
+          action: "like",
+          current_action: "like",
+          state: "failed",
+          receipt_state: "unavailable",
+          attempt_count: 1,
+          receipts: [],
+        },
+      }),
+  );
+  await page.route(
+    "**/api/public-outreach/tasks/task-like-001/unknown",
+    (route) =>
+      route.fulfill({
+        json: {
+          task_id: "task-like-001",
+          creator_uid: "creator-001",
+          sequence_no: 1,
+          sender_account_id: "web:ordinary-001",
+          action: "like",
+          current_action: "like",
+          state: "pending",
+          receipt_state: "unknown",
+          attempt_count: 1,
+          receipts: [],
+        },
+      }),
+  );
+  await page.route("**/api/public-outreach/sequences/close", (route) =>
+    route.fulfill({
+      json: {
+        claim: { claim: { status: "closed" } },
+        receipt: { receipt_id: "closure-001", verified: true },
+      },
+    }),
+  );
 
   await page.goto("/workspace/guild");
 
@@ -92,4 +154,8 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
 
   await expect(page.getByText("public_action_receipt")).toBeVisible();
   await expect(page.getByText("provider_readback")).toBeVisible();
+  await page.getByTestId("outreach-retry").click();
+  await page.getByTestId("outreach-takeover").click();
+  await page.getByTestId("outreach-unknown").click();
+  await page.getByTestId("outreach-close-sequence").click();
 });

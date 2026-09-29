@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -326,38 +327,47 @@ class CreatorOutreachRepository:
         now = now or datetime.now(UTC)
         lease_until = now + timedelta(seconds=lease_seconds)
         lease_token = uuid4().hex
-        stmt = (
-            update(CreatorOutreachActionTaskRow)
-            .where(
-                CreatorOutreachActionTaskRow.task_id == task_id,
-                or_(
-                    CreatorOutreachActionTaskRow.state == "pending",
-                    and_(
-                        CreatorOutreachActionTaskRow.state == "leased",
-                        or_(
-                            CreatorOutreachActionTaskRow.lease_until.is_(None),
-                            CreatorOutreachActionTaskRow.lease_until <= now,
+        async with self.session_factory() as session:
+            task = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if task is None:
+                return None
+            sequence = await session.get(
+                CreatorOutreachSequenceRow,
+                (task.owner_user_id, task.creator_uid, task.sequence_no),
+            )
+            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
+                return None
+            stmt = (
+                update(CreatorOutreachActionTaskRow)
+                .where(
+                    CreatorOutreachActionTaskRow.task_id == task_id,
+                    or_(
+                        CreatorOutreachActionTaskRow.state == "pending",
+                        and_(
+                            CreatorOutreachActionTaskRow.state == "leased",
+                            or_(
+                                CreatorOutreachActionTaskRow.lease_until.is_(None),
+                                CreatorOutreachActionTaskRow.lease_until <= now,
+                            ),
                         ),
                     ),
-                ),
+                )
+                .values(
+                    state="leased",
+                    lease_until=lease_until,
+                    lease_owner=lease_owner,
+                    lease_token=lease_token,
+                    attempt_count=CreatorOutreachActionTaskRow.attempt_count + 1,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
             )
-            .values(
-                state="leased",
-                lease_until=lease_until,
-                lease_owner=lease_owner,
-                lease_token=lease_token,
-                attempt_count=CreatorOutreachActionTaskRow.attempt_count + 1,
-                updated_at=now,
-            )
-            .execution_options(synchronize_session=False)
-        )
-        async with self.session_factory() as session:
             result = await session.execute(stmt)
             await session.commit()
             if not result.rowcount:
                 return None
-            row = await session.get(CreatorOutreachActionTaskRow, task_id)
-            return row.to_dict() if row is not None else None
+            await session.refresh(task)
+            return task.to_dict()
 
     async def complete_action(
         self,
@@ -545,6 +555,255 @@ class CreatorOutreachRepository:
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             return row.to_dict() if row is not None else None
+
+    async def read_action_receipt(self, owner_user_id: str, task_id: str) -> dict[str, Any] | None:
+        """Read only the receipt bound to one owner-scoped action task."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        task_id = _text(task_id, "task_id")
+        async with self.session_factory() as session:
+            task = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if task is None or task.owner_user_id != owner_user_id or task.receipt_id is None:
+                return None
+            receipt = await session.get(
+                CreatorOutreachReceiptRow,
+                (owner_user_id, task.creator_uid, task.sequence_no, task.receipt_id),
+            )
+            return receipt.to_dict() if receipt is not None else None
+
+    async def update_action_payload(
+        self,
+        owner_user_id: str,
+        task_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge bounded user-visible payload into an uncompleted action."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        task_id = _text(task_id, "task_id")
+        payload = _bounded(payload, field="action payload")
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None or row.owner_user_id != owner_user_id:
+                raise ValueError("action task does not exist")
+            if row.state == "completed":
+                raise ValueError("completed action payload cannot be changed")
+            sequence = await session.get(
+                CreatorOutreachSequenceRow,
+                (owner_user_id, row.creator_uid, row.sequence_no),
+            )
+            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
+                raise ValueError("closed outreach sequences cannot be changed")
+            row.payload_json = {**(row.payload_json or {}), **payload}
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.to_dict()
+
+    async def retry_action(
+        self,
+        owner_user_id: str,
+        task_id: str,
+        *,
+        recoverable_error_codes: Iterable[str],
+    ) -> dict[str, Any]:
+        """Reset one explicitly unknown/recoverable task without duplicating verified work."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        task_id = _text(task_id, "task_id")
+        allowed = {_text(code, "error_code", 128) for code in recoverable_error_codes}
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None or row.owner_user_id != owner_user_id:
+                raise ValueError("action task does not exist")
+            if row.state == "completed":
+                raise ValueError("verified outreach actions cannot be retried")
+            if row.state == "leased":
+                raise ValueError("action task is currently leased")
+            receipt = None
+            if row.receipt_id is not None:
+                receipt = await session.get(
+                    CreatorOutreachReceiptRow,
+                    (owner_user_id, row.creator_uid, row.sequence_no, row.receipt_id),
+                )
+            if receipt is not None and receipt.verified:
+                raise ValueError("verified outreach actions cannot be retried")
+            receipt_error_code = (receipt.payload_json or {}).get("error_code") if receipt is not None else None
+            error_code = row.error_code or receipt_error_code
+            if error_code not in allowed:
+                raise ValueError("only recoverable failures may be retried")
+            sequence = await session.get(
+                CreatorOutreachSequenceRow,
+                (owner_user_id, row.creator_uid, row.sequence_no),
+            )
+            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
+                raise ValueError("closed outreach sequences cannot be retried")
+            row.state = "pending"
+            row.lease_until = None
+            row.lease_owner = None
+            row.lease_token = None
+            row.error_code = None
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.to_dict()
+
+    async def set_sender_account_status(
+        self,
+        owner_user_id: str,
+        sender_account_id: str,
+        *,
+        status: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Change one owner-scoped sender status through the native repository."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        sender_account_id = _text(sender_account_id, "sender_account_id")
+        status = _text(status, "status", 32)
+        reason = _text(reason, "reason", 500)
+        async with self.session_factory() as session:
+            row = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
+            if row is None:
+                raise ValueError("sender account does not exist")
+            row.status = status
+            row.capabilities_json = {**(row.capabilities_json or {}), "last_operator_reason": reason}
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.to_dict()
+
+    async def request_manual_takeover(
+        self,
+        owner_user_id: str,
+        task_id: str,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Stop one task and record the bounded manual-takeover reason."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        task_id = _text(task_id, "task_id")
+        reason = _text(reason, "reason", 128)
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None or row.owner_user_id != owner_user_id:
+                raise ValueError("action task does not exist")
+            if row.state == "completed":
+                raise ValueError("verified outreach actions cannot be taken over")
+            sequence = await session.get(
+                CreatorOutreachSequenceRow,
+                (owner_user_id, row.creator_uid, row.sequence_no),
+            )
+            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
+                raise ValueError("closed outreach sequences cannot be changed")
+            row.state = "failed"
+            row.error_code = reason
+            row.lease_until = None
+            row.lease_owner = None
+            row.lease_token = None
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.to_dict()
+
+    async def mark_action_unknown(
+        self,
+        owner_user_id: str,
+        task_id: str,
+        *,
+        receipt_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Persist an unverified provider result and keep the task retryable."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        task_id = _text(task_id, "task_id")
+        receipt_id = _text(receipt_id, "receipt_id")
+        reason = _text(reason, "reason", 500)
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None or row.owner_user_id != owner_user_id:
+                raise ValueError("action task does not exist")
+            if row.state == "completed":
+                raise ValueError("verified outreach actions cannot be marked unknown")
+            if row.state == "leased":
+                raise ValueError("leased action tasks require the worker lease to be released")
+            sequence = await session.get(
+                CreatorOutreachSequenceRow,
+                (owner_user_id, row.creator_uid, row.sequence_no),
+            )
+            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
+                raise ValueError("closed outreach sequences cannot be changed")
+            kind = "dm_receipt" if row.action == "message" else "public_action_receipt"
+            receipt = CreatorOutreachReceiptRow(
+                owner_user_id=owner_user_id,
+                creator_uid=row.creator_uid,
+                sequence_no=row.sequence_no,
+                receipt_id=receipt_id,
+                kind=kind,
+                provider_ref=None,
+                verification_source="operator_unknown",
+                payload_json={
+                    "receipt_type": "provider_unknown",
+                    "action": row.action,
+                    "error_code": "provider_unknown",
+                    "message": reason,
+                    "manual_required": True,
+                },
+                verified=False,
+            )
+            existing = await session.get(
+                CreatorOutreachReceiptRow,
+                (owner_user_id, row.creator_uid, row.sequence_no, receipt_id),
+            )
+            if existing is None:
+                session.add(receipt)
+            elif existing.payload_json != receipt.payload_json or existing.verified:
+                raise ValueError("receipt replay conflict")
+            row.state = "pending"
+            row.receipt_id = receipt_id
+            row.error_code = "provider_unknown"
+            row.lease_until = None
+            row.lease_owner = None
+            row.lease_token = None
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.to_dict()
+
+    async def close_sequence(
+        self,
+        owner_user_id: str,
+        creator_uid: str,
+        sequence_no: int,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Record a closure receipt and close one native outreach sequence."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        creator_uid = _text(creator_uid, "creator_uid")
+        if type(sequence_no) is not int or sequence_no < 1:
+            raise ValueError("sequence_no must be a positive integer")
+        reason = _text(reason, "reason", 500)
+        model = await self.read_model(owner_user_id=owner_user_id, creator_uid=creator_uid)
+        sequence = next(
+            (row for row in (model or {}).get("sequences", []) if row["sequence_no"] == sequence_no),
+            None,
+        )
+        if sequence is None:
+            raise ValueError("outreach sequence does not exist")
+        if sequence["status"] != "replied":
+            raise ValueError("outreach sequence must be replied before closure")
+        receipt_id = f"closure:{owner_user_id}:{creator_uid}:{sequence_no}"
+        receipt = await self.record_receipt(
+            owner_user_id=owner_user_id,
+            creator_uid=creator_uid,
+            sequence_no=sequence_no,
+            receipt_id=receipt_id,
+            kind="closure_receipt",
+            provider_ref=None,
+            verification_source="operator_manual",
+            payload={"receipt_type": "closure_receipt", "reason": reason},
+            verified=True,
+        )
+        claim = await self.advance_state(
+            owner_user_id=owner_user_id,
+            creator_uid=creator_uid,
+            sequence_no=sequence_no,
+            receipt_id=receipt["receipt_id"],
+            next_status="closed",
+        )
+        return {"claim": claim, "receipt": receipt}
 
     async def list_action_tasks(
         self,

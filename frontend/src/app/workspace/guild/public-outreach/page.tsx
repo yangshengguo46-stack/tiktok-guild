@@ -78,6 +78,10 @@ type PublicOutreachCopy = {
     takeover: string;
     verified: string;
     unknown: string;
+    retry: string;
+    manualTakeover: string;
+    markUnknown: string;
+    closeSequence: string;
   };
   receipts: {
     title: string;
@@ -114,6 +118,7 @@ export default function PublicOutreachWorkbenchPage() {
   const [sequenceNo, setSequenceNo] = useState("1");
   const [loading, setLoading] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadAccounts = useCallback(async () => {
@@ -196,6 +201,66 @@ export default function PublicOutreachWorkbenchPage() {
       setError(
         cause instanceof Error ? cause.message : copy.operatorUnavailable,
       );
+    }
+  }
+
+  async function runTaskAction(
+    action: "retry" | "takeover" | "unknown",
+    body?: Record<string, string>,
+  ) {
+    if (!selectedTask) return;
+    setActionBusy(true);
+    setError(null);
+    try {
+      const response = await fetchWithAuth(
+        `${getBackendBaseURL()}/api/public-outreach/tasks/${encodeURIComponent(selectedTask.task_id)}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body ?? {}),
+        },
+      );
+      const updated = await readJson<TaskDetail>(response);
+      setSelectedTask(updated);
+      setTasks((current) =>
+        current.map((task) =>
+          task.task_id === updated.task_id ? { ...task, ...updated } : task,
+        ),
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : copy.operatorUnavailable,
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function closeSequence() {
+    if (!creatorUid.trim()) return;
+    setActionBusy(true);
+    setError(null);
+    try {
+      const response = await fetchWithAuth(
+        `${getBackendBaseURL()}/api/public-outreach/sequences/close`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            creator_uid: creatorUid.trim(),
+            sequence_no: Number(sequenceNo),
+            reason: "workbench_close_sequence",
+          }),
+        },
+      );
+      await readJson(response);
+      await loadTasks();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : copy.operatorUnavailable,
+      );
+    } finally {
+      setActionBusy(false);
     }
   }
 
@@ -294,6 +359,56 @@ export default function PublicOutreachWorkbenchPage() {
               receipts={selectedReceipts}
             />
           </div>
+          {selectedTask ? (
+            <section className="border-border/70 rounded-lg border p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  data-testid="outreach-retry"
+                  disabled={actionBusy}
+                  onClick={() => void runTaskAction("retry")}
+                  size="sm"
+                  variant="outline"
+                >
+                  {copy.taskList.retry}
+                </Button>
+                <Button
+                  data-testid="outreach-takeover"
+                  disabled={actionBusy}
+                  onClick={() =>
+                    void runTaskAction("takeover", {
+                      reason: "workbench_manual_takeover",
+                    })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  {copy.taskList.manualTakeover}
+                </Button>
+                <Button
+                  data-testid="outreach-unknown"
+                  disabled={actionBusy}
+                  onClick={() =>
+                    void runTaskAction("unknown", {
+                      reason: "workbench_provider_unknown",
+                    })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  {copy.taskList.markUnknown}
+                </Button>
+                <Button
+                  data-testid="outreach-close-sequence"
+                  disabled={actionBusy}
+                  onClick={() => void closeSequence()}
+                  size="sm"
+                  variant="destructive"
+                >
+                  {copy.taskList.closeSequence}
+                </Button>
+              </div>
+            </section>
+          ) : null}
         </section>
       </WorkspaceBody>
     </WorkspaceContainer>

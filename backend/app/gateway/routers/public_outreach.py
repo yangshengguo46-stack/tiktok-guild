@@ -12,17 +12,11 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import desc, select, update
 
 from app.gateway.authz import require_permission
-from app.gateway.deps import get_current_user
+from app.gateway.deps import get_current_user, require_admin_user
 from deerflow.creator_agent.public_outreach import PublicOutreachWorkflow
 from deerflow.persistence.creator_agent_relationship import CreatorOutreachRepository
-from deerflow.persistence.creator_agent_relationship.model import (
-    CreatorOutreachActionTaskRow,
-    CreatorOutreachReceiptRow,
-    SenderAccountRow,
-)
 from deerflow.persistence.engine import get_session_factory
 
 router = APIRouter(prefix="/api/public-outreach", tags=["public-outreach"])
@@ -47,11 +41,30 @@ _REDACTED_KEY_PARTS = (
     "cookie",
     "credential",
     "authorization",
+    "auth",
+    "bearer",
+    "api_key",
+    "private_key",
+    "access_key",
     "user_data_dir",
     "profile_path",
+    "profile",
+    "storage",
+    "session",
     "path",
 )
-_REDACTED_PATH_KEYS = frozenset({"profile_ref", "profile_path", "storage_state", "cookies"})
+_REDACTED_PATH_KEYS = frozenset(
+    {
+        "profile_ref",
+        "profile_path",
+        "profile_url",
+        "profile_dir",
+        "storage_state",
+        "cookies",
+        "auth_metadata",
+    }
+)
+_ADMIN_REQUIRED_DETAIL = "Admin privileges are required to manage public outreach."
 
 
 class CreateOutreachTaskRequest(BaseModel):
@@ -132,6 +145,10 @@ async def _user_id(request: Request) -> str:
     return value
 
 
+async def _require_outreach_admin(request: Request) -> None:
+    await require_admin_user(request, detail=_ADMIN_REQUIRED_DETAIL)
+
+
 def _redact(value: Any, *, key: str = "") -> Any:
     """Bounded recursive redaction for provider metadata and receipts."""
 
@@ -198,26 +215,8 @@ def _public_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _receipts(repository: CreatorOutreachRepository, task: dict[str, Any]) -> list[dict[str, Any]]:
-    session_factory = getattr(repository, "session_factory", None)
-    if session_factory is None:
-        return []
-    async with session_factory() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(CreatorOutreachReceiptRow)
-                    .where(
-                        CreatorOutreachReceiptRow.owner_user_id == task["owner_user_id"],
-                        CreatorOutreachReceiptRow.creator_uid == task["creator_uid"],
-                        CreatorOutreachReceiptRow.sequence_no == task["sequence_no"],
-                    )
-                    .order_by(desc(CreatorOutreachReceiptRow.created_at))
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return [row.to_dict() for row in rows]
+    receipt = await repository.read_action_receipt(task["owner_user_id"], task["task_id"])
+    return [receipt] if receipt is not None else []
 
 
 async def _owned_task(
@@ -258,7 +257,7 @@ async def list_outreach_accounts(request: Request) -> dict[str, Any]:
     operator_accounts = await _operator_accounts(operator, owner_user_id)
     by_id = {row["sender_account_id"]: row for row in persisted}
     for row in operator_accounts:
-        if isinstance(row, dict) and row.get("sender_account_id") and row.get("owner_user_id") in {None, owner_user_id}:
+        if isinstance(row, dict) and row.get("sender_account_id") and row.get("owner_user_id") == owner_user_id:
             by_id[row["sender_account_id"]] = {**by_id.get(row["sender_account_id"], {}), **row}
     accounts = [_account_response(row) for row in by_id.values()]
     web_accounts = [row for row in accounts if row.get("channel") == "web"]
@@ -282,6 +281,7 @@ async def list_outreach_accounts(request: Request) -> dict[str, Any]:
 @router.post("/tasks")
 @require_permission("threads", "write")
 async def create_outreach_tasks(request: Request, body: CreateOutreachTaskRequest) -> dict[str, Any]:
+    await _require_outreach_admin(request)
     _operator(request)
     repository = _repository(request)
     owner_user_id = await _user_id(request)
@@ -319,14 +319,10 @@ async def create_outreach_tasks(request: Request, body: CreateOutreachTaskReques
     # task payload, so persist it after the workflow creates the fixed action
     # set without ever mixing it into an idempotency key.
     if payload["comment"] is not None or payload["message"] is not None:
-        session_factory = getattr(repository, "session_factory", None)
-        if session_factory is None:
-            raise HTTPException(status_code=503, detail="Public outreach persistence is not configured")
-        async with session_factory() as session:
-            for task in tasks:
-                await session.execute(update(CreatorOutreachActionTaskRow).where(CreatorOutreachActionTaskRow.task_id == task["task_id"]).values(payload_json={**(task.get("payload_json") or {}), **payload}))
-            await session.commit()
-        tasks = [await repository.read_action_task(task["task_id"]) or task for task in tasks]
+        try:
+            tasks = [await repository.update_action_payload(owner_user_id, task["task_id"], payload) for task in tasks]
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"tasks": [_public_task(task) for task in tasks], "creator_uid": body.creator_uid, "sequence_no": body.sequence_no}
 
 
@@ -360,44 +356,20 @@ async def get_outreach_task(task_id: str, request: Request) -> dict[str, Any]:
     return _task_response(task, receipts, model)
 
 
-async def _reset_task(repository: CreatorOutreachRepository, task: dict[str, Any], *, error_code: str | None = None) -> dict[str, Any]:
-    session_factory = getattr(repository, "session_factory", None)
-    if session_factory is None:
-        raise HTTPException(status_code=503, detail="Public outreach persistence is not configured")
-    values: dict[str, Any] = {
-        "state": "pending",
-        "lease_until": None,
-        "lease_owner": None,
-        "lease_token": None,
-        "error_code": error_code,
-        "updated_at": datetime.now(UTC),
-    }
-    async with session_factory() as session:
-        await session.execute(update(CreatorOutreachActionTaskRow).where(CreatorOutreachActionTaskRow.task_id == task["task_id"]).values(**values))
-        await session.commit()
-    refreshed = await repository.read_action_task(task["task_id"])
-    if refreshed is None:
-        raise HTTPException(status_code=404, detail="Public outreach task not found")
-    return refreshed
-
-
 @router.post("/tasks/{task_id}/retry")
 @require_permission("threads", "write")
 async def retry_outreach_task(task_id: str, request: Request, body: RetryTaskRequest | None = None) -> dict[str, Any]:
+    await _require_outreach_admin(request)
     _operator(request)
-    repository, _, task, receipts, model = await _owned_task(request, task_id)
-    if task["state"] == "completed" or any(receipt.get("verified") for receipt in receipts):
-        raise HTTPException(status_code=409, detail="Verified outreach actions cannot be duplicated")
-    latest = receipts[0] if receipts else None
-    latest_payload = (latest or {}).get("payload_json") or {}
-    error_code = task.get("error_code") or latest_payload.get("error_code")
-    if task["state"] == "leased":
-        raise HTTPException(status_code=409, detail="Outreach task is currently leased")
-    if task["state"] == "failed" and error_code not in _RECOVERABLE_ERRORS:
-        raise HTTPException(status_code=409, detail="Only recoverable failures may be retried")
-    if task["state"] == "pending" and not latest_payload.get("manual_required") and error_code not in _RECOVERABLE_ERRORS:
-        raise HTTPException(status_code=409, detail="Retry requires an explicit unknown or recoverable failure")
-    refreshed = await _reset_task(repository, task)
+    repository, owner_user_id, task, _, model = await _owned_task(request, task_id)
+    try:
+        refreshed = await repository.retry_action(
+            owner_user_id,
+            task["task_id"],
+            recoverable_error_codes=_RECOVERABLE_ERRORS,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     receipts = await _receipts(repository, refreshed)
     return _task_response(refreshed, receipts, model)
 
@@ -405,6 +377,7 @@ async def retry_outreach_task(task_id: str, request: Request, body: RetryTaskReq
 @router.post("/accounts/{sender_account_id}/pause")
 @require_permission("threads", "write")
 async def pause_outreach_account(sender_account_id: str, request: Request, body: ManualReasonRequest) -> dict[str, Any]:
+    await _require_outreach_admin(request)
     _operator(request)
     owner_user_id = await _user_id(request)
     repository = _repository(request)
@@ -414,6 +387,7 @@ async def pause_outreach_account(sender_account_id: str, request: Request, body:
 @router.post("/accounts/{sender_account_id}/resume")
 @require_permission("threads", "write")
 async def resume_outreach_account(sender_account_id: str, request: Request, body: ManualReasonRequest | None = None) -> dict[str, Any]:
+    await _require_outreach_admin(request)
     _operator(request)
     owner_user_id = await _user_id(request)
     repository = _repository(request)
@@ -427,38 +401,34 @@ async def _set_account_status(
     status: str,
     reason: str,
 ) -> dict[str, Any]:
-    session_factory = getattr(repository, "session_factory", None)
-    if session_factory is None:
-        raise HTTPException(status_code=503, detail="Public outreach persistence is not configured")
-    async with session_factory() as session:
-        row = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
-        if row is None:
-            raise HTTPException(status_code=404, detail="Sender account not found")
-        row.status = status
-        row.capabilities_json = {
-            **(row.capabilities_json or {}),
-            "last_operator_reason": reason,
-        }
-        row.updated_at = datetime.now(UTC)
-        await session.commit()
-        return _account_response(row.to_dict())
+    try:
+        row = await repository.set_sender_account_status(
+            owner_user_id,
+            sender_account_id,
+            status=status,
+            reason=reason,
+        )
+    except ValueError as exc:
+        if "does not exist" in str(exc):
+            raise HTTPException(status_code=404, detail="Sender account not found") from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _account_response(row)
 
 
 @router.post("/tasks/{task_id}/takeover")
 @require_permission("threads", "write")
 async def request_manual_takeover(task_id: str, request: Request, body: ManualReasonRequest) -> dict[str, Any]:
+    await _require_outreach_admin(request)
     _operator(request)
-    repository, _, task, _, model = await _owned_task(request, task_id)
-    refreshed = await _reset_task(repository, task, error_code="manual_takeover")
-    refreshed["state"] = "failed"
-    refreshed["error_code"] = body.reason
-    # Persist the manual boundary after resetting any stale lease.
-    session_factory = getattr(repository, "session_factory", None)
-    if session_factory is not None:
-        async with session_factory() as session:
-            await session.execute(update(CreatorOutreachActionTaskRow).where(CreatorOutreachActionTaskRow.task_id == task_id).values(state="failed", error_code=body.reason, updated_at=datetime.now(UTC)))
-            await session.commit()
-    refreshed = await repository.read_action_task(task_id) or refreshed
+    repository, owner_user_id, _, _, model = await _owned_task(request, task_id)
+    try:
+        refreshed = await repository.request_manual_takeover(
+            owner_user_id,
+            task_id,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _task_response(refreshed, await _receipts(repository, refreshed), model)
 
 
@@ -467,66 +437,39 @@ async def request_manual_takeover(task_id: str, request: Request, body: ManualRe
 async def mark_provider_unknown(task_id: str, request: Request, body: ManualReasonRequest) -> dict[str, Any]:
     """Persist an explicit provider-unknown receipt and leave the task retryable."""
 
+    await _require_outreach_admin(request)
     _operator(request)
-    repository, _, task, receipts, model = await _owned_task(request, task_id)
-    if task["state"] == "completed" or any(receipt.get("verified") for receipt in receipts):
-        raise HTTPException(status_code=409, detail="Verified outreach actions cannot be marked unknown")
-    kind = "dm_receipt" if task["action"] == "message" else "public_action_receipt"
+    repository, owner_user_id, task, _, model = await _owned_task(request, task_id)
     try:
-        await repository.record_receipt(
-            owner_user_id=task["owner_user_id"],
-            creator_uid=task["creator_uid"],
-            sequence_no=task["sequence_no"],
+        refreshed = await repository.mark_action_unknown(
+            owner_user_id,
+            task_id,
             receipt_id=f"unknown:{task['task_id']}:{task.get('attempt_count', 0)}",
-            kind=kind,
-            provider_ref=None,
-            verification_source="operator_unknown",
-            payload={
-                "receipt_type": "provider_unknown",
-                "action": task["action"],
-                "error_code": "provider_unknown",
-                "message": body.reason,
-                "manual_required": True,
-            },
-            verified=False,
+            reason=body.reason,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    refreshed = await _reset_task(repository, task, error_code="provider_unknown")
     return _task_response(refreshed, await _receipts(repository, refreshed), model)
 
 
 @router.post("/sequences/close")
 @require_permission("threads", "write")
 async def close_outreach_sequence(request: Request, body: CloseSequenceRequest) -> dict[str, Any]:
+    await _require_outreach_admin(request)
     _operator(request)
     repository = _repository(request)
     owner_user_id = await _user_id(request)
-    model = await repository.read_model(owner_user_id=owner_user_id, creator_uid=body.creator_uid)
-    if model is None or not any(row["sequence_no"] == body.sequence_no for row in model["sequences"]):
-        raise HTTPException(status_code=404, detail="Outreach sequence not found")
-    receipt = await repository.record_receipt(
-        owner_user_id=owner_user_id,
-        creator_uid=body.creator_uid,
-        sequence_no=body.sequence_no,
-        receipt_id=f"closure:{owner_user_id}:{body.creator_uid}:{body.sequence_no}",
-        kind="closure_receipt",
-        provider_ref=None,
-        verification_source="operator_manual",
-        payload={"receipt_type": "closure_receipt", "reason": body.reason},
-        verified=True,
-    )
     try:
-        claim = await repository.advance_state(
-            owner_user_id=owner_user_id,
-            creator_uid=body.creator_uid,
-            sequence_no=body.sequence_no,
-            receipt_id=receipt["receipt_id"],
-            next_status="closed",
+        result = await repository.close_sequence(
+            owner_user_id,
+            body.creator_uid,
+            body.sequence_no,
+            reason=body.reason,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"claim": _redact(claim, key="claim"), "receipt": _redact(receipt, key="receipt")}
+        status_code = 404 if "does not exist" in str(exc) else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return _redact(result, key="close_sequence")
 
 
 __all__ = ["router"]

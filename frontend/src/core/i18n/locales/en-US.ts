@@ -440,6 +440,10 @@ export const enUS: Translations = {
         takeover: "Takeover",
         verified: "Verified",
         unknown: "Unknown",
+        retry: "Retry",
+        manualTakeover: "Manual takeover",
+        markUnknown: "Mark provider unknown",
+        closeSequence: "Close sequence",
       },
       receipts: {
         title: "Receipt evidence",

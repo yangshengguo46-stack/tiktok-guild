@@ -413,6 +413,10 @@ export const zhCN: Translations = {
         takeover: "人工接管",
         verified: "已验证",
         unknown: "待核验",
+        retry: "重试",
+        manualTakeover: "人工接管",
+        markUnknown: "标记为执行器未知",
+        closeSequence: "关闭序列",
       },
       receipts: {
         title: "回执证据",
