@@ -327,3 +327,17 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 - 这次仅是登录预检受阻，不是 Task 8 的单账号 Web 行为 pilot；Web provider 身份/
   新回执映射继续 `unverified-external`。暂停 Playwright 登录路径及后续写入测试，先通过
   用户正常使用的官方渠道核对账号状态并评估本次提示，再决定是否另行安排受控试跑。
+
+## 2026-09-30 iPhone 接入预检
+
+- 用户转向 iPhone 单设备试跑，当前仅做只读本机/依赖检查并打开 Xcode，未连接手机、
+  启动 Appium/WDA session、打开 TikTok 或执行平台动作。
+- `/Applications/Xcode.app` 存在，Xcode `26.5` 可由显式 `DEVELOPER_DIR` 调用；系统当前
+  developer directory 仍指向 Command Line Tools。`devicectl` 报 Xcode/SDK 许可尚未
+  同意，这一法律许可必须由用户本人阅读并同意；没有代为接受或修改系统选择。
+- USB 清单未见 iPhone/iPad，DeerFlow iOS 设备登记目录仍不存在。静态 doctor 检查
+  Playwright/Appium `3.1.0`/XCUITest `12.13.3` 均已安装和注册，但没有 ready 设备。
+  XCUITest doctor 的模拟器/可选 Remote XPC 项不能代替真机配对、签名 WDA 和健康读回。
+- 下一门槛由用户在 Xcode 完成许可/必要组件，USB 连接并信任解锁的 iPhone，按设备
+  提示开启 Developer Mode / UI Automation，并在官方 TikTok App 手动登录。之后再做
+  `devicectl`、WDA 签名/探针和单号只读检查；遇“访问频繁”立即停止，不绕过提示。
