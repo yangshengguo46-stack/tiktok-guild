@@ -12,9 +12,15 @@ write to TikTok or attach a real device.
 - Build and sign WebDriverAgent with the team's Apple development signing
   identity. Record the signed `wda_bundle_id` in the native sender/device
   registration; credentials and signing material stay outside Git.
-- Install Appium 3 and the XCUITest driver from the pinned operator package.
+- Install Appium 3 and the pinned XCUITest driver from the operator package:
+  run `npm install` in `ops/guild-runtime/public-outreach-operator`, then run
+  `npm run ios:install-driver`. This installs
+  `appium-xcuitest-driver@12.13.3`; do not use an unpinned driver version.
 - Register exactly one device with `device_ref`, `udid`, `platform_version`, and
-  `wda_bundle_id`. The expected initial health state is `ready`.
+  `wda_bundle_id`, and provide a live WDA probe hook. A non-empty bundle id or
+  caller-supplied `paired`/`online` metadata is not proof of readiness. The
+  expected initial health state is `ready` only after the probe succeeds;
+  otherwise the device remains `manual_required` or `offline`.
 - Log into one ordinary TikTok account manually on the iPhone. Do not put
   credentials, cookies, screenshots, or profile data in the repository.
 
@@ -23,8 +29,8 @@ write to TikTok or attach a real device.
 1. Stop any previous iOS operator process and verify that the device registry
    has no active session lease for the device.
 2. Start the operator with the iOS device root and failure-evidence root
-   configured. Confirm the device health read-back is `ready`, WDA is reachable,
-   and the device is not `locked` or `offline`.
+   configured. Confirm the device health read-back is `ready`, the live WDA
+   probe succeeds, and the device is not `locked` or `offline`.
 3. From the existing DeerFlow claim, create one public outreach sequence with a
    fixed iOS sender identity. Do not mix a Web sender and an iOS sender in the
    same sequence.
@@ -47,10 +53,18 @@ write to TikTok or attach a real device.
 ## Stop conditions and recovery
 
 - `wda_unavailable`, `device_locked`, `device_offline`, `app_launch_failed`,
-  `selector_missing`, `locator_evidence_required`, `challenge`, or `unknown`
+  `selector_missing`, `locator_evidence_required`, `pilot_required`,
+  `challenge`, or `unknown`
   pauses the sender/device path and creates a manual-takeover task.
 - Unlock or re-pair the iPhone manually, repair/sign WDA, or inspect the
   accessibility tree before retrying. Never retry a verified action.
+- Use accessibility identifiers, visible text, predicates, or class chains for
+  provider controls. Coordinate-only fallback is rejected into manual takeover
+  even when an evidence record exists, because it cannot prove target identity
+  or control identity.
+- Custom iOS locators are available only when the separately authorized pilot
+  flag is enabled. The locator version and evidence source are included in the
+  receipt.
 - Failure screenshots and accessibility snapshots are diagnostic evidence only;
   they cannot advance the creator state.
 - If the device remains `busy`, close the owning session using its lease id.

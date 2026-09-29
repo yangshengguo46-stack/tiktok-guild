@@ -64,6 +64,11 @@ function normalizeElement(element) {
       if (typeof element.type === 'function') return element.type(value);
       throw new IosSessionError('selector_missing', 'Element cannot accept text.');
     },
+    async press(key) {
+      if (typeof element.press === 'function') return element.press(key);
+      if (typeof element.sendKeys === 'function') return element.sendKeys(key);
+      return undefined;
+    },
   };
 }
 
@@ -89,23 +94,26 @@ export function createXcuitestSession({
   let launched = false;
   let lease = null;
   const actualEvidenceRoot = evidenceRoot ? path.resolve(evidenceRoot) : null;
-  const defaultHealthCheck = createWdaHealthChecker();
+  const defaultHealthCheck = createWdaHealthChecker({
+    driverProbe: async ({ driver: activeDriver }) => {
+      if (!activeDriver) return false;
+      if (typeof activeDriver.getStatus === 'function') {
+        const status = await activeDriver.getStatus();
+        return status?.ready !== false;
+      }
+      if (typeof activeDriver.isWdaHealthy === 'function') return activeDriver.isWdaHealthy();
+      if (typeof activeDriver.status === 'function') {
+        const status = await activeDriver.status();
+        return status?.ready !== false;
+      }
+      return false;
+    },
+  });
 
   async function ensureHealth() {
-    if (healthCheck || !device.state) {
-      const result = await (healthCheck ?? defaultHealthCheck)({ device, driver: resolvedDriver });
-      if (!result?.ok) throw new IosSessionError(result?.error_code ?? 'wda_unavailable', result?.message, result);
-      return result;
-    }
-    const badState = device.state && !['ready', 'paired'].includes(device.state);
-    if (badState) {
-      const code = device.state === 'offline' ? 'device_offline'
-        : device.state === 'manual_required' ? (device.health ?? 'manual_required')
-          : 'device_unavailable';
-      throw new IosSessionError(code, `Device is ${device.state}.`);
-    }
-    if (device.locked) throw new IosSessionError('device_locked', 'Unlock the iPhone before starting a session.');
-    if (device.online === false) throw new IosSessionError('device_offline', 'The iPhone is offline.');
+    const result = await (healthCheck ?? defaultHealthCheck)({ device, driver: resolvedDriver });
+    if (!result?.ok) throw new IosSessionError(result?.error_code ?? 'wda_unavailable', result?.message, result);
+    return result;
   }
 
   async function ensureDriver() {
@@ -147,9 +155,9 @@ export function createXcuitestSession({
 
   async function launch() {
     if (closed) throw new IosSessionError('session_closed', 'The XCUITest session is closed.');
+    const activeDriver = await ensureDriver();
     await ensureHealth();
     await claimDevice();
-    const activeDriver = await ensureDriver();
     try {
       if (typeof activeDriver.activateApp === 'function') await activeDriver.activateApp(bundleId);
       else if (typeof activeDriver.launchApp === 'function') await activeDriver.launchApp();
@@ -164,8 +172,14 @@ export function createXcuitestSession({
   }
 
   async function find(locator, { coordinateEvidence = null } = {}) {
-    if (hasCoordinateOnlyLocator(locator) && !coordinateEvidence) {
-      throw new IosSessionError('locator_evidence_required', 'Coordinate-only actions require an attached locator evidence record.');
+    coordinateEvidence ??= locator?.evidence ?? null;
+    if (hasCoordinateOnlyLocator(locator)) {
+      if (!coordinateEvidence) {
+        throw new IosSessionError('locator_evidence_required', 'Coordinate-only actions require an attached locator evidence record.');
+      }
+      throw new IosSessionError('manual_required', 'Coordinate-only fallback is disabled; use an accessibility locator or manual takeover.', {
+        coordinate_evidence: coordinateEvidence,
+      });
     }
     const kind = locatorKind(locator);
     if (!kind) throw new IosSessionError('selector_missing', 'An accessibility id, visible text, or predicate locator is required.');
@@ -182,7 +196,13 @@ export function createXcuitestSession({
             ? `//XCUIElementTypeAny[@label="${String(value).replaceAll('"', '\\"')}"]`
             : String(value));
       } else if (typeof activeDriver.findElement === 'function') {
-        element = await activeDriver.findElement(kind, locator[kind] ?? locator);
+        const strategy = kind === 'accessibility_id' || kind === 'accessibilityId'
+          ? 'accessibility id'
+          : kind === 'text' || kind === 'label' ? 'xpath' : kind;
+        const value = strategy === 'xpath'
+          ? `//XCUIElementTypeAny[@label="${String(locator[kind]).replaceAll('"', '\\"')}"]`
+          : locator[kind] ?? locator;
+        element = await activeDriver.findElement(strategy, value);
       }
     } catch (error) {
       throw new IosSessionError('selector_missing', error instanceof Error ? error.message : 'Accessibility locator lookup failed.');
@@ -208,6 +228,41 @@ export function createXcuitestSession({
     await element.clear();
     await element.type(value);
     return { ok: true, locator, text: value };
+  }
+
+  async function readCreatorIdentity(locator) {
+    const identity = await find(locator);
+    return {
+      creator_uid: await identity.getAttribute('data-creator-uid')
+        ?? await identity.getAttribute('creator_uid')
+        ?? await identity.getAttribute('data-user-id')
+        ?? await identity.getAttribute('user_id'),
+      handle: await identity.getAttribute('data-creator-handle')
+        ?? await identity.getAttribute('data-username')
+        ?? await identity.getAttribute('username')
+        ?? await identity.getAttribute('label')
+        ?? await identity.getAttribute('name'),
+      verification_source: 'tiktok-ios@1:profile-identity',
+    };
+  }
+
+  async function navigateToCreator({ creator = {}, locators = {} } = {}) {
+    const activeDriver = await ensureDriver();
+    const profileUrl = creator.profile_url ?? creator.profileUrl ?? null;
+    if (profileUrl) {
+      if (typeof activeDriver.url === 'function') await activeDriver.url(profileUrl);
+      else if (typeof activeDriver.navigateTo === 'function') await activeDriver.navigateTo(profileUrl);
+      else if (typeof activeDriver.get === 'function') await activeDriver.get(profileUrl);
+      else throw new IosSessionError('selector_missing', 'The XCUITest driver cannot navigate to a creator profile.');
+      return readCreatorIdentity(locators.creatorIdentity);
+    }
+    const handle = creator.handle ?? creator.username ?? null;
+    if (!handle) throw new IosSessionError('provider_rejected', 'A creator profile URL or canonical handle is required.');
+    await type(locators.creatorSearch, String(handle));
+    const search = await find(locators.creatorSearch);
+    await search.press('Enter');
+    await tap(locators.creatorResult);
+    return readCreatorIdentity(locators.creatorIdentity);
   }
 
   async function screenshot() {
@@ -287,6 +342,8 @@ export function createXcuitestSession({
     find,
     tap,
     type,
+    navigateToCreator,
+    readCreatorIdentity,
     screenshot,
     accessibilitySnapshot,
     captureFailureEvidence,

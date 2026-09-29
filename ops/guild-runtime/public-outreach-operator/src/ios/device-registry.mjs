@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -68,6 +68,7 @@ export function createDeviceRegistry({
   if (typeof rootDir !== 'string' || !rootDir) throw new TypeError('rootDir is required.');
   const root = path.resolve(rootDir);
   const file = path.join(root, 'devices.json');
+  const lockFile = path.join(root, 'devices.lock');
   const checker = healthChecker ?? createWdaHealthChecker({
     prerequisites,
     prerequisiteProbe,
@@ -82,9 +83,10 @@ export function createDeviceRegistry({
     await readyPromise;
   }
 
-  async function load() {
+  async function load({ refresh = false } = {}) {
     await ensureRoot();
-    if (memory.size) return memory;
+    if (memory.size && !refresh) return memory;
+    if (refresh) memory.clear();
     const values = await readJson(file, []);
     for (const value of Array.isArray(values) ? values : []) {
       try {
@@ -99,7 +101,39 @@ export function createDeviceRegistry({
 
   async function flush() {
     await ensureRoot();
-    await writeFile(file, `${JSON.stringify([...memory.values()], null, 2)}\n`, 'utf8');
+    const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify([...memory.values()], null, 2)}\n`, 'utf8');
+    await rename(temporary, file);
+  }
+
+  async function withFilesystemLock(work) {
+    await ensureRoot();
+    const token = crypto.randomUUID();
+    const deadline = Date.now() + 10_000;
+    let acquired = false;
+    while (!acquired) {
+      try {
+        const handle = await open(lockFile, 'wx');
+        await handle.writeFile(`${JSON.stringify({ token, acquired_at: Date.now() })}\n`, 'utf8');
+        await handle.close();
+        acquired = true;
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error;
+        const current = await readJson(lockFile, null);
+        if (current?.acquired_at && current.acquired_at + 30_000 < Date.now()) {
+          await rm(lockFile, { force: true });
+          continue;
+        }
+        if (Date.now() >= deadline) throw new Error('iOS device registry lock timeout.');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    try {
+      return await work();
+    } finally {
+      const current = await readJson(lockFile, null);
+      if (current?.token === token) await rm(lockFile, { force: true });
+    }
   }
 
   async function serialize(work) {
@@ -108,7 +142,7 @@ export function createDeviceRegistry({
     writeTail = new Promise((resolve) => { release = resolve; });
     await previous;
     try {
-      return await work();
+      return await withFilesystemLock(work);
     } finally {
       release();
     }
@@ -117,11 +151,12 @@ export function createDeviceRegistry({
   async function registerDevice(input) {
     const normalized = normalizeDevice(input);
     return serialize(async () => {
-      await load();
+      await load({ refresh: true });
       const existing = memory.get(normalized.device_ref);
       const merged = {
         ...(existing ?? {}),
         ...normalized,
+        active_session_id: existing?.active_session_id ?? normalized.active_session_id,
         registered_at: existing?.registered_at ?? nowIso(clock),
         updated_at: nowIso(clock),
       };
@@ -154,27 +189,29 @@ export function createDeviceRegistry({
   }
 
   async function health(deviceRef, patch = {}) {
-    await load();
-    const current = memory.get(deviceRef);
-    if (!current) return { ok: false, error_code: 'device_not_found' };
-    const merged = { ...current, ...patch, device_ref: current.device_ref };
-    const result = await checker({ device: merged, driver: patch.driver ?? null });
-    const updated = {
-      ...merged,
-      state: current.state === 'busy' ? 'busy' : result.ok ? 'ready' : result.state,
-      health: result.ok ? 'healthy' : result.error_code,
-      health_detail: result,
-      updated_at: nowIso(clock),
-    };
-    delete updated.driver;
-    memory.set(deviceRef, updated);
-    await serialize(flush);
-    return { ok: result.ok, device: { ...updated }, ...(!result.ok ? { error_code: result.error_code } : {}) };
+    return serialize(async () => {
+      await load({ refresh: true });
+      const current = memory.get(deviceRef);
+      if (!current) return { ok: false, error_code: 'device_not_found' };
+      const merged = { ...current, ...patch, device_ref: current.device_ref };
+      const result = await checker({ device: merged, driver: patch.driver ?? null });
+      const updated = {
+        ...merged,
+        state: current.state === 'busy' ? 'busy' : result.ok ? 'ready' : result.state,
+        health: result.ok ? 'healthy' : result.error_code,
+        health_detail: result,
+        updated_at: nowIso(clock),
+      };
+      delete updated.driver;
+      memory.set(deviceRef, updated);
+      await flush();
+      return { ok: result.ok, device: { ...updated }, ...(!result.ok ? { error_code: result.error_code } : {}) };
+    });
   }
 
   async function claim(deviceRef, { sessionId = crypto.randomUUID() } = {}) {
     return serialize(async () => {
-      await load();
+      await load({ refresh: true });
       const device = memory.get(deviceRef);
       if (!device) return { ok: false, error_code: 'device_not_found' };
       if (device.active_session_id) {
@@ -200,14 +237,20 @@ export function createDeviceRegistry({
   }
 
   async function release(input) {
-    const deviceRef = typeof input === 'string' ? input : input?.device_ref;
-    const sessionId = typeof input === 'object' ? input?.session_id : null;
+    if (!input || typeof input !== 'object') {
+      return { ok: false, error_code: 'session_lease_required' };
+    }
+    const deviceRef = input.device_ref;
+    const sessionId = input.session_id;
+    if (typeof deviceRef !== 'string' || typeof sessionId !== 'string' || !sessionId) {
+      return { ok: false, error_code: 'session_lease_required' };
+    }
     return serialize(async () => {
-      await load();
+      await load({ refresh: true });
       const device = memory.get(deviceRef);
       if (!device) return { ok: false, error_code: 'device_not_found' };
       if (!device.active_session_id) return { ok: false, error_code: 'session_not_found' };
-      if (sessionId && device.active_session_id !== sessionId) {
+      if (device.active_session_id !== sessionId) {
         return { ok: false, error_code: 'session_mismatch' };
       }
       const released = {
@@ -226,7 +269,7 @@ export function createDeviceRegistry({
 
   async function markManualRequired(deviceRef, details = {}) {
     return serialize(async () => {
-      await load();
+      await load({ refresh: true });
       const device = memory.get(deviceRef);
       if (!device) return { ok: false, error_code: 'device_not_found' };
       const updated = {

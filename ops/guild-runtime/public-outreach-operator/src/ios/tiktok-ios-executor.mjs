@@ -15,11 +15,14 @@ const MANUAL_CODES = new Set([
   'provider_rejected',
   'unknown',
   'manual_required',
+  'pilot_required',
 ]);
 
 export const IOS_LOCATORS = Object.freeze({
   loginRequired: { accessibility_id: 'login-button' },
   challenge: { accessibility_id: 'captcha-container' },
+  creatorSearch: { accessibility_id: 'creator-search' },
+  creatorResult: { accessibility_id: 'creator-search-result' },
   profileRoot: { accessibility_id: 'user-profile' },
   creatorIdentity: { accessibility_id: 'user-profile' },
   likeButton: { accessibility_id: 'like-button' },
@@ -46,6 +49,15 @@ function accountId(account) {
 
 function creatorId(creator) {
   return creator?.creator_uid ?? creator?.uid ?? creator?.user_id ?? null;
+}
+
+function normalizeHandle(value) {
+  return typeof value === 'string' ? value.replace(/^@/, '').toLowerCase() : null;
+}
+
+function pilotAllowed(explicit) {
+  if (explicit === true) return true;
+  return ['1', 'true', 'yes'].includes(String(process.env.PUBLIC_OUTREACH_TIKTOK_PILOT ?? '').toLowerCase());
 }
 
 async function invokeHook(account, names, ...args) {
@@ -153,7 +165,7 @@ async function active(element) {
   return /\b(liked|following|已点赞|已关注)\b/i.test(values.join(' '));
 }
 
-function receiptFor({ account, creator, action, evidence, payload }) {
+function receiptFor({ account, creator, action, evidence, payload, locatorVersion }) {
   const senderAccountId = accountId(account);
   const creatorUid = creatorId(creator);
   return {
@@ -164,6 +176,7 @@ function receiptFor({ account, creator, action, evidence, payload }) {
       sender_account_id: senderAccountId,
       creator_uid: creatorUid,
       evidence: [evidence],
+      locator_version: locatorVersion,
       payload: action === 'comment' || action === 'message'
         ? { text: payload.comment ?? payload.comment_text ?? payload.message ?? payload.message_text ?? payload.text ?? null }
         : {},
@@ -175,28 +188,60 @@ function receiptFor({ account, creator, action, evidence, payload }) {
 }
 
 async function prepareCreator(session, creator, locators) {
-  if (typeof session.prepareCreator === 'function') return session.prepareCreator(creator);
-  const profile = await session.find(locators.profileRoot);
-  if (!await visible(profile)) throw new IosSessionError('selector_missing', 'Creator profile is not visible.');
-  const identity = await session.find(locators.creatorIdentity);
-  const observedUid = await attribute(identity, 'data-creator-uid')
-    ?? await attribute(identity, 'creator_uid')
-    ?? await attribute(identity, 'name')
-    ?? await attribute(identity, 'label');
+  let observed = null;
+  const hasSearchTarget = creator.profile_url || creator.profileUrl || creator.handle || creator.username;
+  if (typeof session.navigateToCreator === 'function' && hasSearchTarget) {
+    observed = await session.navigateToCreator({ creator, locators });
+  } else if (typeof session.readCreatorIdentity === 'function') {
+    observed = await session.readCreatorIdentity(locators.creatorIdentity);
+  } else if (typeof session.prepareCreator === 'function') {
+    observed = await session.prepareCreator(creator);
+  } else {
+    const profile = await session.find(locators.profileRoot);
+    if (!await visible(profile)) throw new IosSessionError('selector_missing', 'Creator profile is not visible.');
+    const identity = await session.find(locators.creatorIdentity);
+    observed = {
+      creator_uid: await attribute(identity, 'data-creator-uid')
+        ?? await attribute(identity, 'creator_uid')
+        ?? await attribute(identity, 'name')
+        ?? await attribute(identity, 'label'),
+      handle: await attribute(identity, 'data-creator-handle')
+        ?? await attribute(identity, 'data-username')
+        ?? await attribute(identity, 'username')
+        ?? await attribute(identity, 'name')
+        ?? await attribute(identity, 'label'),
+    };
+  }
+  const observedUid = observed?.creator_uid ?? null;
+  const observedHandle = observed?.handle ?? null;
   const requestedUid = creatorId(creator);
-  if (requestedUid && observedUid && String(observedUid) !== String(requestedUid)) {
+  const requestedHandle = creator.handle ?? creator.username ?? null;
+  if (requestedUid && (!observedUid || String(observedUid) !== String(requestedUid))) {
     throw new IosSessionError('unknown', 'Current profile identity does not match the requested creator.', {
       requested_uid: requestedUid,
       observed_uid: observedUid,
     });
   }
-  if (!observedUid && !requestedUid && !creator.handle) {
+  if (requestedHandle && (!observedHandle || normalizeHandle(observedHandle) !== normalizeHandle(requestedHandle))) {
+    throw new IosSessionError('unknown', 'Current profile handle does not match the requested creator.', {
+      requested_handle: requestedHandle,
+      observed_handle: observedHandle,
+    });
+  }
+  if (!requestedUid && !requestedHandle) {
+    throw new IosSessionError('provider_rejected', 'A canonical creator UID or handle is required.');
+  }
+  if (!observedUid && !observedHandle) {
     throw new IosSessionError('unknown', 'Creator identity could not be verified.');
   }
-  return { verification_source: 'tiktok-ios@1:profile-identity' };
+  return {
+    creator_uid: observedUid,
+    handle: observedHandle,
+    verification_source: observed?.verification_source ?? 'tiktok-ios@1:profile-identity',
+  };
 }
 
-async function runAction(session, action, payload, locators) {
+async function runAction(session, action, payload, locators, locatorVersion) {
   switch (action) {
     case 'like': {
       const control = await session.find(locators.likeButton);
@@ -204,7 +249,7 @@ async function runAction(session, action, payload, locators) {
       if (!await active(control)) await session.tap(locators.likeButton);
       const readBack = await session.find(locators.likeButton);
       if (!await active(readBack)) throw new IosSessionError('unknown', 'Like did not produce a verified active state.');
-      return { action, evidence: 'tiktok-ios@1:accessibility_id:like-button' };
+      return { action, evidence: `${locatorVersion}:accessibility_id:like-button` };
     }
     case 'follow': {
       const control = await session.find(locators.followButton);
@@ -212,7 +257,7 @@ async function runAction(session, action, payload, locators) {
       if (!await active(control)) await session.tap(locators.followButton);
       const readBack = await session.find(locators.followButton);
       if (!await active(readBack)) throw new IosSessionError('unknown', 'Follow did not produce a verified active state.');
-      return { action, evidence: 'tiktok-ios@1:accessibility_id:follow-button' };
+      return { action, evidence: `${locatorVersion}:accessibility_id:follow-button` };
     }
     case 'comment': {
       const value = payload.comment ?? payload.comment_text ?? payload.text;
@@ -223,7 +268,7 @@ async function runAction(session, action, payload, locators) {
       if (!await visible(receipt) || !(await text(receipt)).includes(value)) {
         throw new IosSessionError('unknown', 'Comment was not verified by a provider read-back.');
       }
-      return { action, evidence: 'tiktok-ios@1:accessibility_id:comment-item' };
+      return { action, evidence: `${locatorVersion}:accessibility_id:comment-item` };
     }
     case 'message': {
       const value = payload.message ?? payload.message_text ?? payload.text;
@@ -234,7 +279,7 @@ async function runAction(session, action, payload, locators) {
       if (!await visible(receipt) || !(await text(receipt)).includes(value)) {
         throw new IosSessionError('unknown', 'Message was not verified by a provider read-back.');
       }
-      return { action, evidence: 'tiktok-ios@1:accessibility_id:message-item' };
+      return { action, evidence: `${locatorVersion}:accessibility_id:message-item` };
     }
     default:
       throw new IosSessionError('provider_rejected', `Unsupported iOS action: ${action}`);
@@ -259,13 +304,18 @@ export async function executeIosAction({
   const actions = orderedActions(action);
   let session = account?.session ?? resolvedAccount.session ?? device.session ?? null;
   let ownedSession = false;
-  const locators = Object.freeze({ ...IOS_LOCATORS, ...(payload.locators ?? resolvedAccount.locators ?? {}) });
   try {
     if (!actions.length || actions.some((item) => typeof item !== 'string')) {
       throw new IosSessionError('provider_rejected', 'An iOS action is required.');
     }
     validateOrder(actions);
     if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
+    const customLocators = payload.locators ?? resolvedAccount.locators ?? null;
+    if (customLocators && !pilotAllowed(payload.pilotEnabled ?? resolvedAccount.pilot_enabled)) {
+      throw new IosSessionError('pilot_required', 'Custom iOS locators require the authorized pilot flag.');
+    }
+    const locatorVersion = customLocators ? 'tiktok-ios@1:pilot-custom' : 'tiktok-ios@1';
+    const locators = Object.freeze({ ...IOS_LOCATORS, ...(customLocators ?? {}) });
     if (!session) {
       session = createXcuitestSession({
         device,
@@ -278,17 +328,19 @@ export async function executeIosAction({
       ownedSession = true;
     }
     if (typeof session.launch === 'function') await session.launch();
-    await prepareCreator(session, creator, locators);
+    const resolvedCreator = await prepareCreator(session, creator, locators);
+    const receiptCreator = { ...creator, ...resolvedCreator };
     const receipts = [];
     for (const currentAction of actions) {
       if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
-      const result = await runAction(session, currentAction, payload, locators);
+      const result = await runAction(session, currentAction, payload, locators, locatorVersion);
       receipts.push(receiptFor({
         account: resolvedAccount,
-        creator,
+        creator: receiptCreator,
         action: currentAction,
         evidence: result.evidence,
         payload,
+        locatorVersion,
       }));
     }
     const final = receipts.at(-1);

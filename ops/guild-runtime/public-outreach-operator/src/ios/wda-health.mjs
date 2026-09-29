@@ -83,6 +83,7 @@ export function createWdaHealthChecker({
   prerequisites = null,
   prerequisiteProbe = detectMacPrerequisites,
   driverProbe = null,
+  requireProbe = true,
 } = {}) {
   return async function checkWdaHealth({ device = {}, driver = null } = {}) {
     const checked = prerequisites
@@ -134,6 +135,15 @@ export function createWdaHealthChecker({
         error_code: 'wda_unavailable',
         prerequisites: normalized,
         message: normalized.reason ?? 'macOS, Xcode, and a signed WebDriverAgent are required.',
+      };
+    }
+    if (requireProbe && typeof driverProbe !== 'function') {
+      return {
+        ok: false,
+        state: 'manual_required',
+        error_code: 'wda_probe_required',
+        prerequisites: normalized,
+        message: 'A live WebDriverAgent health probe is required before marking the device ready.',
       };
     }
     if (typeof driverProbe === 'function') {

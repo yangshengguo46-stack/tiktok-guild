@@ -5,13 +5,15 @@
   "type": "module",
   "description": "Versioned execution shell for native DeerFlow public outreach tasks.",
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "ios:install-driver": "appium driver install --source=npm appium-xcuitest-driver@12.13.3"
   },
   "engines": {
     "node": ">=22.16"
   },
   "dependencies": {
     "appium": "3.1.0",
+    "appium-xcuitest-driver": "12.13.3",
     "playwright": "1.59.1"
   }
 }
