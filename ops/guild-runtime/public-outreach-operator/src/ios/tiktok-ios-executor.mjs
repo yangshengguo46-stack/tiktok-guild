@@ -16,6 +16,7 @@ const MANUAL_CODES = new Set([
   'unknown',
   'manual_required',
   'pilot_required',
+  'already_state',
 ]);
 
 export const IOS_LOCATORS = Object.freeze({
@@ -173,6 +174,43 @@ async function active(element) {
   return /\b(liked|following|已点赞|已关注)\b/i.test(values.join(' '));
 }
 
+async function receiptSnapshot(session, locator) {
+  const count = typeof session.count === 'function' ? await session.count(locator) : null;
+  let element = null;
+  try {
+    element = await session.find(locator);
+  } catch {
+    // A missing receipt before an action is a valid baseline.
+  }
+  if (!element) return { count, exists: false, marker: null, text: '' };
+  const marker = await attribute(element, 'data-receipt-id')
+    ?? await attribute(element, 'data-message-id')
+    ?? await attribute(element, 'data-id')
+    ?? await attribute(element, 'id')
+    ?? await attribute(element, 'data-created-at');
+  return {
+    count,
+    exists: true,
+    marker: marker ?? null,
+    text: await text(element),
+  };
+}
+
+function freshReceipt(before, after, expectedText) {
+  if (!after.exists || !after.text.includes(expectedText)) return null;
+  if (before.count !== null && after.count !== null && after.count > before.count) {
+    return { kind: 'count', before: before.count, after: after.count };
+  }
+  if (after.marker && after.marker !== before.marker) {
+    return { kind: 'marker', before: before.marker, after: after.marker };
+  }
+  return null;
+}
+
+function transitionEvidence(locatorVersion, action, locator, before, after) {
+  return `${locatorVersion}:${action}:${locatorDescription(locator)}:transition:${String(before)}->${String(after)}`;
+}
+
 function receiptFor({ account, creator, action, evidence, payload, locatorVersion }) {
   const senderAccountId = accountId(account);
   const creatorUid = creatorId(creator);
@@ -254,40 +292,74 @@ async function runAction(session, action, payload, locators, locatorVersion) {
     case 'like': {
       const control = await session.find(locators.likeButton);
       if (!await visible(control)) throw new IosSessionError('selector_missing', 'Like control is missing.');
-      if (!await active(control)) await session.tap(locators.likeButton);
+      const beforeActive = await active(control);
+      if (beforeActive) {
+        throw new IosSessionError('already_state', 'Like was already active before this task.', {
+          action,
+          state: 'active',
+        });
+      }
+      await session.tap(locators.likeButton);
       const readBack = await session.find(locators.likeButton);
-      if (!await active(readBack)) throw new IosSessionError('unknown', 'Like did not produce a verified active state.');
-      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.likeButton)}` };
+      const afterActive = await active(readBack);
+      if (!afterActive) throw new IosSessionError('unknown', 'Like did not produce an inactive-to-active transition.');
+      return {
+        action,
+        evidence: transitionEvidence(locatorVersion, action, locators.likeButton, beforeActive, afterActive),
+      };
     }
     case 'follow': {
       const control = await session.find(locators.followButton);
       if (!await visible(control)) throw new IosSessionError('selector_missing', 'Follow control is missing.');
-      if (!await active(control)) await session.tap(locators.followButton);
+      const beforeActive = await active(control);
+      if (beforeActive) {
+        throw new IosSessionError('already_state', 'Follow was already active before this task.', {
+          action,
+          state: 'active',
+        });
+      }
+      await session.tap(locators.followButton);
       const readBack = await session.find(locators.followButton);
-      if (!await active(readBack)) throw new IosSessionError('unknown', 'Follow did not produce a verified active state.');
-      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.followButton)}` };
+      const afterActive = await active(readBack);
+      if (!afterActive) throw new IosSessionError('unknown', 'Follow did not produce an inactive-to-active transition.');
+      return {
+        action,
+        evidence: transitionEvidence(locatorVersion, action, locators.followButton, beforeActive, afterActive),
+      };
     }
     case 'comment': {
       const value = payload.comment ?? payload.comment_text ?? payload.text;
       if (typeof value !== 'string' || !value.trim()) throw new IosSessionError('provider_rejected', 'Comment text is required.');
+      const before = await receiptSnapshot(session, locators.commentReceipt);
       await session.type(locators.commentInput, value);
       await session.tap(locators.commentSubmit);
-      const receipt = await session.find(locators.commentReceipt);
-      if (!await visible(receipt) || !(await text(receipt)).includes(value)) {
-        throw new IosSessionError('unknown', 'Comment was not verified by a provider read-back.');
-      }
-      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.commentReceipt)}` };
+      const after = await receiptSnapshot(session, locators.commentReceipt);
+      const fresh = freshReceipt(before, after, value);
+      if (!fresh) throw new IosSessionError('unknown', 'Comment did not produce fresh provider receipt evidence.', {
+        before,
+        after,
+      });
+      return {
+        action,
+        evidence: `${locatorVersion}:${action}:${locatorDescription(locators.commentReceipt)}:fresh-${fresh.kind}:${fresh.before}->${fresh.after}`,
+      };
     }
     case 'message': {
       const value = payload.message ?? payload.message_text ?? payload.text;
       if (typeof value !== 'string' || !value.trim()) throw new IosSessionError('provider_rejected', 'Message text is required.');
+      const before = await receiptSnapshot(session, locators.messageReceipt);
       await session.type(locators.messageInput, value);
       await session.tap(locators.messageSubmit);
-      const receipt = await session.find(locators.messageReceipt);
-      if (!await visible(receipt) || !(await text(receipt)).includes(value)) {
-        throw new IosSessionError('unknown', 'Message was not verified by a provider read-back.');
-      }
-      return { action, evidence: `${locatorVersion}:${action}:${locatorDescription(locators.messageReceipt)}` };
+      const after = await receiptSnapshot(session, locators.messageReceipt);
+      const fresh = freshReceipt(before, after, value);
+      if (!fresh) throw new IosSessionError('unknown', 'Message did not produce fresh provider receipt evidence.', {
+        before,
+        after,
+      });
+      return {
+        action,
+        evidence: `${locatorVersion}:${action}:${locatorDescription(locators.messageReceipt)}:fresh-${fresh.kind}:${fresh.before}->${fresh.after}`,
+      };
     }
     default:
       throw new IosSessionError('provider_rejected', `Unsupported iOS action: ${action}`);

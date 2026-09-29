@@ -248,6 +248,30 @@ export function createXcuitestSession({
     return { ok: true, locator, text: value };
   }
 
+  async function count(locator) {
+    const activeDriver = await ensureDriver();
+    if (typeof activeDriver.count === 'function') {
+      const value = await activeDriver.count(locator);
+      return Number.isFinite(Number(value)) ? Number(value) : null;
+    }
+    if (typeof activeDriver.$$ === 'function') {
+      const elements = await activeDriver.$$(typeof locator === 'string' ? locator : locator?.accessibility_id ?? locator);
+      return Array.isArray(elements) ? elements.length : null;
+    }
+    if (typeof activeDriver.findElements === 'function') {
+      const kind = locatorKind(locator);
+      const strategy = kind === 'accessibility_id' || kind === 'accessibilityId'
+        ? 'accessibility id'
+        : kind === 'text' || kind === 'label' ? 'xpath' : kind;
+      const value = strategy === 'xpath'
+        ? `//XCUIElementTypeAny[@label="${String(locator[kind]).replaceAll('"', '\\"')}"]`
+        : locator?.[kind] ?? locator;
+      const elements = await activeDriver.findElements(strategy, value);
+      return Array.isArray(elements) ? elements.length : null;
+    }
+    return null;
+  }
+
   async function readCreatorIdentity(locator) {
     const identity = await find(locator);
     return {
@@ -364,6 +388,7 @@ export function createXcuitestSession({
     find,
     tap,
     type,
+    count,
     navigateToCreator,
     readCreatorIdentity,
     screenshot,

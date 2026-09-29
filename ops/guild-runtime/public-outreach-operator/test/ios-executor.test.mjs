@@ -59,10 +59,32 @@ class FakeElement {
 }
 
 class FakeDriver {
-  constructor({ launchError = null, locked = false, missingWda = false } = {}) {
+  constructor({
+    launchError = null,
+    locked = false,
+    missingWda = false,
+    likeActive = false,
+    followActive = false,
+    existingCommentText = '',
+    existingMessageText = '',
+    receiptMarkers = true,
+    receiptCountSupport = true,
+    countIncrementOnSubmit = true,
+  } = {}) {
     this.launchError = launchError;
     this.locked = locked;
     this.missingWda = missingWda;
+    this.receiptMarkers = receiptMarkers;
+    this.receiptCountSupport = receiptCountSupport;
+    this.countIncrementOnSubmit = countIncrementOnSubmit;
+    this.receiptCounts = {
+      comment: existingCommentText ? 1 : 0,
+      message: existingMessageText ? 1 : 0,
+    };
+    this.receiptSequences = {
+      comment: existingCommentText ? 1 : 0,
+      message: existingMessageText ? 1 : 0,
+    };
     this.controls = new Map();
     this.controls.set('user-profile', new FakeElement({
       attributes: { 'data-creator-uid': 'creator-001', 'data-creator-handle': 'creator' },
@@ -76,26 +98,50 @@ class FakeDriver {
       },
     }));
     this.controls.set('like-button', new FakeElement({
-      attributes: { 'aria-pressed': 'false' },
+      attributes: { 'aria-pressed': String(likeActive) },
       onClick: (element) => { element.attributes['aria-pressed'] = 'true'; },
     }));
     this.controls.set('follow-button', new FakeElement({
-      attributes: { 'aria-pressed': 'false' },
+      attributes: { 'aria-pressed': String(followActive) },
       onClick: (element) => { element.attributes['aria-pressed'] = 'true'; },
     }));
-    const commentReceipt = new FakeElement();
+    const commentReceipt = new FakeElement({
+      text: existingCommentText,
+      visible: Boolean(existingCommentText),
+      attributes: this.receiptMarkers && existingCommentText
+        ? { 'data-receipt-id': 'comment-existing-1' }
+        : {},
+    });
     const commentInput = new FakeElement();
     this.controls.set('comment-input', commentInput);
     this.controls.set('comment-item', commentReceipt);
     this.controls.set('comment-submit', new FakeElement({
-      onClick: () => { commentReceipt.text = commentInput.text; commentReceipt.visible = true; },
+      onClick: () => {
+        if (this.countIncrementOnSubmit) this.receiptCounts.comment += 1;
+        this.receiptSequences.comment += 1;
+        commentReceipt.text = commentInput.text;
+        commentReceipt.visible = true;
+        if (this.receiptMarkers) commentReceipt.attributes['data-receipt-id'] = `comment-${this.receiptSequences.comment}`;
+      },
     }));
-    const messageReceipt = new FakeElement();
+    const messageReceipt = new FakeElement({
+      text: existingMessageText,
+      visible: Boolean(existingMessageText),
+      attributes: this.receiptMarkers && existingMessageText
+        ? { 'data-message-id': 'message-existing-1' }
+        : {},
+    });
     const messageInput = new FakeElement();
     this.controls.set('message-input', messageInput);
     this.controls.set('message-item', messageReceipt);
     this.controls.set('message-submit', new FakeElement({
-      onClick: () => { messageReceipt.text = messageInput.text; messageReceipt.visible = true; },
+      onClick: () => {
+        if (this.countIncrementOnSubmit) this.receiptCounts.message += 1;
+        this.receiptSequences.message += 1;
+        messageReceipt.text = messageInput.text;
+        messageReceipt.visible = true;
+        if (this.receiptMarkers) messageReceipt.attributes['data-message-id'] = `message-${this.receiptSequences.message}`;
+      },
     }));
   }
 
@@ -106,6 +152,14 @@ class FakeDriver {
   async find(locator) {
     const value = typeof locator === 'string' ? locator : locator.accessibility_id;
     return this.controls.get(value) ?? null;
+  }
+
+  async count(locator) {
+    if (!this.receiptCountSupport) return null;
+    const value = typeof locator === 'string' ? locator : locator.accessibility_id;
+    if (value === 'comment-item') return this.receiptCounts.comment;
+    if (value === 'message-item') return this.receiptCounts.message;
+    return null;
   }
 
   async takeScreenshot() { return Buffer.from('fake-png').toString('base64'); }
@@ -525,6 +579,88 @@ test('custom iOS locators require pilot authorization and coordinate fallbacks g
   assert.equal(coordinate.manual_takeover.status, 'manual_required');
 });
 
+test('comment and message require a fresh receipt beyond stale visible text', async () => {
+  const commentDevices = await registry();
+  const commentRegistered = await commentDevices.registerDevice(device());
+  const staleComment = await executeIosAction({
+    device: {
+      ...commentRegistered.device,
+      registry: commentDevices,
+      healthCheck: strictHealth,
+    },
+    account: account({
+      driver: new FakeDriver({
+        existingCommentText: 'hello',
+        receiptMarkers: false,
+        receiptCountSupport: false,
+      }),
+    }),
+    creator: { creator_uid: 'creator-001' },
+    action: 'comment',
+    payload: { comment: 'hello', testOnly: true },
+  });
+  assert.equal(staleComment.verified, false);
+  assert.equal(staleComment.error_code, 'unknown');
+  assert.equal(staleComment.manual_takeover.status, 'manual_required');
+
+  const messageDevices = await registry();
+  const messageRegistered = await messageDevices.registerDevice(device());
+  const staleMessage = await executeIosAction({
+    device: {
+      ...messageRegistered.device,
+      registry: messageDevices,
+      healthCheck: strictHealth,
+    },
+    account: account({
+      driver: new FakeDriver({
+        existingMessageText: 'hello again',
+        receiptMarkers: false,
+        receiptCountSupport: false,
+      }),
+    }),
+    creator: { creator_uid: 'creator-001' },
+    action: 'message',
+    payload: { message: 'hello again', testOnly: true },
+  });
+  assert.equal(staleMessage.verified, false);
+  assert.equal(staleMessage.error_code, 'unknown');
+  assert.equal(staleMessage.manual_takeover.status, 'manual_required');
+});
+
+test('like and follow require an inactive-to-active transition', async () => {
+  const likeDevices = await registry();
+  const likeRegistered = await likeDevices.registerDevice(device());
+  const alreadyLiked = await executeIosAction({
+    device: {
+      ...likeRegistered.device,
+      registry: likeDevices,
+      healthCheck: strictHealth,
+    },
+    account: account({ driver: new FakeDriver({ likeActive: true }) }),
+    creator: { creator_uid: 'creator-001' },
+    action: 'like',
+  });
+  assert.equal(alreadyLiked.verified, false);
+  assert.equal(alreadyLiked.error_code, 'already_state');
+  assert.equal(alreadyLiked.manual_takeover.status, 'manual_required');
+
+  const followDevices = await registry();
+  const followRegistered = await followDevices.registerDevice(device());
+  const alreadyFollowed = await executeIosAction({
+    device: {
+      ...followRegistered.device,
+      registry: followDevices,
+      healthCheck: strictHealth,
+    },
+    account: account({ driver: new FakeDriver({ followActive: true }) }),
+    creator: { creator_uid: 'creator-001' },
+    action: 'follow',
+  });
+  assert.equal(alreadyFollowed.verified, false);
+  assert.equal(alreadyFollowed.error_code, 'already_state');
+  assert.equal(alreadyFollowed.manual_takeover.status, 'manual_required');
+});
+
 test('ordered like comment follow and message return the same receipt envelope', async () => {
   const devices = await registry();
   const registered = await devices.registerDevice(device());
@@ -543,6 +679,7 @@ test('ordered like comment follow and message return the same receipt envelope',
   assert.equal(result.receipt_payload.receipt_type, 'public_action_receipt');
   assert.deepEqual(result.receipt_payload.actions.map((item) => item.action), ['like', 'comment', 'follow']);
   assert.equal(result.receipt_payload.sender_account_id, 'ios-account-001');
+  assert.match(result.receipt_payload.actions[1].evidence[0], /fresh-count:0->1/);
 
   const message = await executeIosAction({
     device: {
@@ -557,6 +694,7 @@ test('ordered like comment follow and message return the same receipt envelope',
   });
   assert.equal(message.verified, true);
   assert.equal(message.receipt_payload.receipt_type, 'dm_receipt');
+  assert.match(message.receipt_payload.evidence[0], /fresh-count:0->1/);
 });
 
 test('evidence can be persisted to the configured root and never proves success alone', async () => {
