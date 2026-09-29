@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Index, Integer, String, text
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from deerflow.persistence.base import Base
@@ -74,6 +74,29 @@ class CreatorClaimRow(Base):
     __table_args__ = (CheckConstraint("status IN ('gray','public_touched','contacted','replied','closed')", name="ck_creator_claim_status"),)
 
 
+class SenderAccountRow(Base):
+    """A persisted sender identity used by one or more outreach sequences."""
+
+    __tablename__ = "sender_account"
+
+    owner_user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    sender_account_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    external_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    profile_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="enabled", server_default="enabled")
+    capabilities_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    last_health_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "sender_account_id", name="uq_sender_account_owner_id"),
+        CheckConstraint("channel IN ('web','ios')", name="ck_sender_account_channel"),
+    )
+
+
 class CreatorOutreachSequenceRow(Base):
     __tablename__ = "creator_outreach_sequence"
 
@@ -111,3 +134,41 @@ class CreatorOutreachReceiptRow(Base):
     payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+
+class CreatorOutreachActionTaskRow(Base):
+    """One durable, idempotent action in a creator outreach sequence."""
+
+    __tablename__ = "creator_outreach_action_task"
+
+    task_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    creator_uid: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    sender_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    receipt_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "idempotency_key", name="uq_creator_outreach_action_idempotency"),
+        Index(
+            "uq_creator_outreach_active_action",
+            "owner_user_id",
+            "creator_uid",
+            "sequence_no",
+            "action",
+            unique=True,
+            sqlite_where=text("state IN ('pending','leased')"),
+            postgresql_where=text("state IN ('pending','leased')"),
+        ),
+        CheckConstraint("action IN ('like','comment','follow','message')", name="ck_creator_outreach_action"),
+        CheckConstraint("state IN ('pending','leased','completed','failed')", name="ck_creator_outreach_action_state"),
+    )

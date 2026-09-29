@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,8 +15,10 @@ from deerflow.persistence.creator_agent_relationship.model import (
     CreatorClaimRow,
     CreatorHandoffBatchRow,
     CreatorHandoffCandidateRow,
+    CreatorOutreachActionTaskRow,
     CreatorOutreachReceiptRow,
     CreatorOutreachSequenceRow,
+    SenderAccountRow,
 )
 
 _MAX_JSON_BYTES = 32_768
@@ -34,6 +37,13 @@ _REQUIRED_EVIDENCE = {
     "closed": "closure_receipt",
 }
 _RECEIPT_KINDS = frozenset(_REQUIRED_EVIDENCE.values())
+_SENDER_CHANNELS = frozenset({"web", "ios"})
+_ACTION_KINDS = frozenset({"like", "comment", "follow", "message"})
+_ACTION_STATES = frozenset({"pending", "leased", "completed", "failed"})
+_ACTIVE_SEQUENCE_STATES = ("pending", "public_touched", "contacted", "replied")
+_ACTIVE_SENDER_STATES = frozenset({"enabled", "healthy", "ready", "active"})
+_MAX_WEB_SENDER_ACCOUNTS = 50
+_MAX_ACTIVE_SENDER_ACCOUNTS = 10
 
 
 def _bounded(value: Any, *, field: str) -> Any:
@@ -57,11 +67,380 @@ def _dataset_hash(value: str) -> str:
     return value
 
 
+def _same_datetime(left: datetime | None, right: datetime | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    if left.tzinfo is not None:
+        left = left.astimezone(UTC).replace(tzinfo=None)
+    if right.tzinfo is not None:
+        right = right.astimezone(UTC).replace(tzinfo=None)
+    return left == right
+
+
 class CreatorOutreachRepository:
     """Repository whose claim key is owner plus creator, independent of sender."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
+
+    async def register_sender_account(
+        self,
+        owner_user_id: str,
+        sender_account_id: str,
+        channel: str,
+        *,
+        external_ref: str | None = None,
+        profile_ref: str | None = None,
+        device_ref: str | None = None,
+        status: str = "enabled",
+        capabilities: dict[str, Any] | list[Any] | None = None,
+        capabilities_json: dict[str, Any] | list[Any] | None = None,
+        last_health_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Register one sender identity, preserving identical replays."""
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        sender_account_id = _text(sender_account_id, "sender_account_id")
+        if channel not in _SENDER_CHANNELS:
+            raise ValueError("channel must be web or ios")
+        status = _text(status, "status", 32)
+        if capabilities is not None and capabilities_json is not None and capabilities != capabilities_json:
+            raise ValueError("capabilities and capabilities_json conflict")
+        capabilities = capabilities if capabilities is not None else capabilities_json
+        capabilities = _bounded({} if capabilities is None else capabilities, field="capabilities")
+        for value, field, limit in (
+            (external_ref, "external_ref", 255),
+            (profile_ref, "profile_ref", 255),
+            (device_ref, "device_ref", 255),
+        ):
+            if value is not None:
+                _text(value, field, limit)
+        async with self.session_factory() as session:
+            existing = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
+            if existing is not None:
+                expected = (channel, external_ref, profile_ref, device_ref, status, capabilities, last_health_at)
+                actual = (
+                    existing.channel,
+                    existing.external_ref,
+                    existing.profile_ref,
+                    existing.device_ref,
+                    existing.status,
+                    existing.capabilities_json,
+                    existing.last_health_at,
+                )
+                if actual[:-1] != expected[:-1] or not _same_datetime(actual[-1], expected[-1]):
+                    raise ValueError("sender account replay conflict")
+                return existing.to_dict()
+            if channel == "web":
+                web_count = await session.scalar(select(func.count()).select_from(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id, SenderAccountRow.channel == "web"))
+                if int(web_count or 0) >= _MAX_WEB_SENDER_ACCOUNTS:
+                    raise ValueError("maximum of 50 web sender accounts reached")
+            row = SenderAccountRow(
+                owner_user_id=owner_user_id,
+                sender_account_id=sender_account_id,
+                channel=channel,
+                external_ref=external_ref,
+                profile_ref=profile_ref,
+                device_ref=device_ref,
+                status=status,
+                capabilities_json=capabilities,
+                last_health_at=last_health_at,
+            )
+            try:
+                async with session.begin_nested():
+                    session.add(row)
+                    await session.flush()
+            except IntegrityError:
+                existing = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
+                if existing is None:
+                    raise
+                if (
+                    existing.channel,
+                    existing.external_ref,
+                    existing.profile_ref,
+                    existing.device_ref,
+                    existing.status,
+                    existing.capabilities_json,
+                ) != (channel, external_ref, profile_ref, device_ref, status, capabilities) or not _same_datetime(existing.last_health_at, last_health_at):
+                    raise ValueError("sender account replay conflict")
+                return existing.to_dict()
+            await session.commit()
+            return row.to_dict()
+
+    async def list_sender_accounts(
+        self,
+        owner_user_id: str,
+        *,
+        channel: str | None = None,
+        status: str | None = None,
+        active_only: bool = False,
+        limit: int | None = None,
+        active_limit: int | None = None,
+        max_active: int | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        if channel is not None and channel not in _SENDER_CHANNELS:
+            raise ValueError("channel must be web or ios")
+        if status is not None:
+            status = _text(status, "status", 32)
+        if active_limit is not None and max_active is not None and active_limit != max_active:
+            raise ValueError("active_limit and max_active conflict")
+        if max_active is not None:
+            active_limit = max_active
+        if active_limit is not None:
+            active_only = True
+            if limit is not None and limit != active_limit:
+                raise ValueError("limit and active_limit conflict")
+            limit = active_limit
+        if limit is not None and (type(limit) is not int or limit <= 0):
+            raise ValueError("limit must be a positive integer")
+        stmt = select(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id)
+        if channel is not None:
+            stmt = stmt.where(SenderAccountRow.channel == channel)
+        if status is not None:
+            stmt = stmt.where(SenderAccountRow.status == status)
+        if active_only:
+            stmt = stmt.where(SenderAccountRow.status.in_(_ACTIVE_SENDER_STATES))
+            if limit is None:
+                limit = _MAX_ACTIVE_SENDER_ACCOUNTS
+        stmt = stmt.order_by(SenderAccountRow.created_at, SenderAccountRow.sender_account_id)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        async with self.session_factory() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+            return [row.to_dict() for row in rows]
+
+    async def enqueue_action(
+        self,
+        owner_user_id: str,
+        creator_uid: str,
+        sequence_no: int,
+        sender_account_id: str,
+        action: str,
+        idempotency_key: str,
+        *,
+        payload: dict[str, Any] | list[Any] | None = None,
+        payload_json: dict[str, Any] | list[Any] | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        owner_user_id = _text(owner_user_id, "owner_user_id")
+        creator_uid = _text(creator_uid, "creator_uid")
+        sender_account_id = _text(sender_account_id, "sender_account_id")
+        if type(sequence_no) is not int or sequence_no < 1:
+            raise ValueError("sequence_no must be a positive integer")
+        if action not in _ACTION_KINDS:
+            raise ValueError("unsupported outreach action")
+        idempotency_key = _text(idempotency_key, "idempotency_key", 255)
+        if payload is not None and payload_json is not None and payload != payload_json:
+            raise ValueError("payload and payload_json conflict")
+        payload = payload if payload is not None else payload_json
+        payload = _bounded({} if payload is None else payload, field="action payload")
+        if task_id is None:
+            task_id = uuid4().hex
+        else:
+            task_id = _text(task_id, "task_id")
+        async with self.session_factory() as session:
+            existing = await session.scalar(
+                select(CreatorOutreachActionTaskRow).where(
+                    CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+                    CreatorOutreachActionTaskRow.idempotency_key == idempotency_key,
+                )
+            )
+            expected = (creator_uid, sequence_no, sender_account_id, action, payload)
+            if existing is not None:
+                actual = (
+                    existing.creator_uid,
+                    existing.sequence_no,
+                    existing.sender_account_id,
+                    existing.action,
+                    existing.payload_json,
+                )
+                if actual != expected:
+                    raise ValueError("action idempotency replay conflict")
+                return existing.to_dict()
+            sequence = await session.get(CreatorOutreachSequenceRow, (owner_user_id, creator_uid, sequence_no))
+            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
+                raise ValueError("an active bound sequence is required")
+            if sequence.sender_account_id != sender_account_id:
+                raise ValueError("action sender differs from the active sequence sender")
+            row = CreatorOutreachActionTaskRow(
+                task_id=task_id,
+                owner_user_id=owner_user_id,
+                creator_uid=creator_uid,
+                sequence_no=sequence_no,
+                sender_account_id=sender_account_id,
+                action=action,
+                idempotency_key=idempotency_key,
+                payload_json=payload,
+                state="pending",
+            )
+            try:
+                async with session.begin_nested():
+                    session.add(row)
+                    await session.flush()
+            except IntegrityError:
+                existing = await session.scalar(
+                    select(CreatorOutreachActionTaskRow).where(
+                        CreatorOutreachActionTaskRow.owner_user_id == owner_user_id,
+                        CreatorOutreachActionTaskRow.idempotency_key == idempotency_key,
+                    )
+                )
+                if existing is not None:
+                    if (
+                        existing.creator_uid,
+                        existing.sequence_no,
+                        existing.sender_account_id,
+                        existing.action,
+                        existing.payload_json,
+                    ) != expected:
+                        raise ValueError("action idempotency replay conflict")
+                    return existing.to_dict()
+                raise ValueError("an active action task already exists") from None
+            await session.commit()
+            return row.to_dict()
+
+    async def claim_action(
+        self,
+        task_id: str,
+        *,
+        lease_seconds: int = 60,
+        now: datetime | None = None,
+        lease_owner: str | None = None,
+    ) -> dict[str, Any] | None:
+        task_id = _text(task_id, "task_id")
+        if type(lease_seconds) is not int or lease_seconds <= 0:
+            raise ValueError("lease_seconds must be a positive integer")
+        if lease_owner is not None:
+            _text(lease_owner, "lease_owner")
+        now = now or datetime.now(UTC)
+        lease_until = now + timedelta(seconds=lease_seconds)
+        stmt = (
+            update(CreatorOutreachActionTaskRow)
+            .where(
+                CreatorOutreachActionTaskRow.task_id == task_id,
+                or_(
+                    CreatorOutreachActionTaskRow.state == "pending",
+                    and_(
+                        CreatorOutreachActionTaskRow.state == "leased",
+                        or_(
+                            CreatorOutreachActionTaskRow.lease_until.is_(None),
+                            CreatorOutreachActionTaskRow.lease_until <= now,
+                        ),
+                    ),
+                ),
+            )
+            .values(
+                state="leased",
+                lease_until=lease_until,
+                attempt_count=CreatorOutreachActionTaskRow.attempt_count + 1,
+                updated_at=now,
+            )
+        )
+        async with self.session_factory() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+            if not result.rowcount:
+                return None
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            return row.to_dict() if row is not None else None
+
+    async def complete_action(
+        self,
+        task_id: str,
+        *,
+        sender_account_id: str,
+        idempotency_key: str,
+        receipt_id: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        task_id = _text(task_id, "task_id")
+        sender_account_id = _text(sender_account_id, "sender_account_id")
+        idempotency_key = _text(idempotency_key, "idempotency_key", 255)
+        if receipt is not None:
+            receipt = _bounded(receipt, field="receipt")
+            receipt_id = receipt_id or receipt.get("receipt_id")
+        receipt_id = _text(receipt_id, "receipt_id")
+        now = now or datetime.now(UTC)
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None:
+                raise ValueError("action task does not exist")
+            if row.sender_account_id != sender_account_id or row.idempotency_key != idempotency_key:
+                raise ValueError("action completion identity does not match task")
+            if row.state == "completed":
+                if row.receipt_id != receipt_id:
+                    raise ValueError("completed action replay conflict")
+                return row.to_dict()
+            if row.state not in ("pending", "leased"):
+                raise ValueError("action task is not completable")
+            row.state = "completed"
+            row.lease_until = None
+            row.receipt_id = receipt_id
+            row.error_code = None
+            row.updated_at = now
+            await session.commit()
+            return row.to_dict()
+
+    async def fail_action(
+        self,
+        task_id: str,
+        *,
+        error_code: str,
+        sender_account_id: str | None = None,
+        idempotency_key: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        task_id = _text(task_id, "task_id")
+        error_code = _text(error_code, "error_code", 128)
+        if sender_account_id is not None:
+            sender_account_id = _text(sender_account_id, "sender_account_id")
+        if idempotency_key is not None:
+            idempotency_key = _text(idempotency_key, "idempotency_key", 255)
+        now = now or datetime.now(UTC)
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None:
+                raise ValueError("action task does not exist")
+            if sender_account_id is not None and row.sender_account_id != sender_account_id:
+                raise ValueError("action failure identity does not match task")
+            if idempotency_key is not None and row.idempotency_key != idempotency_key:
+                raise ValueError("action failure identity does not match task")
+            if row.state == "failed":
+                if row.error_code != error_code:
+                    raise ValueError("failed action replay conflict")
+                return row.to_dict()
+            if row.state == "completed":
+                raise ValueError("completed action cannot fail")
+            row.state = "failed"
+            row.lease_until = None
+            row.error_code = error_code
+            row.updated_at = now
+            await session.commit()
+            return row.to_dict()
+
+    async def release_expired_action_leases(self, *, now: datetime | None = None) -> int:
+        now = now or datetime.now(UTC)
+        stmt = (
+            update(CreatorOutreachActionTaskRow)
+            .where(
+                CreatorOutreachActionTaskRow.state == "leased",
+                or_(
+                    CreatorOutreachActionTaskRow.lease_until.is_(None),
+                    CreatorOutreachActionTaskRow.lease_until <= now,
+                ),
+            )
+            .values(state="pending", lease_until=None, updated_at=now)
+        )
+        async with self.session_factory() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+            return int(result.rowcount or 0)
+
+    async def read_action_task(self, task_id: str) -> dict[str, Any] | None:
+        task_id = _text(task_id, "task_id")
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            return row.to_dict() if row is not None else None
 
     async def import_handoff(
         self,
