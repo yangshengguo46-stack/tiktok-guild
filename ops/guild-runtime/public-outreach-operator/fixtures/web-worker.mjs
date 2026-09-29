@@ -1,9 +1,9 @@
 // Only the external Chromium boundary is substituted. The worker protocol,
 // production resource composition and executors are the shipped code.
 import { readFile } from 'node:fs/promises';
-import { createProductionExecutor } from '../../src/production-executor.mjs';
-import { serveExecutionWorker } from '../../src/worker-protocol.mjs';
-import { PILOT_LOCATORS } from '../../src/web/page-objects.mjs';
+import { createProductionExecutor } from '../src/production-executor.mjs';
+import { serveExecutionWorker } from '../src/worker-protocol.mjs';
+import { PILOT_LOCATORS } from '../src/web/page-objects.mjs';
 function page() {
   let opened = false; let liked = false; let followed = false;
   const receipts = { comment: [], message: [] }; const values = {};

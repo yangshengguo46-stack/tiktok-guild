@@ -62,6 +62,9 @@ _RECOVERABLE_ERRORS = frozenset(
     {
         "unknown",
         "provider_unknown",
+        "external_attempt_unknown",
+        "receipt_persistence_failed",
+        "cancelled",
         "operator_unavailable",
         "timeout",
         "transient",
@@ -587,7 +590,7 @@ async def native_outreach_adapter(method: str, request: Request, body: dict[str,
     methods = {"listSenderAccounts", "registerSenderAccount", "healthSenderAccount", "disableSenderAccount", "enqueueAction", "getAction", "claimAction", "executeAction", "completeAction", "failAction", "reconcileActions"}
     if method not in methods:
         raise HTTPException(status_code=404, detail="Native outreach method not found")
-    forbidden = {"owner_user_id", "receipt", "receipt_payload", "verified", "provider_ref", "verification_source", "lease_owner", "lease_token"}
+    forbidden = {"owner_user_id", "receipt", "receipt_payload", "verified", "provider_ref", "verification_source", "lease_owner", "lease_token", "_external_attempt_started", "_external_attempt_token", "manual_required"}
     if forbidden.intersection(body):
         raise HTTPException(status_code=422, detail="Caller identity, receipts and execution leases cannot be supplied")
     reads = {"listSenderAccounts", "healthSenderAccount", "getAction", "reconcileActions"}

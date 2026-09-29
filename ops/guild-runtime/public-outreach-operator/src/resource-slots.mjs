@@ -17,6 +17,7 @@ export async function acquireResourceSlot({ root, kind, maximum }) {
       if (error.code !== 'EEXIST') throw error;
       let current;
       try { current = JSON.parse(await readFile(file, 'utf8')); } catch { continue; }
+      if (current.cleanup_required) continue;
       if (current.host !== os.hostname()) continue;
       try { process.kill(current.pid, 0); continue; } catch (probe) { if (probe.code !== 'ESRCH') continue; }
       if (kind === 'ios') continue; // A remote Appium session may outlive Node.
@@ -41,7 +42,14 @@ export async function acquireResourceSlot({ root, kind, maximum }) {
       }).catch(() => { /* Failed heartbeats never permit lease reclamation. */ });
     }, 1000);
     heartbeat.unref();
-    return { ok: true, async release() {
+    return { ok: true, async markCleanupRequired() {
+      heartbeatWrite = heartbeatWrite.then(async () => {
+        const current = JSON.parse(await readFile(file, 'utf8'));
+        if (current.token !== token) throw Error('Resource slot ownership lost');
+        await writeFile(file, JSON.stringify({ ...current, cleanup_required: true }), { mode: 0o600 });
+      });
+      await heartbeatWrite;
+    }, async release() {
       released = true; clearInterval(heartbeat); await heartbeatWrite;
       let current; try { current = JSON.parse(await readFile(file, 'utf8')); } catch { return; }
       if (current.token === token && current.pid === process.pid) await rm(file, { force: true });
@@ -55,9 +63,10 @@ export async function activeResourceSlots({ root, kind, maximum }) {
   for (let index = 0; index < maximum; index += 1) {
     try {
       const lock = JSON.parse(await readFile(path.join(root, 'slots', kind, `${index}.lock`), 'utf8'));
+      if (lock.cleanup_required) { count += 1; continue; }
       if (lock.host !== os.hostname()) { count += 1; continue; }
       try { process.kill(lock.pid, 0); count += 1; } catch (error) { if (error.code !== 'ESRCH') count += 1; }
-    } catch { /* An absent slot is idle. */ }
+    } catch (error) { if (error.code !== 'ENOENT') count += 1; }
   }
   return count;
 }

@@ -99,7 +99,7 @@ test('close and reopen preserves login storage and never shares profile director
   await reopened.close();
 });
 
-test('expired leases are recovered before a new batch claims a slot', async () => {
+test('expired undispatched leases are recovered before a new batch claims a slot', async () => {
   const profileRoot = await tempRoot();
   let current = 1000;
   const registry = createProfileRegistry({ profileRoot, clock: () => current, ownerAlive: () => false });
@@ -111,7 +111,7 @@ test('expired leases are recovered before a new batch claims a slot', async () =
     launchPersistentContext: fakeLauncher([]),
   });
   await pool.register(account('expiring'));
-  const first = await pool.claim('expiring');
+  const first = await registry.acquire('expiring', { leaseTtlMs: 100 });
   assert.equal(first.ok, true);
   current = 1200;
   const second = await pool.claim('expiring');
@@ -273,6 +273,8 @@ test('cross-process owner fencing prevents stale lease double ownership', async 
   assert.equal(stillOwned.error_code, 'profile_in_use');
 
   ownerAlive = false;
+  assert.equal((await poolB.claim('fenced')).error_code, 'profile_cleanup_required');
+  assert.equal((await poolA.release(oldLease.lease_id)).ok, true);
   const newLease = await poolB.claim('fenced');
   assert.equal(newLease.ok, true);
   assert.equal((await oldLease.assertLease()).error_code, 'lease_lost');

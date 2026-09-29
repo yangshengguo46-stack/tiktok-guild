@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
+import signal
+import sys
 import threading
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -386,7 +390,7 @@ async def test_native_web_sequence_uses_shipped_node_composition_and_method_shap
     configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web"}
     source = tmp_path / "web-config.json"
     source.write_text(json.dumps(configuration))
-    worker = ROOT / "ops/guild-runtime/public-outreach-operator/test/fixtures/web-worker.mjs"
+    worker = ROOT / "ops/guild-runtime/public-outreach-operator/fixtures/web-worker.mjs"
     transport = NodeExecutorTransport(worker_path=worker, config_path=source, runtime_root=tmp_path / "runtime", node=shutil.which("node"))
     service = PublicOutreachService(repo, transport, config=configuration)
     try:
@@ -402,3 +406,275 @@ async def test_native_web_sequence_uses_shipped_node_composition_and_method_shap
         assert (await service.capacity())["active"] == 0
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_capacity_keeps_unconfirmed_browser_cleanup_occupied_after_owner_death(repo, tmp_path):
+    slots = tmp_path / "slots" / "web"
+    slots.mkdir(parents=True)
+    (slots / "0.lock").write_text(json.dumps({"pid": 999999999, "cleanup_required": True}))
+    (slots / "1.lock").write_text(json.dumps({"pid": 999999998}))
+    (slots / "2.lock").write_text("interrupted lock write")
+    transport = NodeExecutorTransport(worker_path=WORKER, config_path=None, runtime_root=tmp_path)
+    service = PublicOutreachService(repo, transport, config={})
+    assert await service.capacity() == {"active": 2, "active_limit": 10}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [("owner", "sender", "creator"), ("other", "sender", "creator"), ("owner", "other", "creator")])
+async def test_existing_native_no_contact_fences_only_the_exact_scope(repo, tmp_path, provider, scope):
+    from deerflow.persistence.creator_agent_relationship import CreatorAgentRelationshipRepository
+
+    url, state = provider
+    tasks = await bound(repo)
+    await CreatorAgentRelationshipRepository(repo.session_factory).record_evidence(
+        owner_user_id=scope[0], account_id=scope[1], creator_uid=scope[2], event={"event_id": "refusal", "source_kind": "creator_message", "source_ref": "test-message", "text": "stop", "do_not_contact": True}
+    )
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    service = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=tmp_path / "runtime"), config=config(url))
+    try:
+        if scope == ("owner", "sender", "creator"):
+            with pytest.raises(ValueError, match="contact"):
+                await service.execute_task("owner", tasks[0]["task_id"])
+            assert await repo.claim_action(tasks[0]["task_id"], lease_owner="bypass") is None
+            assert state["sessions"] == 0
+        else:
+            assert (await service.execute_task("owner", tasks[0]["task_id"]))["task"]["state"] == "completed"
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["storage_before", "storage_after", "complete_before", "complete_after", "malformed", "persistence_exception"])
+async def test_unified_external_attempt_terminal_boundary(repo, tmp_path, provider, monkeypatch, phase):
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    transport = NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=tmp_path / "runtime")
+    service = PublicOutreachService(repo, transport, config=config(url))
+    try:
+        await service.execute_task("owner", tasks[0]["task_id"])
+        entered = asyncio.Event()
+        original_record = repo.record_receipt
+        original_complete = repo.complete_action
+        original_execute = transport.execute
+
+        async def record(**kwargs):
+            if kwargs.get("verified") and phase.startswith("storage"):
+                if phase == "storage_after":
+                    await original_record(**kwargs)
+                entered.set()
+                await asyncio.Event().wait()
+            if phase == "persistence_exception":
+                raise RuntimeError("storage unavailable")
+            return await original_record(**kwargs)
+
+        async def complete(*args, **kwargs):
+            if phase.startswith("complete"):
+                if phase == "complete_after":
+                    await original_complete(*args, **kwargs)
+                entered.set()
+                await asyncio.Event().wait()
+            return await original_complete(*args, **kwargs)
+
+        async def execute(**kwargs):
+            result = await original_execute(**kwargs)
+            if phase == "malformed":
+                result["receipt_payload"]["creator_uid"] = "wrong"
+            return result
+
+        monkeypatch.setattr(repo, "record_receipt", record)
+        monkeypatch.setattr(repo, "complete_action", complete)
+        monkeypatch.setattr(transport, "execute", execute)
+        if phase.startswith(("storage", "complete")):
+            execution = asyncio.create_task(service.execute_task("owner", tasks[1]["task_id"]))
+            await asyncio.wait_for(entered.wait(), 5)
+            await service.cancel_task(tasks[1]["task_id"])
+            if phase == "complete_after":
+                assert (await execution)["status"] == "duplicate"
+            else:
+                with pytest.raises(asyncio.CancelledError):
+                    await execution
+        else:
+            assert (await service.execute_task("owner", tasks[1]["task_id"]))["status"] == "unknown"
+        monkeypatch.setattr(repo, "record_receipt", original_record)
+        monkeypatch.setattr(repo, "complete_action", original_complete)
+        current = await repo.read_action_task(tasks[1]["task_id"])
+        if phase == "complete_after":
+            assert current["state"] == "completed"
+            assert (await service.execute_task("owner", current["task_id"]))["status"] == "duplicate"
+        else:
+            assert current["state"] == "failed"
+            assert current["payload_json"]["manual_required"] is True
+            assert (await repo.read_sender_account("owner", "sender"))["status"] == "paused"
+            assert await repo.claim_action(current["task_id"], lease_owner="blind", now=datetime.now(UTC) + timedelta(seconds=301)) is None
+            await repo.release_expired_action_leases(now=datetime.now(UTC) + timedelta(seconds=301))
+            with pytest.raises(ValueError):
+                await service.execute_task("owner", current["task_id"])
+            if phase in {"storage_after", "complete_before"}:
+                proof = await repo.read_action_receipt("owner", current["task_id"])
+                assert proof["verified"] is True
+                with pytest.raises(ValueError, match="verified"):
+                    await repo.mark_action_unknown("owner", current["task_id"], receipt_id="cannot-replace-proof", reason="manual override")
+                with pytest.raises(ValueError, match="verified"):
+                    await repo.retry_action("owner", current["task_id"], recoverable_error_codes=["cancelled"])
+        assert state["actions"].count("comment-submit") == 1
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", ["claim", "expired", "release"])
+async def test_dispatched_native_lease_can_never_be_automatically_reclaimed(repo, recovery):
+    tasks = await bound(repo)
+    claim = await repo.claim_action(tasks[0]["task_id"], lease_owner="first", lease_seconds=300)
+    await repo.mark_external_attempt_started(claim["task_id"], lease_owner=claim["lease_owner"], lease_token=claim["lease_token"])
+    future = datetime.now(UTC) + timedelta(seconds=301)
+    if recovery == "claim":
+        assert await repo.claim_action(claim["task_id"], lease_owner="second", now=future) is None
+    elif recovery == "expired":
+        assert await repo.release_expired_action_leases(now=future) == 1
+    else:
+        await repo.release_action_claim(claim["task_id"], lease_owner=claim["lease_owner"], lease_token=claim["lease_token"], now=future)
+    current = await repo.read_action_task(claim["task_id"])
+    assert current["state"] == "failed"
+    assert current["payload_json"]["manual_required"] is True
+    assert (await repo.read_sender_account("owner", "sender"))["status"] == "paused"
+    await repo.retry_action("owner", claim["task_id"], recoverable_error_codes=["external_attempt_unknown"])
+    current = await repo.read_action_task(claim["task_id"])
+    assert not current["payload_json"].get("_external_attempt_started")
+    assert await repo.claim_action(claim["task_id"], lease_owner="third") is None
+    await repo.set_sender_account_status("owner", "sender", status="enabled", reason="manually reconciled")
+    assert await repo.claim_action(claim["task_id"], lease_owner="third") is not None
+
+
+@pytest.mark.asyncio
+async def test_native_payload_cannot_forge_dispatch_or_manual_fields(repo):
+    tasks = await bound(repo)
+    for key in ["_external_attempt_started", "_external_attempt_token", "manual_required"]:
+        with pytest.raises(ValueError, match="owned"):
+            await repo.update_action_payload("owner", tasks[0]["task_id"], {key: True})
+        with pytest.raises(ValueError, match="owned"):
+            await repo.enqueue_action(owner_user_id="owner", creator_uid="creator", sequence_no=1, sender_account_id="sender", action="like", idempotency_key="forged-" + key, payload={key: True})
+
+
+@pytest.mark.asyncio
+async def test_no_contact_written_after_claim_still_stops_provider_dispatch(repo, tmp_path, provider, monkeypatch):
+    from deerflow.persistence.creator_agent_relationship import CreatorAgentRelationshipRepository
+
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    transport = NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=tmp_path / "runtime")
+    service = PublicOutreachService(repo, transport, config=config(url))
+    original = repo.mark_external_attempt_started
+
+    async def changed(*args, **kwargs):
+        await CreatorAgentRelationshipRepository(repo.session_factory).record_evidence(
+            owner_user_id="owner", account_id="sender", creator_uid="creator", event={"event_id": "late-refusal", "source_kind": "creator_message", "source_ref": "native-event", "text": "stop", "do_not_contact": True}
+        )
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "mark_external_attempt_started", changed)
+    try:
+        result = await service.execute_task("owner", tasks[0]["task_id"])
+        assert result["status"] == "unknown"
+        assert state["sessions"] == 0
+        assert transport.process is None
+        assert not result["task"]["payload_json"].get("_external_attempt_started")
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["before_proof", "after_proof"])
+async def test_hard_python_exit_after_real_node_result_never_replays_dispatched_comment(repo, tmp_path, provider, phase):
+    url, state = provider
+    tasks = await bound(repo)
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(config(url)))
+    runtime = tmp_path / "runtime"
+    service = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=runtime), config=config(url))
+    await service.execute_task("owner", tasks[0]["task_id"])
+    await service.close()
+    pid_file = tmp_path / "worker.pid"
+    child_file = tmp_path / "hard-exit.py"
+    child_file.write_text("""import asyncio,json,os,sys
+from pathlib import Path
+from sqlalchemy.ext.asyncio import create_async_engine,async_sessionmaker
+from app.gateway.public_outreach_service import NodeExecutorTransport,PublicOutreachService
+from deerflow.persistence.creator_agent_relationship import CreatorOutreachRepository
+async def main():
+    db,config_path,worker,runtime,task_id,pid_file,phase=sys.argv[1:]
+    engine=create_async_engine('sqlite+aiosqlite:///'+db)
+    repo=CreatorOutreachRepository(async_sessionmaker(engine,expire_on_commit=False))
+    transport=NodeExecutorTransport(worker_path=Path(worker),config_path=Path(config_path),runtime_root=Path(runtime))
+    service=PublicOutreachService(repo,transport,config=json.loads(Path(config_path).read_text()))
+    original=repo.record_receipt
+    async def terminate(**kwargs):
+        if kwargs.get('verified'):
+            Path(pid_file).write_text(str(transport.process.pid))
+            if phase=='after_proof':await original(**kwargs)
+            os._exit(12)
+        return await original(**kwargs)
+    repo.record_receipt=terminate
+    await service.execute_task('owner',task_id)
+asyncio.run(main())
+""")
+    db = str(repo.session_factory.kw["bind"].url.database)
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(child_file),
+        db,
+        str(source),
+        str(WORKER),
+        str(runtime),
+        tasks[1]["task_id"],
+        str(pid_file),
+        phase,
+        cwd=ROOT / "backend",
+        env={**os.environ, "PYTHONPATH": str(ROOT / "backend")},
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        output = await asyncio.wait_for(child.communicate(), 10)
+        assert child.returncode == 12, output
+        assert state["actions"].count("comment-submit") == 1
+        task = await repo.read_action_task(tasks[1]["task_id"])
+        assert task["payload_json"]["_external_attempt_started"] is True
+        await repo.release_expired_action_leases(now=datetime.now(UTC) + timedelta(seconds=301))
+        task = await repo.read_action_task(tasks[1]["task_id"])
+        assert task["state"] == "failed"
+        assert (await repo.read_sender_account("owner", "sender"))["status"] == "paused"
+        if phase == "after_proof":
+            proof = await repo.read_action_receipt("owner", task["task_id"])
+            assert proof["verified"] is True
+            with pytest.raises(ValueError, match="verified"):
+                await repo.retry_action("owner", task["task_id"], recoverable_error_codes=["external_attempt_unknown"])
+        restarted = PublicOutreachService(repo, NodeExecutorTransport(worker_path=WORKER, config_path=source, runtime_root=runtime), config=config(url))
+        try:
+            with pytest.raises(ValueError):
+                await restarted.execute_task("owner", task["task_id"])
+            assert restarted.transport.process is None
+        finally:
+            await restarted.close()
+        assert state["actions"].count("comment-submit") == 1
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+        if pid_file.exists():
+            pid = int(pid_file.read_text())
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            await asyncio.sleep(0.1)
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass

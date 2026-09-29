@@ -363,6 +363,7 @@ async def test_unknown_provider_ref_does_not_block_later_verified_receipt(repo):
     assert unknown["status"] == "unknown"
     assert unknown["receipt"]["provider_ref"] is None
     await repo.retry_action("guild", tasks[0]["task_id"], recoverable_error_codes={"unknown"})
+    await repo.set_sender_account_status("guild", "web:account-001", status="enabled", reason="manually reconciled")
     verified = await workflow.record_public_action_result(
         tasks[0]["task_id"],
         _receipt(

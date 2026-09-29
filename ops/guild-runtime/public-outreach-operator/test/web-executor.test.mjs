@@ -437,6 +437,8 @@ test('executor refuses an old lease after another owner fences it out', async ()
   const oldLease = await poolA.claim('fenced_executor');
   current = 1200;
   ownerAlive = false;
+  assert.equal((await poolB.claim('fenced_executor')).error_code, 'profile_cleanup_required');
+  await poolA.release(oldLease.lease_id);
   assert.equal((await poolB.claim('fenced_executor')).ok, true);
   const result = await executeWebAction({
     account: oldLease,

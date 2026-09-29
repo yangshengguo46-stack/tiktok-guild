@@ -11,6 +11,7 @@ export function createProductionExecutor({ runtimeRoot, config = {}, chromium = 
   let pool;
   let closed = false;
   const sessions = new Set();
+  const heldSlots = new Set();
   const pilot = config.pilot ?? {};
   function admitted({ account, creator, action }) {
     return pilot.enabled === true && pilot.owner_user_id === account.owner_user_id
@@ -39,6 +40,7 @@ export function createProductionExecutor({ runtimeRoot, config = {}, chromium = 
         const resourceId = crypto.createHash('sha256').update(`${account.owner_user_id}\0${account.sender_account_id}`).digest('hex');
         const registered = await pool.register({ sender_account_id: resourceId, channel: 'web', status: 'enabled', health: 'healthy', external_ref: account.external_ref });
         if (!registered.ok) return { verified: false, error_code: registered.error_code };
+        await slot.markCleanupRequired();
         const lease = await pool.claim(resourceId);
         if (!lease.ok) return { verified: false, error_code: lease.error_code };
         try {
@@ -47,7 +49,7 @@ export function createProductionExecutor({ runtimeRoot, config = {}, chromium = 
           // Keep the resource id private. Receipts identify the native sender.
           return await executeWebAction({ account: { ...lease, account: { ...lease.account, sender_account_id: account.sender_account_id, page: browserPage } }, creator, action, payload, signal: request.signal });
         } finally {
-          try { await pool.release(lease.lease_id); } catch (error) { cleanupSucceeded = false; throw error; }
+          try { await slot.markCleanupRequired(); await pool.release(lease.lease_id); } catch (error) { cleanupSucceeded = false; throw error; }
         }
       }
       if (account.channel !== 'ios') return { verified: false, error_code: 'channel_mismatch' };
@@ -60,15 +62,17 @@ export function createProductionExecutor({ runtimeRoot, config = {}, chromium = 
       sessions.add(session);
       try { return await executeIosAction({ device, account: { ...account, session }, creator, action, payload, signal: request.signal }); }
       finally {
-        try { await session.close(); } catch (error) { cleanupSucceeded = false; throw error; }
-        finally { sessions.delete(session); }
+        try { await session.close(); sessions.delete(session); } catch (error) { cleanupSucceeded = false; throw error; }
       }
-    } finally { if (cleanupSucceeded) await slot.release(); }
+    } finally { if (cleanupSucceeded) await slot.release(); else heldSlots.add(slot); }
   }
   async function close() {
     closed = true;
-    await Promise.allSettled([...sessions].map((session) => session.close()));
+    const results = await Promise.allSettled([...sessions].map((session) => session.close()));
+    const failed = results.filter((result) => result.status === 'rejected');
+    if (failed.length) throw new AggregateError(failed.map((result) => result.reason), 'Device cleanup remains unconfirmed');
     await pool?.close();
+    await Promise.all([...heldSlots].map(async (slot) => { await slot.release(); heldSlots.delete(slot); }));
   }
   return { execute, close };
 }

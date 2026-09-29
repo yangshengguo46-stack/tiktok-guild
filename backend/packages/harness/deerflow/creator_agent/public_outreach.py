@@ -226,6 +226,16 @@ class PublicOutreachWorkflow:
         if provider_ref is not None:
             diagnostic["provider_ref"] = provider_ref
         kind = "dm_receipt" if task["action"] == "message" else "public_action_receipt"
+        if claim is not None:
+            terminal = await self.repository.settle_external_attempt_unknown(
+                task["task_id"],
+                lease_owner=claim["lease_owner"],
+                lease_token=claim["lease_token"],
+                error_code=error_code,
+                receipt_id=receipt_id,
+            )
+            if terminal["state"] == "completed":
+                return await self._duplicate_result(terminal)
         stored = None
         try:
             stored = await self.repository.record_receipt(
@@ -239,21 +249,10 @@ class PublicOutreachWorkflow:
                 payload=diagnostic,
                 verified=False,
             )
-        except ValueError:
+        except Exception:
             # A provider may repeat the same identifier with malformed details.
-            # The durable task remains pending; the original receipt is retained.
+            # Task failure and sender pause were committed before diagnostics.
             stored = None
-        finally:
-            if claim is not None:
-                await self.repository.fail_action(
-                    task["task_id"],
-                    sender_account_id=task["sender_account_id"],
-                    idempotency_key=task["idempotency_key"],
-                    error_code=error_code,
-                    receipt_id=stored["receipt_id"] if stored else None,
-                    lease_owner=claim["lease_owner"],
-                    lease_token=claim["lease_token"],
-                )
         ready, model = await self._public_ready(task) if task["action"] == "message" else (False, None)
         return {
             "status": "unknown",
@@ -335,6 +334,7 @@ class PublicOutreachWorkflow:
         kind: str,
         verified: bool,
         payload: dict[str, Any],
+        claim: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return await self.repository.record_receipt(
             owner_user_id=task["owner_user_id"],
@@ -346,6 +346,7 @@ class PublicOutreachWorkflow:
             verification_source=_verification_source(receipt, verified=verified),
             payload=payload,
             verified=verified,
+            **({"action_task_id": task["task_id"], "lease_owner": claim["lease_owner"], "lease_token": claim["lease_token"]} if claim else {}),
         )
 
     @staticmethod
@@ -416,7 +417,7 @@ class PublicOutreachWorkflow:
         if task["action"] not in _PUBLIC_ACTIONS:
             raise ValueError("public action result requires a like, comment, or follow task")
         if not _provider_receipt_shape(receipt) or receipt.get("verified") is not True:
-            return await self._record_unknown_result(task, receipt)
+            return await self._record_unknown_result(task, receipt, claim=_claim)
         try:
             payload = _payload(receipt)
             items = _action_items(payload)
@@ -431,7 +432,7 @@ class PublicOutreachWorkflow:
             if task["action"] not in item_actions:
                 raise ValueError("receipt action does not match task")
         except ValueError:
-            return await self._record_unknown_result(task, receipt)
+            return await self._record_unknown_result(task, receipt, claim=_claim)
         verified = True
         stored_payload = {**payload, _ACTION_GROUP_KEY: group}
         try:
@@ -441,6 +442,7 @@ class PublicOutreachWorkflow:
                 kind="public_action_receipt",
                 verified=verified,
                 payload=stored_payload,
+                claim=_claim,
             )
         except ValueError:
             if len(items) <= 1:
@@ -455,6 +457,7 @@ class PublicOutreachWorkflow:
                 kind="public_action_receipt",
                 verified=verified,
                 payload=stored_payload,
+                claim=_claim,
             )
         completed: list[dict[str, Any]] = []
         if verified:
@@ -541,7 +544,7 @@ class PublicOutreachWorkflow:
                 "model": model,
             }
         if not _provider_receipt_shape(receipt) or receipt.get("verified") is not True:
-            return await self._record_unknown_result(task, receipt)
+            return await self._record_unknown_result(task, receipt, claim=_claim)
         try:
             payload = _payload(receipt)
             items = _action_items(payload)
@@ -552,7 +555,7 @@ class PublicOutreachWorkflow:
                 raise ValueError("message receipt contains an unsupported action")
             group = _action_group(task, payload)
         except ValueError:
-            return await self._record_unknown_result(task, receipt)
+            return await self._record_unknown_result(task, receipt, claim=_claim)
         verified = True
         stored = await self._store_receipt(
             task,
@@ -560,6 +563,7 @@ class PublicOutreachWorkflow:
             kind="dm_receipt",
             verified=verified,
             payload={**payload, _ACTION_GROUP_KEY: group},
+            claim=_claim,
         )
         completed = []
         public_ready, model = await self._public_ready(task)
@@ -716,33 +720,35 @@ class PublicOutreachWorkflow:
         }
         if sender["channel"] == "ios":
             kwargs["device"] = device or {}
+        finalizing = False
         try:
+            task = await self.repository.mark_external_attempt_started(task_id, lease_owner=claim["lease_owner"], lease_token=claim["lease_token"])
             result = callback(**kwargs)
             if inspect.isawaitable(result):
                 result = await result
+            finalizing = True
+            if not isinstance(result, dict):
+                result = {"verified": False, "error_code": "unknown", "message": "Operator result must be an object."}
+            if result.get("verified") is not True or not _provider_receipt_shape(result):
+                return await self._record_unknown_result(task, result, claim=claim)
+            if task["action"] == "message":
+                return await self.record_message_result(task_id, result, _claim=claim)
+            return await self.record_public_action_result(task_id, result, _claim=claim)
         except asyncio.CancelledError:
-            await self._record_unknown_result(task, {"verified": False, "error_code": "cancelled"}, claim=claim)
+            terminal = await asyncio.shield(self._record_unknown_result(task, {"verified": False, "error_code": "cancelled"}, claim=claim))
+            if terminal["status"] == "duplicate":
+                return terminal
             raise
         except Exception as error:
             return await self._record_unknown_result(
                 task,
                 {
                     "verified": False,
-                    "error_code": getattr(error, "error_code", "unknown"),
+                    "error_code": getattr(error, "error_code", "receipt_persistence_failed" if finalizing else "unknown"),
                     "message": str(error) or "Provider result is unknown.",
                 },
                 claim=claim,
             )
-        if not isinstance(result, dict):
-            result = {"verified": False, "error_code": "unknown", "message": "Operator result must be an object."}
-        if result.get("verified") is not True or not _provider_receipt_shape(result):
-            return await self._record_unknown_result(task, result, claim=claim)
-        try:
-            if task["action"] == "message":
-                return await self.record_message_result(task_id, result, _claim=claim)
-            return await self.record_public_action_result(task_id, result, _claim=claim)
-        except Exception:
-            return await self._record_unknown_result(task, {"verified": False, "error_code": "receipt_persistence_failed"}, claim=claim)
 
 
 PublicOutreachCoordinator = PublicOutreachWorkflow

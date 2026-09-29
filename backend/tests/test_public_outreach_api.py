@@ -184,6 +184,7 @@ async def test_task_get_is_owner_isolated_and_unknown_retry_uses_current_receipt
 
     # A verified receipt on a different action in the same sequence must not
     # block retrying this comment task.
+    await repo.set_sender_account_status("owner-a", "web-1", status="enabled", reason="manually reconciled")
     like_claim = await repo.claim_action(like_task["task_id"], lease_owner="test-worker")
     assert like_claim is not None
     live_like_claim = await repo.read_action_task(like_task["task_id"])
@@ -376,8 +377,12 @@ async def test_leased_controls_require_cas_lease_and_takeover_preserves_worker(r
         lease_owner="worker-a",
         lease_token=lease_token,
     )
-    assert unknown["state"] == "pending"
+    assert unknown["state"] == "failed"
     assert unknown["lease_token"] is None
+
+    assert await repo.claim_action(task_id, lease_owner="worker-b") is None
+    await repo.retry_action("owner-a", task_id, recoverable_error_codes={"provider_unknown"})
+    await repo.set_sender_account_status("owner-a", "web-1", status="enabled", reason="manually reconciled")
 
     reclaimed = await repo.claim_action(task_id, lease_owner="worker-b")
     assert reclaimed is not None

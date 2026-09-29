@@ -91,6 +91,8 @@ export function createPlaywrightPool({
         continue;
       }
       try {
+        const marked = await profiles.markBrowserOwned?.({ lease_id: lease.lease_id, sender_account_id: account.sender_account_id, owner_id: poolOwnerId });
+        if (marked && !marked.ok) return { ok: false, error_code: marked.error_code };
         const context = await launchPersistentContext(account.userDataDir, {
           sender_account_id: account.sender_account_id,
           channel: 'web',
@@ -170,36 +172,24 @@ export function createPlaywrightPool({
         owner_id: poolOwnerId,
       });
     }
-    active.delete(leaseId);
-    clearInterval(lease._heartbeat);
-    try {
+    if (!lease._closeConfirmed) {
+      await profiles.markBrowserOwned?.({ lease_id: leaseId, sender_account_id: lease.account.sender_account_id, owner_id: poolOwnerId });
       await lease.context?.close?.();
-    } finally {
-      return profiles.release({
-        lease_id: leaseId,
-        sender_account_id: lease.account.sender_account_id,
-        owner_id: poolOwnerId,
-      });
+      lease._closeConfirmed = true;
     }
+    const released = await profiles.release({ lease_id: leaseId, sender_account_id: lease.account.sender_account_id, owner_id: poolOwnerId });
+    if (!released.ok && released.error_code !== 'lease_not_found') throw new Error(`Browser profile release failed: ${released.error_code}`);
+    clearInterval(lease._heartbeat);
+    active.delete(leaseId);
+    return released.ok ? released : { ok: true, already_fenced: true };
   }
 
   async function close() {
-    if (closed) return;
     closed = true;
     const leases = [...active.values()];
-    active.clear();
-    await Promise.allSettled(leases.map(async (lease) => {
-      clearInterval(lease._heartbeat);
-      try {
-        await lease.context?.close?.();
-      } finally {
-        await profiles.release({
-          lease_id: lease.lease_id,
-          sender_account_id: lease.account.sender_account_id,
-          owner_id: poolOwnerId,
-        });
-      }
-    }));
+    const results = await Promise.allSettled(leases.map((lease) => release(lease.lease_id)));
+    const failed = results.filter((result) => result.status === 'rejected');
+    if (failed.length) throw new AggregateError(failed.map((result) => result.reason), 'Browser cleanup remains unconfirmed');
   }
 
   return Object.freeze({

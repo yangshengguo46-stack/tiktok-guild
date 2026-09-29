@@ -85,6 +85,13 @@ export function createProfileRegistry({
   const memory = new Map();
   let readyPromise;
   let registrationTail = Promise.resolve();
+  let leaseUpdateTail = Promise.resolve();
+
+  function serializeLeaseUpdate(work) {
+    const result = leaseUpdateTail.then(work);
+    leaseUpdateTail = result.catch(() => {});
+    return result;
+  }
 
   async function ensureRoot() {
     if (!readyPromise) {
@@ -207,7 +214,7 @@ export function createProfileRegistry({
       const lock = await readJson(file);
       if (lock?.lease_until && lock.lease_until <= now) {
         const alive = ownerAlive(lock);
-        if (alive) {
+        if (alive || lock.cleanup_required) {
           blocked.push({ sender_account_id: entry.name.slice(0, -5), lock });
           continue;
         }
@@ -245,6 +252,7 @@ export function createProfileRegistry({
     } catch (error) {
       if (error?.code === 'EEXIST') {
         const current = await readJson(lockPath(root, account.sender_account_id));
+        if (current?.cleanup_required) return { ok: false, error_code: ownerAlive(current) ? 'profile_in_use' : 'profile_cleanup_required', account };
         if (current?.lease_until && current.lease_until <= acquiredAt) {
           const alive = ownerAlive(current);
           if (alive) {
@@ -290,19 +298,31 @@ export function createProfileRegistry({
   }
 
   async function renew(input, { leaseTtlMs: requestedTtlMs = leaseTtlMs } = {}) {
-    await ensureRoot();
-    const owner = typeof input === 'object' ? input?.owner_id ?? input?.ownerId : null;
-    if (!owner) return { ok: false, error_code: 'owner_required' };
-    const found = await findLease(input);
-    if (!found || found.lock.owner_id !== owner) return { ok: false, error_code: 'lease_lost' };
-    const now = nowMs(clock);
-    const updated = {
-      ...found.lock,
-      heartbeat_at: now,
-      lease_until: now + Math.max(1, requestedTtlMs),
-    };
-    await writeFile(lockPath(root, found.id), `${JSON.stringify(updated)}\n`, 'utf8');
-    return { ok: true, sender_account_id: found.id, lease: updated };
+    return serializeLeaseUpdate(async () => {
+      await ensureRoot();
+      const owner = typeof input === 'object' ? input?.owner_id ?? input?.ownerId : null;
+      if (!owner) return { ok: false, error_code: 'owner_required' };
+      const found = await findLease(input);
+      if (!found || found.lock.owner_id !== owner) return { ok: false, error_code: 'lease_lost' };
+      const now = nowMs(clock);
+      const updated = {
+        ...found.lock,
+        heartbeat_at: now,
+        lease_until: now + Math.max(1, requestedTtlMs),
+      };
+      await writeFile(lockPath(root, found.id), `${JSON.stringify(updated)}\n`, 'utf8');
+      return { ok: true, sender_account_id: found.id, lease: updated };
+    });
+  }
+
+  async function markBrowserOwned(input) {
+    return serializeLeaseUpdate(async () => {
+      await ensureRoot();
+      const found = await findLease(input);
+      if (!found || found.lock.owner_id !== input.owner_id) return { ok: false, error_code: 'lease_lost' };
+      await writeFile(lockPath(root, found.id), `${JSON.stringify({ ...found.lock, cleanup_required: true })}\n`, 'utf8');
+      return { ok: true };
+    });
   }
 
   async function release(input) {
@@ -374,6 +394,7 @@ export function createProfileRegistry({
     pid,
     validateLease,
     renew,
+    markBrowserOwned,
     recordManualTakeover,
   });
 }

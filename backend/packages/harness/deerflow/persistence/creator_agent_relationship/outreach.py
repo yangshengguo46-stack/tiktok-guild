@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deerflow.persistence.creator_agent_relationship.model import (
+    CreatorAgentRelationshipRow,
     CreatorClaimRow,
     CreatorHandoffBatchRow,
     CreatorHandoffCandidateRow,
@@ -45,6 +46,32 @@ _ACTIVE_SEQUENCE_STATES = ("pending", "public_touched", "contacted", "replied")
 _ACTIVE_SENDER_STATES = frozenset({"enabled", "healthy", "ready", "active"})
 _MAX_WEB_SENDER_ACCOUNTS = 50
 _MAX_ACTIVE_SENDER_ACCOUNTS = 10
+_ATTEMPT_STARTED = "_external_attempt_started"
+_ATTEMPT_TOKEN = "_external_attempt_token"
+_RESERVED_PAYLOAD_FIELDS = frozenset({_ATTEMPT_STARTED, _ATTEMPT_TOKEN, "manual_required", "manual_takeover_requested", "manual_takeover_reason"})
+
+
+def _user_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) or key in _RESERVED_PAYLOAD_FIELDS or key.startswith("_external_attempt") for key in value):
+            raise ValueError("dispatch and manual recovery fields are native-worker owned")
+        for child in value.values():
+            _user_payload(child)
+    elif isinstance(value, list):
+        for child in value:
+            _user_payload(child)
+    return value
+
+
+def _no_contact(task):
+    return exists(
+        select(CreatorAgentRelationshipRow.creator_uid).where(
+            CreatorAgentRelationshipRow.owner_user_id == task.owner_user_id,
+            CreatorAgentRelationshipRow.account_id == task.sender_account_id,
+            CreatorAgentRelationshipRow.creator_uid == task.creator_uid,
+            CreatorAgentRelationshipRow.do_not_contact.is_(True),
+        )
+    )
 
 
 def _bounded(value: Any, *, field: str) -> Any:
@@ -83,6 +110,101 @@ class CreatorOutreachRepository:
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
+
+    async def contact_prohibited(self, owner_user_id: str, sender_account_id: str, creator_uid: str) -> bool:
+        async with self.session_factory() as session:
+            row = await session.get(CreatorAgentRelationshipRow, (owner_user_id, sender_account_id, creator_uid))
+            return bool(row and row.do_not_contact)
+
+    async def _fail_attempt(self, session, row, *, now, error_code, receipt_id=None) -> bool:
+        """Fence the exact attempt and sender together, including expired leases."""
+        proof = await session.get(CreatorOutreachReceiptRow, (row.owner_user_id, row.creator_uid, row.sequence_no, row.receipt_id)) if row.receipt_id else None
+        if proof and proof.verified:
+            receipt_id = proof.receipt_id
+        result = await session.execute(
+            update(CreatorOutreachActionTaskRow)
+            .where(
+                CreatorOutreachActionTaskRow.task_id == row.task_id,
+                CreatorOutreachActionTaskRow.state == "leased",
+                CreatorOutreachActionTaskRow.lease_owner == row.lease_owner,
+                CreatorOutreachActionTaskRow.lease_token == row.lease_token,
+            )
+            .values(
+                state="failed",
+                error_code=error_code,
+                lease_until=None,
+                lease_owner=None,
+                lease_token=None,
+                payload_json={**(row.payload_json or {}), "manual_required": True},
+                **({"receipt_id": func.coalesce(CreatorOutreachActionTaskRow.receipt_id, receipt_id)} if receipt_id else {}),
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount:
+            await session.execute(
+                update(SenderAccountRow)
+                .where(
+                    SenderAccountRow.owner_user_id == row.owner_user_id,
+                    SenderAccountRow.sender_account_id == row.sender_account_id,
+                )
+                .values(status="paused", updated_at=now)
+            )
+        return bool(result.rowcount)
+
+    async def settle_external_attempt_unknown(self, task_id: str, *, lease_owner: str, lease_token: str, error_code: str, receipt_id: str | None = None) -> dict[str, Any]:
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None:
+                raise ValueError("action task does not exist")
+            if row.state == "completed":
+                return row.to_dict()
+            if row.state == "failed" and (row.payload_json or {}).get(_ATTEMPT_TOKEN) == lease_token:
+                return row.to_dict()
+            if row.state != "leased" or row.lease_owner != lease_owner or row.lease_token != lease_token:
+                raise ValueError("action attempt is stale or owned by another worker")
+            await self._fail_attempt(session, row, now=datetime.now(UTC), error_code=_text(error_code, "error_code"), receipt_id=receipt_id)
+            await session.commit()
+            await session.refresh(row)
+            return row.to_dict()
+
+    async def mark_external_attempt_started(self, task_id: str, *, lease_owner: str, lease_token: str) -> dict[str, Any]:
+        """Commit before provider I/O; model payload cannot manufacture this fence."""
+        async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row is None:
+                raise ValueError("action task does not exist")
+            result = await session.execute(
+                update(CreatorOutreachActionTaskRow)
+                .where(
+                    CreatorOutreachActionTaskRow.task_id == task_id,
+                    CreatorOutreachActionTaskRow.state == "leased",
+                    CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                    CreatorOutreachActionTaskRow.lease_token == lease_token,
+                    CreatorOutreachActionTaskRow.lease_until > datetime.now(UTC),
+                    ~_no_contact(row),
+                    exists(
+                        select(SenderAccountRow.sender_account_id).where(SenderAccountRow.owner_user_id == row.owner_user_id, SenderAccountRow.sender_account_id == row.sender_account_id, SenderAccountRow.status.in_(_ACTIVE_SENDER_STATES))
+                    ),
+                    exists(
+                        select(CreatorOutreachSequenceRow.sequence_no).where(
+                            CreatorOutreachSequenceRow.owner_user_id == row.owner_user_id,
+                            CreatorOutreachSequenceRow.creator_uid == row.creator_uid,
+                            CreatorOutreachSequenceRow.sequence_no == row.sequence_no,
+                            CreatorOutreachSequenceRow.status.in_(_ACTIVE_SEQUENCE_STATES),
+                        )
+                    ),
+                    CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_not(True),
+                    CreatorOutreachActionTaskRow.payload_json["manual_required"].as_boolean().is_not(True),
+                )
+                .values(payload_json={**(row.payload_json or {}), _ATTEMPT_STARTED: True, _ATTEMPT_TOKEN: lease_token})
+                .execution_options(synchronize_session=False)
+            )
+            if not result.rowcount:
+                raise ValueError("Native no-contact boundary or stale dispatched lease prevents execution")
+            await session.commit()
+            await session.refresh(row)
+            return row.to_dict()
 
     async def register_sender_account(
         self,
@@ -244,7 +366,7 @@ class CreatorOutreachRepository:
         if payload is not None and payload_json is not None and payload != payload_json:
             raise ValueError("payload and payload_json conflict")
         payload = payload if payload is not None else payload_json
-        payload = _bounded({} if payload is None else payload, field="action payload")
+        payload = _user_payload(_bounded({} if payload is None else payload, field="action payload"))
         if task_id is None:
             task_id = uuid4().hex
         else:
@@ -331,6 +453,10 @@ class CreatorOutreachRepository:
             task = await session.get(CreatorOutreachActionTaskRow, task_id)
             if task is None:
                 return None
+            if task.state == "leased" and (task.lease_until is None or _same_datetime(task.lease_until, now) or task.lease_until.replace(tzinfo=UTC) < now) and (task.payload_json or {}).get(_ATTEMPT_STARTED):
+                await self._fail_attempt(session, task, now=now, error_code="external_attempt_unknown")
+                await session.commit()
+                return None
             active_sequence = exists(
                 select(CreatorOutreachSequenceRow.sequence_no).where(
                     CreatorOutreachSequenceRow.owner_user_id == task.owner_user_id,
@@ -352,6 +478,9 @@ class CreatorOutreachRepository:
                     CreatorOutreachActionTaskRow.task_id == task_id,
                     active_sequence,
                     active_sender,
+                    ~_no_contact(task),
+                    CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_not(True),
+                    CreatorOutreachActionTaskRow.payload_json["manual_required"].as_boolean().is_not(True),
                     or_(
                         CreatorOutreachActionTaskRow.state == "pending",
                         and_(
@@ -503,22 +632,38 @@ class CreatorOutreachRepository:
 
     async def release_expired_action_leases(self, *, now: datetime | None = None) -> int:
         now = now or datetime.now(UTC)
-        stmt = (
-            update(CreatorOutreachActionTaskRow)
-            .where(
-                CreatorOutreachActionTaskRow.state == "leased",
-                or_(
-                    CreatorOutreachActionTaskRow.lease_until.is_(None),
-                    CreatorOutreachActionTaskRow.lease_until <= now,
-                ),
-            )
-            .values(state="pending", lease_until=None, lease_owner=None, lease_token=None, updated_at=now)
-            .execution_options(synchronize_session=False)
-        )
         async with self.session_factory() as session:
-            result = await session.execute(stmt)
+            rows = list(
+                await session.scalars(
+                    select(CreatorOutreachActionTaskRow).where(
+                        CreatorOutreachActionTaskRow.state == "leased",
+                        or_(
+                            CreatorOutreachActionTaskRow.lease_until.is_(None),
+                            CreatorOutreachActionTaskRow.lease_until <= now,
+                        ),
+                    )
+                )
+            )
+            count = 0
+            for row in rows:
+                if (row.payload_json or {}).get(_ATTEMPT_STARTED):
+                    count += int(await self._fail_attempt(session, row, now=now, error_code="external_attempt_unknown"))
+                else:
+                    result = await session.execute(
+                        update(CreatorOutreachActionTaskRow)
+                        .where(
+                            CreatorOutreachActionTaskRow.task_id == row.task_id,
+                            CreatorOutreachActionTaskRow.state == "leased",
+                            CreatorOutreachActionTaskRow.lease_token == row.lease_token,
+                            ~CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_(True),
+                            or_(CreatorOutreachActionTaskRow.lease_until.is_(None), CreatorOutreachActionTaskRow.lease_until <= now),
+                        )
+                        .values(state="pending", lease_until=None, lease_owner=None, lease_token=None, updated_at=now)
+                        .execution_options(synchronize_session=False)
+                    )
+                    count += int(result.rowcount or 0)
             await session.commit()
-            return int(result.rowcount or 0)
+            return count
 
     async def release_action_claim(
         self,
@@ -528,7 +673,7 @@ class CreatorOutreachRepository:
         lease_token: str,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        """Return a leased action to pending after an unverified provider result."""
+        """Only undispatched resource claims can return to the automatic queue."""
         task_id = _text(task_id, "task_id")
         lease_owner = _text(lease_owner, "lease_owner")
         lease_token = _text(lease_token, "lease_token")
@@ -540,6 +685,7 @@ class CreatorOutreachRepository:
                 CreatorOutreachActionTaskRow.state == "leased",
                 CreatorOutreachActionTaskRow.lease_owner == lease_owner,
                 CreatorOutreachActionTaskRow.lease_token == lease_token,
+                CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_not(True),
             )
             .values(
                 state="pending",
@@ -551,6 +697,12 @@ class CreatorOutreachRepository:
             .execution_options(synchronize_session=False)
         )
         async with self.session_factory() as session:
+            row = await session.get(CreatorOutreachActionTaskRow, task_id)
+            if row and row.state == "leased" and row.lease_owner == lease_owner and row.lease_token == lease_token and (row.payload_json or {}).get(_ATTEMPT_STARTED):
+                await self._fail_attempt(session, row, now=now, error_code="external_attempt_unknown")
+                await session.commit()
+                await session.refresh(row)
+                return row.to_dict()
             result = await session.execute(stmt)
             await session.commit()
             if not result.rowcount:
@@ -592,7 +744,7 @@ class CreatorOutreachRepository:
         """Merge bounded user-visible payload into an uncompleted action."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         task_id = _text(task_id, "task_id")
-        payload = _bounded(payload, field="action payload")
+        payload = _user_payload(_bounded(payload, field="action payload"))
         async with self.session_factory() as session:
             row = await session.get(CreatorOutreachActionTaskRow, task_id)
             if row is None or row.owner_user_id != owner_user_id:
@@ -680,6 +832,7 @@ class CreatorOutreachRepository:
                     lease_owner=None,
                     lease_token=None,
                     error_code=None,
+                    payload_json={key: value for key, value in (row.payload_json or {}).items() if key not in _RESERVED_PAYLOAD_FIELDS},
                     updated_at=now,
                 )
                 .execution_options(synchronize_session=False)
@@ -812,7 +965,7 @@ class CreatorOutreachRepository:
         lease_owner: str | None = None,
         lease_token: str | None = None,
     ) -> dict[str, Any]:
-        """Persist an unverified provider result and keep the task retryable."""
+        """Persist an explicit unknown result; only manual recovery permits retry."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         task_id = _text(task_id, "task_id")
         receipt_id = _text(receipt_id, "receipt_id")
@@ -828,6 +981,10 @@ class CreatorOutreachRepository:
                 raise ValueError("action task does not exist")
             if row.state == "completed":
                 raise ValueError("verified outreach actions cannot be marked unknown")
+            if row.receipt_id:
+                proof = await session.get(CreatorOutreachReceiptRow, (owner_user_id, row.creator_uid, row.sequence_no, row.receipt_id))
+                if proof and proof.verified:
+                    raise ValueError("verified outreach proof cannot be replaced with unknown")
             if row.state == "leased" and (row.lease_owner != lease_owner or row.lease_token != lease_token):
                 raise ValueError("action task lease is owned by another worker")
             sequence = await session.get(
@@ -882,9 +1039,10 @@ class CreatorOutreachRepository:
                 update(CreatorOutreachActionTaskRow)
                 .where(*conditions)
                 .values(
-                    state="pending",
+                    state="failed",
                     receipt_id=receipt_id,
                     error_code="provider_unknown",
+                    payload_json={**(row.payload_json or {}), "manual_required": True},
                     lease_until=None,
                     lease_owner=None,
                     lease_token=None,
@@ -894,6 +1052,7 @@ class CreatorOutreachRepository:
             )
             if not result.rowcount:
                 raise ValueError("action task lease changed before unknown result")
+            await session.execute(update(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id, SenderAccountRow.sender_account_id == row.sender_account_id).values(status="paused", updated_at=now))
             await session.commit()
             await session.refresh(row)
             return row.to_dict()
@@ -1118,7 +1277,22 @@ class CreatorOutreachRepository:
             await session.commit()
             return row.to_dict()
 
-    async def record_receipt(self, *, owner_user_id: str, creator_uid: str, sequence_no: int, receipt_id: str, kind: str, provider_ref: str | None, verification_source: str, payload: dict[str, Any], verified: bool) -> dict[str, Any]:
+    async def record_receipt(
+        self,
+        *,
+        owner_user_id: str,
+        creator_uid: str,
+        sequence_no: int,
+        receipt_id: str,
+        kind: str,
+        provider_ref: str | None,
+        verification_source: str,
+        payload: dict[str, Any],
+        verified: bool,
+        action_task_id: str | None = None,
+        lease_owner: str | None = None,
+        lease_token: str | None = None,
+    ) -> dict[str, Any]:
         """Persist a provider/verifier-owned receipt; callers must record its source."""
         owner_user_id = _text(owner_user_id, "owner_user_id")
         creator_uid = _text(creator_uid, "creator_uid")
@@ -1142,6 +1316,9 @@ class CreatorOutreachRepository:
             if existing is not None:
                 if (existing.kind, existing.provider_ref, existing.verification_source, existing.payload_json, existing.verified) != (kind, provider_ref, verification_source, payload, verified):
                     raise ValueError("receipt replay conflict")
+                if action_task_id:
+                    await self._bind_attempt_proof(session, action_task_id, owner_user_id, creator_uid, sequence_no, receipt_id, verified, lease_owner, lease_token)
+                    await session.commit()
                 return existing.to_dict()
             row = CreatorOutreachReceiptRow(
                 owner_user_id=owner_user_id,
@@ -1164,9 +1341,36 @@ class CreatorOutreachRepository:
                     raise
                 if (existing.kind, existing.provider_ref, existing.verification_source, existing.payload_json, existing.verified) != (kind, provider_ref, verification_source, payload, verified):
                     raise ValueError("receipt replay conflict")
+                if action_task_id:
+                    await self._bind_attempt_proof(session, action_task_id, owner_user_id, creator_uid, sequence_no, receipt_id, verified, lease_owner, lease_token)
+                    await session.commit()
                 return existing.to_dict()
+            if action_task_id:
+                await self._bind_attempt_proof(session, action_task_id, owner_user_id, creator_uid, sequence_no, receipt_id, verified, lease_owner, lease_token)
             await session.commit()
             return row.to_dict()
+
+    async def _bind_attempt_proof(self, session, task_id, owner, creator, sequence, receipt_id, verified, lease_owner, lease_token):
+        if verified is not True or not lease_owner or not lease_token:
+            raise ValueError("verified attempt proof requires native execution lease")
+        result = await session.execute(
+            update(CreatorOutreachActionTaskRow)
+            .where(
+                CreatorOutreachActionTaskRow.task_id == task_id,
+                CreatorOutreachActionTaskRow.owner_user_id == owner,
+                CreatorOutreachActionTaskRow.creator_uid == creator,
+                CreatorOutreachActionTaskRow.sequence_no == sequence,
+                CreatorOutreachActionTaskRow.state == "leased",
+                CreatorOutreachActionTaskRow.lease_owner == lease_owner,
+                CreatorOutreachActionTaskRow.lease_token == lease_token,
+                CreatorOutreachActionTaskRow.lease_until > datetime.now(UTC),
+                CreatorOutreachActionTaskRow.payload_json[_ATTEMPT_STARTED].as_boolean().is_(True),
+            )
+            .values(receipt_id=receipt_id)
+            .execution_options(synchronize_session=False)
+        )
+        if not result.rowcount:
+            raise ValueError("attempt proof cannot bind to a stale or undispatched lease")
 
     async def advance_state(self, *, owner_user_id: str, creator_uid: str, sequence_no: int, receipt_id: str, next_status: str) -> dict[str, Any]:
         if next_status not in _ALLOWED_STATES:

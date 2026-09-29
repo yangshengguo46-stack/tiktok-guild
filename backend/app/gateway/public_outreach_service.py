@@ -85,7 +85,7 @@ class NodeExecutorTransport:
         except TimeoutError:
             pass
         finally:
-            # Also terminate a Chromium child that outlived its Node parent.
+            # Detached Chromium groups may outlive Node; their resource fences remain until confirmed cleanup.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -113,10 +113,13 @@ class PublicOutreachService:
             for path in (self.transport.runtime_root / "slots" / "web").glob("*.lock"):
                 try:
                     lease = json.loads(path.read_text())
-                    os.kill(int(lease["pid"]), 0)
+                    if not lease.get("cleanup_required"):
+                        os.kill(int(lease["pid"]), 0)
                     count += 1
-                except (OSError, ValueError, KeyError):
+                except (FileNotFoundError, ProcessLookupError):
                     pass
+                except (OSError, ValueError, KeyError):
+                    count += 1  # An unreadable lock cannot establish that a browser resource is idle.
             return {"active": min(count, 10), "active_limit": 10}
 
         return await asyncio.to_thread(read)
@@ -136,8 +139,13 @@ class PublicOutreachService:
         task = await self.repository.read_action_task(task_id)
         if not task or task["owner_user_id"] != owner_user_id:
             raise ValueError("Public outreach task not found")
+        if task["state"] == "leased":
+            await self.repository.release_expired_action_leases()
+            task = await self.repository.read_action_task(task_id)
         if task["state"] == "completed":
             return await self.workflow._duplicate_result(task)
+        if await self.repository.contact_prohibited(owner_user_id, task["sender_account_id"], task["creator_uid"]):
+            raise ValueError("Native do_not_contact prohibits outbound public outreach")
         if task["state"] != "pending" or task.get("error_code") or (task.get("payload_json") or {}).get("manual_required"):
             raise ValueError("Task requires manual review or explicit recovery before execution")
         if not self.admitted(task):
