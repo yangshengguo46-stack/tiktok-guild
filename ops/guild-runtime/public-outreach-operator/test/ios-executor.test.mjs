@@ -249,20 +249,21 @@ test('missing WDA, locked, offline, and unpaired devices fail closed with explic
     prerequisites: { ...readyPrerequisites, locked: true },
   });
   assert.equal((await locked.registerDevice(device())).device.state, 'manual_required');
-  assert.equal((await locked.get('iphone-001')).health, 'wda_unavailable');
+  assert.equal((await locked.get('iphone-001')).health, 'device_locked');
 
   const offline = await createDeviceRegistry({
     rootDir: await mkdtemp(path.join(os.tmpdir(), 'ios-offline-')),
     prerequisites: { ...readyPrerequisites, online: false },
   });
-  assert.equal((await offline.registerDevice(device())).device.state, 'manual_required');
-  assert.equal((await offline.get('iphone-001')).health, 'wda_unavailable');
+  assert.equal((await offline.registerDevice(device())).device.state, 'offline');
+  assert.equal((await offline.get('iphone-001')).health, 'device_offline');
 
   const unpaired = await createDeviceRegistry({
     rootDir: await mkdtemp(path.join(os.tmpdir(), 'ios-unpaired-')),
     prerequisites: { ...readyPrerequisites, paired: false },
   });
   assert.equal((await unpaired.registerDevice(device())).device.state, 'manual_required');
+  assert.equal((await unpaired.get('iphone-001')).health, 'device_unpaired');
 
   const noProbe = await createWdaHealthChecker({ prerequisites: readyPrerequisites })({
     device: { ...device(), platform: 'darwin' },

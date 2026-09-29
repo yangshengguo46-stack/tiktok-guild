@@ -240,6 +240,23 @@ export function createDeviceRegistry({
       };
     }
     if (!isVerifiedWdaHealth(result)) {
+      const knownNonReady = new Set([
+        'device_offline',
+        'device_locked',
+        'device_unpaired',
+        'wda_probe_required',
+      ]);
+      if (
+        result
+        && typeof result === 'object'
+        && result.ok !== true
+        && (
+          (result.state === 'offline' && result.error_code === 'device_offline')
+          || (result.state === 'manual_required' && knownNonReady.has(result.error_code))
+        )
+      ) {
+        return result;
+      }
       return {
         ...(result && typeof result === 'object' ? result : {}),
         ok: false,
