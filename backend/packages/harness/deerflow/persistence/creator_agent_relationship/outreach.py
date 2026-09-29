@@ -331,12 +331,14 @@ class CreatorOutreachRepository:
             task = await session.get(CreatorOutreachActionTaskRow, task_id)
             if task is None:
                 return None
-            sequence = await session.get(
-                CreatorOutreachSequenceRow,
-                (task.owner_user_id, task.creator_uid, task.sequence_no),
+            active_sequence = exists(
+                select(CreatorOutreachSequenceRow.sequence_no).where(
+                    CreatorOutreachSequenceRow.owner_user_id == task.owner_user_id,
+                    CreatorOutreachSequenceRow.creator_uid == task.creator_uid,
+                    CreatorOutreachSequenceRow.sequence_no == task.sequence_no,
+                    CreatorOutreachSequenceRow.status.in_(_ACTIVE_SEQUENCE_STATES),
+                )
             )
-            if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
-                return None
             active_sender = exists(
                 select(SenderAccountRow.sender_account_id).where(
                     SenderAccountRow.owner_user_id == task.owner_user_id,
@@ -348,6 +350,7 @@ class CreatorOutreachRepository:
                 update(CreatorOutreachActionTaskRow)
                 .where(
                     CreatorOutreachActionTaskRow.task_id == task_id,
+                    active_sequence,
                     active_sender,
                     or_(
                         CreatorOutreachActionTaskRow.state == "pending",

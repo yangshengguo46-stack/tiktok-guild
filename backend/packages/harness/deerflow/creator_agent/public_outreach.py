@@ -273,6 +273,16 @@ class PublicOutreachWorkflow:
             refreshed = await self.repository.read_action_task(task["task_id"])
             if refreshed and refreshed["state"] == "completed":
                 return None
+            model = await self.repository.read_model(
+                owner_user_id=task["owner_user_id"],
+                creator_uid=task["creator_uid"],
+            )
+            sequence = next(
+                (row for row in (model or {}).get("sequences", []) if row["sequence_no"] == task["sequence_no"]),
+                None,
+            )
+            if sequence and sequence["status"] == "closed":
+                return {"__sequence_closed__": True}
             raise ValueError("action task is already leased or unavailable")
         return claim
 
@@ -655,6 +665,13 @@ class PublicOutreachWorkflow:
         if claim is None:
             current = await self.repository.read_action_task(task_id)
             return {"status": "duplicate", "task": current}
+        if claim.get("__sequence_closed__"):
+            current = await self.repository.read_action_task(task_id)
+            return {
+                "status": "sequence_closed",
+                "error_code": "sequence_closed",
+                "task": current,
+            }
         operator = self.web_operator if sender["channel"] == "web" else self.ios_operator
         callback = _operator_callable(operator)
         if callback is None:

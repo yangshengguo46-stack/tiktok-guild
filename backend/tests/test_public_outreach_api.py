@@ -281,6 +281,26 @@ async def test_create_task_rejects_sender_mismatch_and_close_blocks_claims(repo)
     assert closed["claim"]["claim"]["status"] == "closed"
     assert await repo.claim_action(tasks[0]["task_id"], lease_owner="worker") is None
 
+    from deerflow.creator_agent.public_outreach import PublicOutreachWorkflow
+
+    provider_calls: list[str] = []
+
+    async def provider(**kwargs):
+        provider_calls.append(kwargs["action"])
+        return {
+            "provider_ref": "must-not-run",
+            "receipt_payload": {"action": kwargs["action"]},
+            "verified": True,
+        }
+
+    result = await PublicOutreachWorkflow(repo, web_operator=provider).execute_task(
+        tasks[0]["task_id"],
+        creator={"creator_uid": "creator-1"},
+    )
+    assert result["status"] == "sequence_closed"
+    assert result["error_code"] == "sequence_closed"
+    assert provider_calls == []
+
 
 @pytest.mark.asyncio
 async def test_admin_boundary_is_retained_on_management_writes(repo):
