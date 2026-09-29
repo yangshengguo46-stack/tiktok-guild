@@ -31,7 +31,9 @@ _REQUIRED_EVIDENCE = {
     "public_touched": "public_action_receipt",
     "contacted": "dm_receipt",
     "replied": "verified_inbound",
+    "closed": "closure_receipt",
 }
+_RECEIPT_KINDS = frozenset(_REQUIRED_EVIDENCE.values())
 
 
 def _bounded(value: Any, *, field: str) -> Any:
@@ -120,14 +122,17 @@ class CreatorOutreachRepository:
     async def claim_creator(self, *, owner_user_id: str, creator_uid: str, batch_id: str | None = None) -> dict[str, Any]:
         owner_user_id = _text(owner_user_id, "owner_user_id")
         creator_uid = _text(creator_uid, "creator_uid")
+        if batch_id is not None:
+            batch_id = _text(batch_id, "batch_id")
         async with self.session_factory() as session:
             claim = await session.get(CreatorClaimRow, (owner_user_id, creator_uid))
             if claim is not None:
+                if batch_id is not None and claim.batch_id != batch_id:
+                    raise ValueError("creator claim already belongs to a different handoff batch")
                 return await self._read_claim(session, claim)
             candidate = None
             batch = None
             if batch_id is not None:
-                batch_id = _text(batch_id, "batch_id")
                 candidate = await session.get(CreatorHandoffCandidateRow, (owner_user_id, batch_id, creator_uid))
                 if candidate is None:
                     raise ValueError("creator is not present in the handoff batch")
@@ -158,6 +163,8 @@ class CreatorOutreachRepository:
             claim = await session.get(CreatorClaimRow, (owner_user_id, creator_uid))
             if claim is None:
                 raise ValueError("creator must be claimed before sequence binding")
+            if claim.status == "closed":
+                raise ValueError("closed creator claims cannot start a new outreach sequence")
             active = await session.scalar(
                 select(CreatorOutreachSequenceRow).where(
                     CreatorOutreachSequenceRow.owner_user_id == owner_user_id,
@@ -193,8 +200,14 @@ class CreatorOutreachRepository:
     async def record_receipt(self, *, owner_user_id: str, creator_uid: str, sequence_no: int, receipt_id: str, kind: str, provider_ref: str | None, payload: dict[str, Any], verified: bool) -> dict[str, Any]:
         owner_user_id = _text(owner_user_id, "owner_user_id")
         creator_uid = _text(creator_uid, "creator_uid")
+        if type(sequence_no) is not int or sequence_no < 1:
+            raise ValueError("sequence_no must be a positive integer")
         receipt_id = _text(receipt_id, "receipt_id")
         kind = _text(kind, "kind", 32)
+        if kind not in _RECEIPT_KINDS:
+            raise ValueError("unsupported outreach receipt kind")
+        if type(verified) is not bool:
+            raise ValueError("verified must be boolean")
         payload = _bounded(payload, field="receipt payload")
         if provider_ref is not None:
             provider_ref = _text(provider_ref, "provider_ref")
@@ -208,15 +221,25 @@ class CreatorOutreachRepository:
                     raise ValueError("receipt replay conflict")
                 return existing.to_dict()
             row = CreatorOutreachReceiptRow(owner_user_id=owner_user_id, creator_uid=creator_uid, sequence_no=sequence_no, receipt_id=receipt_id, kind=kind, provider_ref=provider_ref, payload_json=payload, verified=verified)
-            async with session.begin_nested():
-                session.add(row)
-                await session.flush()
+            try:
+                async with session.begin_nested():
+                    session.add(row)
+                    await session.flush()
+            except IntegrityError:
+                existing = await session.get(CreatorOutreachReceiptRow, (owner_user_id, creator_uid, sequence_no, receipt_id))
+                if existing is None:
+                    raise
+                if (existing.kind, existing.provider_ref, existing.payload_json, existing.verified) != (kind, provider_ref, payload, verified):
+                    raise ValueError("receipt replay conflict")
+                return existing.to_dict()
             await session.commit()
             return row.to_dict()
 
     async def advance_state(self, *, owner_user_id: str, creator_uid: str, sequence_no: int, receipt_id: str, next_status: str) -> dict[str, Any]:
         if next_status not in _ALLOWED_STATES:
             raise ValueError("unknown outreach state")
+        if type(sequence_no) is not int or sequence_no < 1:
+            raise ValueError("sequence_no must be a positive integer")
         async with self.session_factory() as session:
             claim = await session.get(CreatorClaimRow, (_text(owner_user_id, "owner_user_id"), _text(creator_uid, "creator_uid")))
             if claim is None:
@@ -226,6 +249,9 @@ class CreatorOutreachRepository:
             sequence = await session.get(CreatorOutreachSequenceRow, (claim.owner_user_id, claim.creator_uid, sequence_no))
             if sequence is None or sequence.status not in ("pending", "public_touched", "contacted", "replied"):
                 raise ValueError("an active bound sequence is required")
+            expected_sequence_status = "pending" if claim.status == "gray" else claim.status
+            if sequence.status != expected_sequence_status:
+                raise ValueError("claim and outreach sequence states are inconsistent")
             receipt = await session.get(CreatorOutreachReceiptRow, (claim.owner_user_id, claim.creator_uid, sequence_no, _text(receipt_id, "receipt_id")))
             if receipt is None or not receipt.verified:
                 raise ValueError("a verified receipt is required")

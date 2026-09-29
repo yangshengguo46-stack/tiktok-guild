@@ -26,6 +26,7 @@ from deerflow.persistence.creator_agent_relationship.model import (
     CreatorClaimRow,
     CreatorHandoffBatchRow,
     CreatorHandoffCandidateRow,
+    CreatorOutreachReceiptRow,
     CreatorOutreachSequenceRow,
 )
 from deerflow.persistence.feedback.model import FeedbackRow
@@ -53,6 +54,7 @@ __all__ = [
     "CreatorClaimRow",
     "CreatorHandoffBatchRow",
     "CreatorHandoffCandidateRow",
+    "CreatorOutreachReceiptRow",
     "CreatorOutreachSequenceRow",
     "FeedbackRow",
     "McpTaskRow",

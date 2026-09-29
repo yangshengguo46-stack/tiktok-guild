@@ -64,42 +64,20 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("owner_user_id", "creator_uid", "sequence_no"),
             sa.CheckConstraint("status IN ('pending','public_touched','contacted','replied','closed')", name="ck_creator_sequence_status"),
         )
-        op.create_index(
-            "uq_creator_active_sequence",
-            "creator_outreach_sequence",
-            ["owner_user_id", "creator_uid"],
-            unique=True,
-            sqlite_where=sa.text("status IN ('pending','public_touched','contacted','replied')"),
-            postgresql_where=sa.text("status IN ('pending','public_touched','contacted','replied')"),
-        )
-    if not inspector.has_table("creator_outreach_receipt"):
-        op.create_table(
-            "creator_outreach_receipt",
-            sa.Column("owner_user_id", sa.String(128), nullable=False),
-            sa.Column("creator_uid", sa.String(128), nullable=False),
-            sa.Column("sequence_no", sa.Integer(), nullable=False),
-            sa.Column("receipt_id", sa.String(128), nullable=False),
-            sa.Column("kind", sa.String(32), nullable=False),
-            sa.Column("provider_ref", sa.String(128), nullable=True),
-            sa.Column("payload_json", sa.JSON(), nullable=False),
-            sa.Column("verified", sa.Boolean(), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-            sa.PrimaryKeyConstraint("owner_user_id", "creator_uid", "sequence_no", "receipt_id"),
-        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     if inspector.has_table("creator_outreach_sequence"):
-        op.drop_index("uq_creator_active_sequence", table_name="creator_outreach_sequence")
         op.drop_table("creator_outreach_sequence")
     if inspector.has_table("creator_outreach_receipt"):
         op.drop_table("creator_outreach_receipt")
     if inspector.has_table("creator_claim"):
         op.drop_table("creator_claim")
     if inspector.has_table("creator_handoff_candidate"):
-        op.drop_index("ix_creator_handoff_candidate_creator", table_name="creator_handoff_candidate")
+        if "ix_creator_handoff_candidate_creator" in {item["name"] for item in inspector.get_indexes("creator_handoff_candidate")}:
+            op.drop_index("ix_creator_handoff_candidate_creator", table_name="creator_handoff_candidate")
         op.drop_table("creator_handoff_candidate")
     if inspector.has_table("creator_handoff_batch"):
         op.drop_table("creator_handoff_batch")

@@ -73,3 +73,20 @@ async def test_receipt_idempotency_and_replay_conflict(repo):
     assert {key: duplicate[key] for key in ("receipt_id", "kind", "provider_ref", "payload_json", "verified")} == {key: first[key] for key in ("receipt_id", "kind", "provider_ref", "payload_json", "verified")}
     with pytest.raises(ValueError):
         await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="r", kind="public_action_receipt", provider_ref="p", payload={"x": 2}, verified=True)
+
+
+@pytest.mark.asyncio
+async def test_closed_claim_cannot_rebind_sender(repo):
+    await repo.claim_creator(owner_user_id="guild", creator_uid="c-1")
+    await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender-a")
+    for receipt_id, kind, next_status in (
+        ("like", "public_action_receipt", "public_touched"),
+        ("dm", "dm_receipt", "contacted"),
+        ("inbound", "verified_inbound", "replied"),
+    ):
+        await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id=receipt_id, kind=kind, provider_ref=f"p-{receipt_id}", payload={"receipt": receipt_id}, verified=True)
+        await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id=receipt_id, next_status=next_status)
+    await repo.record_receipt(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="close", kind="closure_receipt", provider_ref="p", payload={"reason": "operator"}, verified=True)
+    await repo.advance_state(owner_user_id="guild", creator_uid="c-1", sequence_no=1, receipt_id="close", next_status="closed")
+    with pytest.raises(ValueError, match="closed"):
+        await repo.bind_sequence(owner_user_id="guild", creator_uid="c-1", sender_account_id="sender-b")
