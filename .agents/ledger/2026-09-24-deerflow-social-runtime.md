@@ -206,3 +206,110 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 - 已备份经纪人操作库后优雅停止旧 owner；没有删除 profile、登录资料或锁文件。现有 profile 的最近登录状态保留。
 - Gateway MCP cache 已重置。使用同一 profile 启动新的 broker server，`broker_workspace` 成功读取 Atlantis（guild `103785`），未再出现 `login_required` 或 `profile_busy`。
 - 本次仅做 workspace 读取和进程恢复，没有执行 TikTok 发信、邀约或其他平台写入；外部消息/回执继续保持 `unverified-external`。
+
+## 2026-09-29 双通道最终集成复核
+
+- 原有 dirty worktree 已保存在 `stash@{0}`（基线 `895233fbe`），未删除或应用历史变更。
+- Task 1–8 的既有软件交付记录仅覆盖已提交的合同、离线执行器、控制面和证据，
+  不代表 Task 8 的真实平台 pilot、live parity 或扩容完成。
+  最终复核发现 Gateway operator 的生产初始化、native MCP adapter、真实 Playwright/Appium
+  transport 未实际接线；整条可执行链继续标记 **执行中**。
+- 当前实现 SHA `02521d405` 已修复 completed message replay、Web owner 心跳与 fencing、
+  Web/iOS fresh readback 和 profile 独立 task_id 持久化问题。
+- Dispatch `production-outreach-integration-20260929`：基线 `02521d405`，唯一实现者
+  `/root/implement_production_outreach_integration`，状态 **执行中**。文件归属为生产 bridge、
+  Gateway 生命周期/执行入口、native MCP adapter、driver factory、相应测试与运行说明；根
+  Agent 维护既有计划、台账和证据并独立验收。未启动 Claude 协作或真实 TikTok 写入。
+- Ruling: 生产接线是原计划 Task 2/5/7 的必要补完，不另起产品或业务账本；默认 provider
+  写入门禁保持关闭，使用离线真实 transport 合同验证后再进入单号 pilot。若判断错误，成本
+  是本批可逆代码返工；不能把 fake adapter 的通过率当作已经可运营。
+- 验收要求：认证身份不可由模型参数覆盖；native task 经真实 transport 接口产生结果并写回
+  同库；caller receipt 不得伪造完成；timeout/exit/lease loss 不得盲重试；shutdown 不泄漏
+  进程或锁。真实 Web/iPhone selector、收发信及十号/五十号容量继续未验证。
+- 独立复审 `02521d405` 为 **NOT CLEAN**。离线 API 形状复现确认：当前登录账号未核验；
+  count 增长混入历史同文；Playwright `first()/last()` 方法误用；生产 adapter 缺失；
+  浏览器启动失败释放锁缺 owner；iOS 单项/集合 selector 转换不一致。后端 focused
+  `36 passed` 和 operator `50 passed` 不能推翻这些复现。上述问题合并进入当前唯一实现
+  批次，历史证据已撤回“可进入 pilot”的表述。
+
+- 集成交付 `75318ad4fcbd5d637fc1baba1e45fc0dab2596ef`：Gateway 原生服务、per-owner MCP
+  认证、Node JSONL worker、Playwright/Appium transport 和显式 execute 入口已提交。根 Agent
+  同 SHA 独立验证 backend 87、operator 65、runtime focused 41、真实 auth + native MCP
+  HTTP/SQLite smoke、static doctor、frontend lint/types/build 和 mocked E2E 1 均通过。
+- 独立验收发现新增 helper 自动发现回归：完整 `acceptance -- --static` 为 122 passed、
+  2 failed，失败分别为新增 `test/fixtures/web-worker.mjs` 缺执行配置、历史 nginx 日志断言。
+  当前状态 **独立审查中**，前者必须修复，后者不能伪称已通过；真实平台仍未运行。
+
+- 独立集成复审 `75318ad4f` 为 **NOT CLEAN**，前一轮六项接线/读回问题已实质修复；
+  本轮真实本地 transport 故障注入仍复现四项：同 owner/sender/creator 的原生
+  `do_not_contact` 未门禁；取消/畸形回执/硬退出后，已派发任务租约恢复可重复评论；
+  Web close 失败被吞掉并释放 profile/host 锁；worker fixture 被父测试发现后崩溃。
+- 唯一关键修复 dispatch `production-outreach-critical-repair-20260929`，BASE
+  `75318ad4fcbd5d637fc1baba1e45fc0dab2596ef`，实现者仍为
+  `/root/implement_production_outreach_integration`，状态 **执行中**；完整发现一批修复后
+  做一次限定复审，禁止把历史 nginx 失败或真实 pilot 混入此批。
+- Ruling: 外部尝试开始前写入原生持久标记；未确认完成的已派发动作过期后必须人工核对，
+  普通资源锁及未派发任务才可安全回收 — 从上游任务事实阻止重复评论/私信，并保留既有
+  同作用域禁联优先级 — 若过度保守，成本是额外人工核对及可逆流程返工，不是盲目重发。
+- 前端额外独立检查：执行门禁关闭、原生成功后完成、原生拒绝后显示原因/无自动重试
+  三项 UI 冒烟均通过；所有 public-outreach API mocked，TikTok 请求数为零。临时
+  Next 服务已停止，没有启动业务后台或操作真实账号。
+
+## 2026-09-30 双通道关键修复与固定 SHA 验收
+
+- 唯一关键修复批次 `production-outreach-critical-repair-20260929` 已交付
+  `e05f83ae9216a229d161bc29c1a8c2b0d3962470`（基线 `75318ad4f`）；
+  同 owner/sender/creator 原生禁联在受理、claim、provider 派发前均检查，
+  不同作用域保持独立。外部 provider I/O 前在原生 task 写持久 attempt 标记；
+  调用者不能写入/覆盖内部 dispatch、manual、lease、receipt 字段。
+- 已派发而未确认完成的任务，在 claim 过期、显式 release、取消、异常和进程硬退出后
+  均保持人工核对/暂停，不再自动回到 pending；普通未派发租约才可回收。
+  verified proof 与原生任务关联原子入库；证明已存而 task 未完成时不能重试、用 unknown
+  覆盖或重复评论。需要明确人工授权的 retry 与独立 sender resume，不能把它们视为
+  已获平台确认；不承诺外部 exactly-once。
+- Web `context.close` 失败不释放 profile/host slot。启动前写 cleanup-required 资源标记，
+  即使 Node owner 已死/租约已过期仍将锁和容量计为占用，只有确认关闭并清理后恢复。
+  iPhone session 删除失败同样保持占用。测试 worker 已移出父包自动发现目录。
+- 根 Agent 对固定 SHA 独立运行：backend focused **104 passed**、operator **71 passed**、
+  runtime focused **41 passed**；本机 real-auth HTTP/SQLite + shipped stdio native MCP
+  冒烟通过且未启动 provider；static doctor 全通过。完整静态 acceptance 为
+  **128 passed / 1 failed**，唯一剩余失败是历史 nginx 日志断言，不能称整套绿。
+  前端在 `75318ad4f..e05f83ae9` 没有代码变化，沿用此前 TypeScript/lint/build、
+  mocked E2E 1 和执行 UI 3 场景通过的同源码证据。
+- 根 Agent 另用 pinned Playwright 实际启动匿名 `about:blank` Chromium，强制 SIGKILL
+  Node 后发现 Chromium 使用独立进程组；模拟租约过期，重新 claim 返回
+  `profile_cleanup_required`，原持久锁内容不变。演练自身 Chromium/临时目录已清理；
+  无 TikTok 导航或写入。限定独立复审仍在进行中。
+- 原始 dirty worktree 仍由 `stash@{0}` =
+  `c17efdf9a13bc9089e0d0d3909a924a375a66892` 保留，不应用、不删除。
+  原有计划、本文、协调入口和能力矩阵原位更新，不另起台账/开发手册。
+- 部署 DB 仍为 `0026_social_runtime`、public profile root 未初始化、无登记 iPhone；
+  TikTok/Web/iOS 真实 sender/creator/新 item read-back 映射没有现场证明。Web/iPhone
+  单号 pilot、live receipt parity、十号到五十号扩展保持 `unverified-external`/`blocked`，
+  本批未做迁移、真实平台动作、push 或 PR。
+- 限定独立复审 `e05f83ae9` 为 **NOT CLEAN**：原四项中的禁联、资源清理与测试 helper
+  已关闭；持久派发边界仍有两个可重复的漏窗。R1：并发普通 payload 更新从旧 JSON
+  覆盖 `_external_attempt_started`，过期后会误回 pending 并允许盲领；R2：FOLLOW 或 DM
+  task 提交完成后取消，proof 留存但关系没有推进，重复执行只返回 duplicate，分别卡在
+  `gray` 或 `public_touched`。独立本地复现脚本和精确输出保存在本计划 SDD scratch；
+  该报告没有修改源码或触发平台。
+- Ruling: 这两处属于已授权目标中的关键原生终局边界，继续由原唯一实现者做一批有限
+  修复再做限定复审；不把已知盲重试和永久灰态交给真实 pilot。若判断错误，成本是额外
+  一次可逆本地修复/复审，不涉及平台写入、迁移或扩容。
+- 终局补丁 `production-outreach-terminal-boundary-20260930` 已交付
+  `d4fd1444a1277583387ccb8cb69e690ccda360e9`，仅改 5 个原生实现/测试/runbook 文件。
+  普通 payload 修改要求 pending 状态和 `updated_at` CAS，旧读不能覆盖派发标志；
+  FOLLOW/DM 的已绑定 verified proof 经原生身份、动作/组/回执类型与禁联/关闭边界校验后，
+  task 完成与 claim/sequence 状态推进同一事务。提交前中断后，明确 execute 只用原生
+  proof 完成结算并返回 duplicate，不能再次调用 Node/provider。
+- 实现者最终 backend focused 124、operator 71、父包静态 128 passed/1 历史 nginx
+  failed；根 Agent 在固定 SHA 上独立复跑 backend **124 passed**、operator **71 passed**、
+  real-auth native MCP/HTTP/SQLite smoke **passed**、父包静态仍 **128 passed/1 历史
+  nginx failed**。前端与 operator 源码在 `75318ad4f..d4fd1444a` 没有变化；
+  e05 的匿名真实 Chromium 资源故障演练适用于同一 Web 资源源码。
+- 固定 `d4fd1444a` 终局补丁限定独立复审 **CLEAN**：R1、R2 均 ADDRESSED，本补丁未引入
+  重要新问题。复审者将旧三个失败场景转为 `--expect-fixed` 正向断言，精确验证普通旧读
+  被拒、派发标志保留/过期后 failed+manual_required/暂停 sender/拒绝盲领，以及 FOLLOW/DM
+  提交后取消时 claim 与 sequence 分别同达 `public_touched`/`contacted`、proof 保留、
+  每目标 provider 仅提交一次、FOLLOW 后 DM 可 verified。独立脚本 3 场景 exit 0，
+  窄后端 **20 passed**。这是本地软件限定验收，不能升级为 live provider/device 已通过。

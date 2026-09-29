@@ -29,9 +29,11 @@ not evidence that any external TikTok action occurred.
 
 ## Dual-channel public outreach (2026-09-29)
 
-The following rows add the staged verification boundary for the Web
-Playwright and iPhone Appium/XCUITest outreach implementation. They do not
-replace the older external TikTok rows above.
+The following rows record the historical `477a67d0a` staged verification
+boundary for the Web Playwright and iPhone Appium/XCUITest outreach
+implementation. Their counts and stale-lease result are snapshots, not current
+`e05f83ae9` recovery semantics; the refreshed evidence follows the table.
+They do not replace the older external TikTok rows above.
 
 | Capability                                                  | Status                | Evidence and boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -45,3 +47,40 @@ replace the older external TikTok rows above.
 | Authorized Web single-account pilot                         | `unverified-external` | Not run in this verification window. Requires explicit account/creator authorization, provider read-back, evidence capture, stop conditions, and cleanup.                                                                                                                                                                                                                                                                                                             |
 | Authorized iPhone single-device pilot                       | `unverified-external` | Not run. No registered physical iPhone or verified live WDA probe was present; screenshots, accessibility snapshots, and fake drivers cannot promote this capability.                                                                                                                                                                                                                                                                                                 |
 | Ten-account expansion and fifty-account operational rollout | `blocked`             | Blocked until the single Web and iPhone pilots pass, manual takeover is exercised, and provider read-back is verified.                                                                                                                                                                                                                                                                                                                                                |
+
+## Production-chain local evidence (2026-09-30)
+
+At `e05f83ae9`, backend focused **104**, operator **71** and runtime focused
+**41** tests pass. An actual authenticated Gateway/SQLite/native MCP exchange
+ran with the external-write gate closed and started no provider worker.
+Same-scope native no-contact, pre-dispatch attempt fencing, linked verified
+proof, and unconfirmed Web/iPhone resource occupancy have local fault tests.
+Scoped review at `e05f83ae9` still reproduced a stale payload update erasing
+the attempt fence, and a final public task commit before claim advancement
+leaving the claim `gray`; software acceptance is blocked. Root launched only
+anonymous `about:blank` Chromium through
+pinned Playwright; after Node hard death, expired reclaim was refused as
+`profile_cleanup_required` and the original profile lock survived. No TikTok
+page, account, or provider write was used. Launched resources now require
+confirmed cleanup; the historical 4.255 ms fake stale-lease recovery applies
+only to an unlaunched resource, not an abandoned browser.
+
+The full static acceptance remains `blocked`: **128 passed / 1 historical nginx
+log assertion failed**. The new worker-helper discovery regression is repaired.
+Actual Web/iOS sender, creator and new-item read-back mappings, migration of
+the current deployment DB, and physical iPhone/WDA readiness remain
+`unverified-external` or blocked. Both single-account pilots and expansion to
+ten/fifty accounts remain outside local software verification.
+
+The terminal follow-up `d4fd1444a` addresses the two `e05f83ae9` residual
+native gaps with pending+version CAS for ordinary payload edits and atomic
+FOLLOW/DM task-and-relationship settlement. A verified receipt stored before
+an interrupted terminal commit can be reconciled by explicit native-only
+execute without a second provider call. Root fixed-head checks: backend 124,
+operator 71 and real-auth native MCP/HTTP/SQLite smoke passed; full static
+acceptance remains 128 passed / 1 historical nginx failed. Independent scoped
+review is **CLEAN** for R1/R2: the earlier three failure scenarios now pass
+strict positive assertions, plus 20 narrow backend tests. This remains
+`verified-local` evidence only for the tested
+paths; real Web/iOS receipt mappings and one-account pilots stay
+`unverified-external`, and expansion stays `blocked`.
