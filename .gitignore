@@ -53,6 +53,7 @@ debug.log
 
 # pnpm
 .pnpm-store
+ops/guild-runtime/public-outreach-operator/node_modules/
 sandbox_image_cache.tar
 
 # ignore the legacy `web` folder

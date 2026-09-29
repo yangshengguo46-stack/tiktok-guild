@@ -540,6 +540,14 @@ def _make_session_pool_tool(
             # host path — the tool-agnostic counterpart to fixing the cwd. Merge
             # rather than replace any operator-provided env.
             session_env = dict(session_connection.get("env") or {})
+            if server_name == "public_outreach_operator":
+                from deerflow.mcp.outreach_auth import public_outreach_session_env
+
+                # Override static env so a config file cannot fix a pooled
+                # outreach process to another authenticated runtime owner.
+                for key in ("DEERFLOW_OUTREACH_OWNER_USER_ID", "DEERFLOW_OUTREACH_INTERNAL_TOKEN"):
+                    session_env.pop(key, None)
+                session_env.update(public_outreach_session_env(user_id))
             session_env.setdefault("TMPDIR", str(tmp_dir))
             session_env.setdefault("TMP", str(tmp_dir))
             session_env.setdefault("TEMP", str(tmp_dir))

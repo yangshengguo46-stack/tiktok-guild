@@ -1,9 +1,12 @@
+import { freshMatchingItem, readIdentity, receiptItem, senderMatches } from '../provider-proof.mjs';
+
 export const LOCATOR_VERSION = 'tiktok-web@1';
 
 // These semantic locators are used by the offline fake-browser tests. Provider
 // selectors are intentionally only activated when the separately authorized
 // pilot flag is set.
 export const FAKE_LOCATORS = Object.freeze({
+  loggedInSender: '[data-outreach-current-sender]',
   loginRequired: '[data-outreach-login-required]',
   challenge: '[data-outreach-challenge]',
   creatorSearch: '[data-outreach-creator-search]',
@@ -21,6 +24,7 @@ export const FAKE_LOCATORS = Object.freeze({
 });
 
 export const PILOT_LOCATORS = Object.freeze({
+  loggedInSender: '[data-e2e="current-user"]',
   loginRequired: '[data-e2e="login-button"]',
   challenge: '[data-e2e="captcha-container"]',
   creatorSearch: '[data-e2e="search-input"]',
@@ -52,7 +56,7 @@ function pilotAllowed(explicit) {
 }
 
 function first(value) {
-  return value?.first ?? value;
+  return typeof value?.first === 'function' ? value.first() : value;
 }
 
 function locatorFor(page, selector) {
@@ -69,7 +73,7 @@ async function visible(locator) {
   if (!locator) return false;
   if (typeof locator.isVisible === 'function') return Boolean(await locator.isVisible());
   if (typeof locator.visible === 'boolean') return locator.visible;
-  return true;
+  return false;
 }
 
 async function attribute(locator, name) {
@@ -105,25 +109,16 @@ async function click(locator) {
   await locator.click();
 }
 
-async function receiptSnapshot(locator) {
-  if (!locator) return { count: null, identity: null, marker: null, text: '' };
-  const count = typeof locator.count === 'function' ? Number(await locator.count()) : null;
-  const latest = locator?.last ?? locator;
-  const identity = await attribute(latest, 'data-receipt-id')
-    ?? await attribute(latest, 'data-action-id')
-    ?? await attribute(latest, 'data-comment-id')
-    ?? await attribute(latest, 'data-message-id');
-  const marker = await attribute(latest, 'data-receipt-marker')
-    ?? await attribute(latest, 'data-provider-marker');
-  return { count, identity, marker, text: await text(latest) };
-}
-
-function freshReceipt(before, after, expectedText) {
-  const countAdvanced = Number.isFinite(before.count) && Number.isFinite(after.count) && after.count > before.count;
-  const identityChanged = Boolean(after.identity) && after.identity !== before.identity;
-  const markerChanged = Boolean(after.marker) && after.marker !== before.marker;
-  const expectedContent = typeof expectedText === 'string' && after.text.includes(expectedText);
-  return (countAdvanced || identityChanged || markerChanged) && expectedContent;
+async function receiptSnapshot(collection) {
+  if (!collection) return [];
+  const count = typeof collection.count === 'function' ? await collection.count() : 1;
+  const items = [];
+  for (let index = 0; index < count; index += 1) {
+    const element = typeof collection.nth === 'function' ? collection.nth(index) : first(collection);
+    if (await visible(element)) items.push(await receiptItem(element));
+    if (typeof collection.nth !== 'function') break;
+  }
+  return items;
 }
 
 async function fill(locator, value) {
@@ -158,6 +153,18 @@ export class TikTokWebPageObjects {
     } else {
       throw new WebActionError('pilot_required', 'Real provider selectors require the authorized pilot flag.');
     }
+  }
+
+  async verifySender(account) {
+    await checkGate(this.page, this.locators);
+    const element = locatorFor(this.page, this.locators.loggedInSender);
+    if (!await visible(element)) throw new WebActionError('sender_identity_missing', 'Logged-in sender identity is unavailable.');
+    const observed = await readIdentity(element, 'sender');
+    if (!senderMatches(observed, account.external_ref)) {
+      throw new WebActionError('sender_identity_mismatch', 'Logged-in sender differs from the registered account.');
+    }
+    this.observedSender = observed;
+    return observed;
   }
 
   async prepareCreator(creator = {}) {
@@ -211,6 +218,8 @@ export class TikTokWebPageObjects {
     if (!observedUid && !observedHandle) {
       throw new WebActionError('unknown', 'Current profile identity could not be verified.');
     }
+    this.creatorUid = observedUid;
+    this.observedCreator = { creator_uid: observedUid, handle: observedHandle };
     return { verification_source: `${LOCATOR_VERSION}:profile-identity` };
   }
 
@@ -241,10 +250,11 @@ export class TikTokWebPageObjects {
     await click(submit);
     if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
     const after = await receiptSnapshot(receipt);
-    if (!freshReceipt(before, after, commentText)) {
+    const fresh = freshMatchingItem(before, after, commentText, this.observedSender, this.creatorUid);
+    if (!fresh) {
       throw new WebActionError('unknown', 'Comment did not produce a fresh provider receipt.');
     }
-    return { action: 'comment', evidence: `${LOCATOR_VERSION}:comment-receipt`, state: 'visible', text: commentText };
+    return { action: 'comment', evidence: `${LOCATOR_VERSION}:comment-receipt:new:${fresh.identity}`, state: 'visible', text: commentText, provider_receipt_id: fresh.identity, proof: fresh };
   }
 
   async follow() {
@@ -274,10 +284,11 @@ export class TikTokWebPageObjects {
     await click(submit);
     if (typeof this.page.waitForTimeout === 'function') await this.page.waitForTimeout(0);
     const after = await receiptSnapshot(receipt);
-    if (!freshReceipt(before, after, messageText)) {
+    const fresh = freshMatchingItem(before, after, messageText, this.observedSender, this.creatorUid);
+    if (!fresh) {
       throw new WebActionError('unknown', 'Message did not produce a fresh provider receipt.');
     }
-    return { action: 'message', evidence: `${LOCATOR_VERSION}:message-receipt`, state: 'visible', text: messageText };
+    return { action: 'message', evidence: `${LOCATOR_VERSION}:message-receipt:new:${fresh.identity}`, state: 'visible', text: messageText, provider_receipt_id: fresh.identity, proof: fresh };
   }
 
   async run(action, payload = {}) {

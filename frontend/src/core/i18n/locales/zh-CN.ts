@@ -415,6 +415,7 @@ export const zhCN: Translations = {
         unknown: "待核验",
         retry: "重试",
         manualTakeover: "人工接管",
+        execute: "执行试点动作",
         markUnknown: "标记为执行器未知",
         closeSequence: "关闭序列",
       },

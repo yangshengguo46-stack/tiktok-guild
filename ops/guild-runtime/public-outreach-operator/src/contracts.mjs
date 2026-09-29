@@ -9,7 +9,7 @@ const COMMON_PROPERTIES = Object.freeze({
 });
 
 export const ACCOUNT_CHILDREN = Object.freeze(['list', 'register', 'health', 'disable']);
-export const TASK_CHILDREN = Object.freeze(['enqueue', 'get', 'claim', 'complete', 'fail', 'reconcile']);
+export const TASK_CHILDREN = Object.freeze(['enqueue', 'get', 'claim', 'execute', 'complete', 'fail', 'reconcile']);
 export const ADAPTER_METHODS = Object.freeze({
   public_outreach_accounts: Object.freeze({
     list: 'listSenderAccounts',
@@ -21,6 +21,7 @@ export const ADAPTER_METHODS = Object.freeze({
     enqueue: 'enqueueAction',
     get: 'getAction',
     claim: 'claimAction',
+    execute: 'executeAction',
     complete: 'completeAction',
     fail: 'failAction',
     reconcile: 'reconcileActions',
@@ -58,7 +59,7 @@ export const TOOL_DEFINITIONS = Object.freeze([
   Object.freeze({
     name: 'public_outreach_tasks',
     title: 'Public outreach tasks',
-    description: 'Create and reconcile ordered public outreach tasks through the native DeerFlow outreach repository.',
+    description: 'Create and reconcile native ordered tasks. Only the explicit execute child performs external TikTok writes, within the deployment single-account pilot gate; claim cannot perform provider writes.',
     inputSchema: childSchema(TASK_CHILDREN),
   }),
 ]);

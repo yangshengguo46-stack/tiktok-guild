@@ -32,7 +32,9 @@ type AccountPayload = {
     maximum: number;
     active_limit: number;
     active: number;
+    ready: number;
   };
+  operator: { external_writes_enabled: boolean };
   ios_readiness: { registered: number; ready: number };
 };
 
@@ -79,6 +81,7 @@ type PublicOutreachCopy = {
     verified: string;
     unknown: string;
     retry: string;
+    execute: string;
     manualTakeover: string;
     markUnknown: string;
     closeSequence: string;
@@ -205,7 +208,7 @@ export default function PublicOutreachWorkbenchPage() {
   }
 
   async function runTaskAction(
-    action: "retry" | "takeover" | "unknown",
+    action: "execute" | "retry" | "takeover" | "unknown",
     body?: Record<string, string>,
   ) {
     if (!selectedTask) return;
@@ -362,6 +365,18 @@ export default function PublicOutreachWorkbenchPage() {
           {selectedTask ? (
             <section className="border-border/70 rounded-lg border p-4">
               <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  data-testid="outreach-execute"
+                  disabled={
+                    actionBusy ||
+                    !accounts?.operator?.external_writes_enabled ||
+                    selectedTask.state !== "pending"
+                  }
+                  onClick={() => void runTaskAction("execute")}
+                  size="sm"
+                >
+                  {copy.taskList.execute}
+                </Button>
                 <Button
                   data-testid="outreach-retry"
                   disabled={actionBusy}

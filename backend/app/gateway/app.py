@@ -524,7 +524,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 set_subagent_batch_submitter(batch_service)
                 app.state.subagent_batches_available = True
 
-        yield
+        from app.gateway.public_outreach_service import close_public_outreach, initialize_public_outreach
+
+        await initialize_public_outreach(app)
+        try:
+            yield
+        finally:
+            try:
+                await close_public_outreach(app)
+            except TimeoutError:
+                logger.warning("Public outreach shutdown exceeded its deadline; continuing Gateway cleanup.")
+            except Exception:
+                logger.exception("Failed to close public outreach executor")
 
         await _shutdown_startup_trash_sweep(app)
 

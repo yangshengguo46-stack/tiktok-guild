@@ -147,7 +147,8 @@ export function createPlaywrightPool({
         active.set(lease.lease_id, activeLease);
         return { ...activeLease };
       } catch (error) {
-        await profiles.release(lease.lease_id);
+        const cleanup = await profiles.release({ lease_id: lease.lease_id, sender_account_id: account.sender_account_id, owner_id: poolOwnerId });
+        if (!cleanup.ok) throw new Error(`Browser launch cleanup failed: ${cleanup.error_code}`);
         return {
           ok: false,
           error_code: 'browser_launch_failed',

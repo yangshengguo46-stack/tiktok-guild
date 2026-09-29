@@ -442,6 +442,7 @@ export const enUS: Translations = {
         unknown: "Unknown",
         retry: "Retry",
         manualTakeover: "Manual takeover",
+        execute: "Execute pilot action",
         markUnknown: "Mark provider unknown",
         closeSequence: "Close sequence",
       },

@@ -31,12 +31,19 @@ export TIKTOK_BROKER_IDENTITY_TEXT="Mira"
 合同。默认最多登记 50 个 Web profile，每批最多 10 个活动 profile；不会在运行时创建代理池、
 指纹伪装、验证码绕过或其他规避检测能力。
 
+生产接线由 Gateway 管理 Node worker；MCP 只调用同一原生 API。外部写入默认关闭，必须在 Git 外
+配置单 owner/sender/creator 的试点 allowlist；私信另需许可。任务创建、claim、health 和 reconcile
+不会写平台，只有明确的 `execute` 子命令/工作台执行按钮会执行动作。真实 TikTok 的账号/目标与新
+条目读回映射仍待单号现场验证，离线 fixture 或 static doctor 不能证明平台已可用。
+部署和故障恢复见[生产运行说明](../../docs/verification/creator-agent/public-outreach-production-runbook.md)。
+
 这些配置只包含路径、并发和 WDA 连接参数，登录资料、cookies、设备登记和截图证据留在
 `$HOME/.codex/tiktok-live-public-outreach/` 或显式指定的本机目录，不进 Git：
 
 ```sh
 export PUBLIC_OUTREACH_OPERATOR_ROOT="$PWD/ops/guild-runtime/public-outreach-operator"
-export PUBLIC_OUTREACH_PROFILE_ROOT="$HOME/.codex/tiktok-live-public-outreach/profiles"
+export PUBLIC_OUTREACH_RUNTIME_ROOT="$HOME/.codex/tiktok-live-public-outreach"
+export PUBLIC_OUTREACH_PROFILE_ROOT="$PUBLIC_OUTREACH_RUNTIME_ROOT/web-profiles"
 export PUBLIC_OUTREACH_MAX_ACTIVE="10"
 export PUBLIC_OUTREACH_IOS_DEVICE_ROOT="$HOME/.codex/tiktok-live-public-outreach/ios-devices"
 export PUBLIC_OUTREACH_IOS_WDA_BUNDLE_ID="com.example.WebDriverAgentRunner"

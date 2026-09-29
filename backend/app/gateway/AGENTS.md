@@ -1,5 +1,18 @@
 ### Gateway API (`app/gateway/`)
 
+Public outreach lifespan composition lives in `public_outreach_service.py`:
+Gateway owns the native repository/workflow and a bounded Node executor; the
+stdio MCP is an authenticated native HTTP adapter. Owner credentials are injected
+after runtime identity resolution per owner/thread, then rehydrated through the
+existing auth provider with normal admin/permission checks. Caller receipts and
+model identities cannot complete tasks. Only explicit execute may write externally,
+under the deployment single-owner/sender/creator pilot allowlist (DM permission is
+separate). Unknown execution persists failed/manual-required and pauses the sender;
+it must not return to the automatic queue. Shared host resource slots enforce
+10 active Web sessions and one iPhone; native tasks/receipts remain database-owned.
+See [production runbook](../../../docs/verification/creator-agent/public-outreach-production-runbook.md)
+for private configuration, cleanup and the still-unverified TikTok readback mapping.
+
 Social profile management admits only an authenticated session user on default
 operator Chat. `operator_management_for_request` freezes owner, Chat thread and
 genuine current message IDs/text in a typed runtime capability. PAT, internal,

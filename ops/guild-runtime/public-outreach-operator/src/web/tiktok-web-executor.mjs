@@ -10,6 +10,9 @@ const MANUAL_CODES = new Set([
   'provider_rejected',
   'unknown',
   'pilot_required',
+  'sender_identity_missing',
+  'sender_identity_mismatch',
+  'already_state',
 ]);
 
 function safeId(value, fallback = 'unknown') {
@@ -103,7 +106,7 @@ function validateOrder(actions) {
   }
 }
 
-function receiptFor({ account, creator, action, evidence, payload }) {
+function receiptFor({ account, creator, action, evidence, payload, result }) {
   const senderAccountId = account.sender_account_id ?? account.account_id ?? account.external_ref;
   const creatorUid = creator.creator_uid ?? creator.uid ?? creator.user_id;
   const providerRef = `tiktok-web:${safeId(senderAccountId)}:${safeId(creatorUid)}:${action}:${crypto.randomUUID()}`;
@@ -115,8 +118,13 @@ function receiptFor({ account, creator, action, evidence, payload }) {
       sender_account_id: senderAccountId ?? null,
       creator_uid: creatorUid ?? null,
       evidence: [evidence],
+      observed_sender: account.observed_sender,
+      observed_creator: account.observed_creator,
+      transition: result.transition ?? null,
+      provider_receipt_id: result.provider_receipt_id ?? null,
+      readback_proof: result.proof ?? null,
       payload: action === 'comment' || action === 'message'
-        ? { text: payload.comment ?? payload.comment_text ?? payload.message ?? payload.message_text ?? payload.text ?? null }
+        ? { text: action === 'comment' ? payload.comment ?? payload.comment_text ?? payload.text ?? null : payload.message ?? payload.message_text ?? payload.text ?? null }
         : {},
       observed_at: new Date().toISOString(),
     },
@@ -190,18 +198,22 @@ export async function executeWebAction({
       pilotEnabled: payload.pilotEnabled ?? executionAccount.pilot_enabled,
       testOnly: payload.testOnly === true,
     });
+    const observedSender = await pageObjects.verifySender(executionAccount);
+    const receiptAccount = { ...executionAccount, observed_sender: observedSender };
     const receipts = [];
     for (const currentAction of actions) {
       if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
       await assertLease(executionAccount);
       const result = await pageObjects.run(currentAction, { ...payload, creator });
+      receiptAccount.observed_creator = pageObjects.observedCreator;
       if (!result || !result.evidence) throw new WebActionError('unknown', 'Action completed without read-back evidence.');
       receipts.push(receiptFor({
-        account: executionAccount,
+        account: receiptAccount,
         creator,
         action: currentAction,
         evidence: result.evidence,
         payload,
+        result,
       }));
     }
     const final = receipts.at(-1);

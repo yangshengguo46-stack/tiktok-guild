@@ -3,7 +3,7 @@ import { PUBLIC_OUTREACH_TOOL_NAMES } from './constants.mjs';
 
 export const PUBLIC_OUTREACH_CHILDREN = Object.freeze({
   public_outreach_accounts: Object.freeze(['list', 'register', 'health', 'disable']),
-  public_outreach_tasks: Object.freeze(['enqueue', 'get', 'claim', 'complete', 'fail', 'reconcile']),
+  public_outreach_tasks: Object.freeze(['enqueue', 'get', 'claim', 'execute', 'complete', 'fail', 'reconcile']),
 });
 
 export async function inspectGatewayMcpConfig({ gatewayUrl, expectedServers, timeoutMs = 5000 }) {

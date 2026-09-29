@@ -1,3 +1,4 @@
+import { freshMatchingItem, readIdentity, receiptItem, senderMatches } from '../provider-proof.mjs';
 import crypto from 'node:crypto';
 
 import { createXcuitestSession, IosSessionError } from './xcuitest-session.mjs';
@@ -17,9 +18,12 @@ const MANUAL_CODES = new Set([
   'manual_required',
   'pilot_required',
   'already_state',
+  'sender_identity_missing',
+  'sender_identity_mismatch',
 ]);
 
 export const IOS_LOCATORS = Object.freeze({
+  loggedInSender: { accessibility_id: 'current-user' },
   loginRequired: { accessibility_id: 'login-button' },
   challenge: { accessibility_id: 'captcha-container' },
   creatorSearch: { accessibility_id: 'creator-search' },
@@ -175,43 +179,19 @@ async function active(element) {
 }
 
 async function receiptSnapshot(session, locator) {
-  const count = typeof session.count === 'function' ? await session.count(locator) : null;
-  let element = null;
-  try {
-    element = await session.find(locator);
-  } catch {
-    // A missing receipt before an action is a valid baseline.
-  }
-  if (!element) return { count, exists: false, marker: null, text: '' };
-  const marker = await attribute(element, 'data-receipt-id')
-    ?? await attribute(element, 'data-message-id')
-    ?? await attribute(element, 'data-id')
-    ?? await attribute(element, 'id')
-    ?? await attribute(element, 'data-created-at');
-  return {
-    count,
-    exists: true,
-    marker: marker ?? null,
-    text: await text(element),
-  };
-}
-
-function freshReceipt(before, after, expectedText) {
-  if (!after.exists || !after.text.includes(expectedText)) return null;
-  if (before.count !== null && after.count !== null && after.count > before.count) {
-    return { kind: 'count', before: before.count, after: after.count };
-  }
-  if (after.marker && after.marker !== before.marker) {
-    return { kind: 'marker', before: before.marker, after: after.marker };
-  }
-  return null;
+  let elements;
+  if (typeof session.findAll === 'function') elements = await session.findAll(locator);
+  else { try { elements = [await session.find(locator)]; } catch { elements = []; } }
+  const items = [];
+  for (const element of elements) if (await visible(element)) items.push(await receiptItem(element));
+  return items;
 }
 
 function transitionEvidence(locatorVersion, action, locator, before, after) {
   return `${locatorVersion}:${action}:${locatorDescription(locator)}:transition:${String(before)}->${String(after)}`;
 }
 
-function receiptFor({ account, creator, action, evidence, payload, locatorVersion }) {
+function receiptFor({ account, creator, action, evidence, payload, locatorVersion, result }) {
   const senderAccountId = accountId(account);
   const creatorUid = creatorId(creator);
   return {
@@ -222,9 +202,14 @@ function receiptFor({ account, creator, action, evidence, payload, locatorVersio
       sender_account_id: senderAccountId,
       creator_uid: creatorUid,
       evidence: [evidence],
+      observed_sender: account.observed_sender,
+      observed_creator: account.observed_creator,
+      transition: result.transition ?? null,
+      provider_receipt_id: result.provider_receipt_id ?? null,
+      readback_proof: result.proof ?? null,
       locator_version: locatorVersion,
       payload: action === 'comment' || action === 'message'
-        ? { text: payload.comment ?? payload.comment_text ?? payload.message ?? payload.message_text ?? payload.text ?? null }
+        ? { text: action === 'comment' ? payload.comment ?? payload.comment_text ?? payload.text ?? null : payload.message ?? payload.message_text ?? payload.text ?? null }
         : {},
       observed_at: new Date().toISOString(),
     },
@@ -287,7 +272,7 @@ async function prepareCreator(session, creator, locators) {
   };
 }
 
-async function runAction(session, action, payload, locators, locatorVersion) {
+async function runAction(session, action, payload, locators, locatorVersion, observedSender, creatorUid) {
   switch (action) {
     case 'like': {
       const control = await session.find(locators.likeButton);
@@ -306,6 +291,7 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       return {
         action,
         evidence: transitionEvidence(locatorVersion, action, locators.likeButton, beforeActive, afterActive),
+        transition: { before: beforeActive, after: afterActive },
       };
     }
     case 'follow': {
@@ -325,6 +311,7 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       return {
         action,
         evidence: transitionEvidence(locatorVersion, action, locators.followButton, beforeActive, afterActive),
+        transition: { before: beforeActive, after: afterActive },
       };
     }
     case 'comment': {
@@ -334,14 +321,16 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       await session.type(locators.commentInput, value);
       await session.tap(locators.commentSubmit);
       const after = await receiptSnapshot(session, locators.commentReceipt);
-      const fresh = freshReceipt(before, after, value);
+      const fresh = freshMatchingItem(before, after, value, observedSender, creatorUid);
       if (!fresh) throw new IosSessionError('unknown', 'Comment did not produce fresh provider receipt evidence.', {
         before,
         after,
       });
       return {
         action,
-        evidence: `${locatorVersion}:${action}:${locatorDescription(locators.commentReceipt)}:fresh-${fresh.kind}:${fresh.before}->${fresh.after}`,
+        evidence: `${locatorVersion}:${action}:${locatorDescription(locators.commentReceipt)}:fresh-item:new:${fresh.identity}`,
+        provider_receipt_id: fresh.identity,
+        proof: fresh,
       };
     }
     case 'message': {
@@ -351,14 +340,16 @@ async function runAction(session, action, payload, locators, locatorVersion) {
       await session.type(locators.messageInput, value);
       await session.tap(locators.messageSubmit);
       const after = await receiptSnapshot(session, locators.messageReceipt);
-      const fresh = freshReceipt(before, after, value);
+      const fresh = freshMatchingItem(before, after, value, observedSender, creatorUid);
       if (!fresh) throw new IosSessionError('unknown', 'Message did not produce fresh provider receipt evidence.', {
         before,
         after,
       });
       return {
         action,
-        evidence: `${locatorVersion}:${action}:${locatorDescription(locators.messageReceipt)}:fresh-${fresh.kind}:${fresh.before}->${fresh.after}`,
+        evidence: `${locatorVersion}:${action}:${locatorDescription(locators.messageReceipt)}:fresh-item:new:${fresh.identity}`,
+        provider_receipt_id: fresh.identity,
+        proof: fresh,
       };
     }
     default:
@@ -390,6 +381,10 @@ export async function executeIosAction({
     }
     validateOrder(actions);
     if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
+    const fakeOnly = payload.testOnly === true && process.env.PUBLIC_OUTREACH_FAKE_BROWSER === '1';
+    if (!pilotAllowed(payload.pilotEnabled ?? resolvedAccount.pilot_enabled) && !fakeOnly) {
+      throw new IosSessionError('pilot_required', 'iOS external actions require the authorized pilot gate.');
+    }
     const customLocators = payload.locators ?? resolvedAccount.locators ?? null;
     if (customLocators && !pilotAllowed(payload.pilotEnabled ?? resolvedAccount.pilot_enabled)) {
       throw new IosSessionError('pilot_required', 'Custom iOS locators require the authorized pilot flag.');
@@ -411,18 +406,25 @@ export async function executeIosAction({
       ownedSession = true;
     }
     if (typeof session.launch === 'function') await session.launch();
+    let senderElement;
+    try { senderElement = await session.find(locators.loggedInSender); } catch { throw new IosSessionError('sender_identity_missing', 'Logged-in sender identity is unavailable.'); }
+    const observedSender = await readIdentity(senderElement, 'sender');
+    if (!senderMatches(observedSender, resolvedAccount.external_ref)) throw new IosSessionError('sender_identity_mismatch', 'Logged-in sender differs from registered account.');
+    const receiptAccount = { ...resolvedAccount, observed_sender: observedSender };
     const resolvedCreator = await prepareCreator(session, creator, locators);
+    receiptAccount.observed_creator = { creator_uid: resolvedCreator.creator_uid, handle: resolvedCreator.handle };
     const receiptCreator = { ...creator, ...resolvedCreator };
     const receipts = [];
     for (const currentAction of actions) {
       if (cancelled(signal)) return { verified: false, error_code: 'cancelled' };
-      const result = await runAction(session, currentAction, payload, locators, locatorVersion);
+      const result = await runAction(session, currentAction, payload, locators, locatorVersion, observedSender, receiptCreator.creator_uid);
       receipts.push(receiptFor({
-        account: resolvedAccount,
+        account: receiptAccount,
         creator: receiptCreator,
         action: currentAction,
         evidence: result.evidence,
         payload,
+        result,
         locatorVersion,
       }));
     }

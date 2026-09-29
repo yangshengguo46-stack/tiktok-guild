@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createPublicOutreachRouter } from './router.mjs';
 
 function adapterSpecifier() {
-  return process.env.DEERFLOW_OUTREACH_ADAPTER?.trim() || '';
+  return process.env.DEERFLOW_OUTREACH_ADAPTER?.trim() || './native-adapter.mjs';
 }
 
 async function loadNativeAdapter() {

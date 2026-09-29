@@ -448,6 +448,7 @@ class CreatorOutreachRepository:
         error_code: str,
         sender_account_id: str,
         idempotency_key: str,
+        receipt_id: str | None = None,
         now: datetime | None = None,
         lease_owner: str | None = None,
         lease_token: str | None = None,
@@ -488,6 +489,7 @@ class CreatorOutreachRepository:
                     lease_owner=None,
                     lease_token=None,
                     error_code=error_code,
+                    **({"receipt_id": receipt_id} if receipt_id else {}),
                     updated_at=now,
                 )
                 .execution_options(synchronize_session=False)

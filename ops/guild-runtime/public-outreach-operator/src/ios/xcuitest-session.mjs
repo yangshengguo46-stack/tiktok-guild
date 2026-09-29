@@ -29,6 +29,20 @@ function hasCoordinateOnlyLocator(locator) {
     && !locatorKind(locator));
 }
 
+function driverLocator(locator) {
+  const kind = locatorKind(locator);
+  if (!kind) throw new IosSessionError('selector_missing', 'A semantic locator is required.');
+  const value = typeof locator === 'string' ? locator : locator[kind];
+  if (kind === 'accessibility_id' || kind === 'accessibilityId') return { selector: `~${value}`, strategy: 'accessibility id', value };
+  if (kind === 'text' || kind === 'label') {
+    if (String(value).includes('"')) throw new IosSessionError('selector_missing', 'Use an explicit predicate for quoted text.');
+    const xpath = `//XCUIElementTypeAny[@label="${value}"]`;
+    return { selector: xpath, strategy: 'xpath', value: xpath };
+  }
+  const strategy = kind === 'predicate' ? '-ios predicate string' : '-ios class chain';
+  return { selector: `${strategy}:${value}`, strategy, value };
+}
+
 function normalizeElement(element) {
   if (!element) return null;
   return {
@@ -92,6 +106,7 @@ export function createXcuitestSession({
   let resolvedDriver = driver;
   let claimed = false;
   let closed = false;
+  let closePromise = null;
   let launched = false;
   let lease = null;
   const actualEvidenceRoot = evidenceRoot ? path.resolve(evidenceRoot) : null;
@@ -173,9 +188,9 @@ export function createXcuitestSession({
 
   async function launch() {
     if (closed) throw new IosSessionError('session_closed', 'The XCUITest session is closed.');
+    await claimDevice();
     const activeDriver = await ensureDriver();
     await ensureHealth();
-    await claimDevice();
     try {
       if (typeof activeDriver.activateApp === 'function') await activeDriver.activateApp(bundleId);
       else if (typeof activeDriver.launchApp === 'function') await activeDriver.launchApp();
@@ -207,12 +222,10 @@ export function createXcuitestSession({
       if (typeof activeDriver.find === 'function') {
         element = await activeDriver.find(locator);
       } else if (typeof activeDriver.$ === 'function') {
-        const value = typeof locator === 'string' ? locator : locator[kind];
-        element = await activeDriver.$(kind === 'accessibility_id' || kind === 'accessibilityId'
-          ? `~${value}`
-          : kind === 'text' || kind === 'label'
-            ? `//XCUIElementTypeAny[@label="${String(value).replaceAll('"', '\\"')}"]`
-            : String(value));
+        element = await activeDriver.$(driverLocator(locator).selector);
+      } else if (typeof activeDriver.findElement === 'function') {
+        const converted = driverLocator(locator);
+        element = await activeDriver.findElement(converted.strategy, converted.value);
       } else if (typeof activeDriver.findElement === 'function') {
         const strategy = kind === 'accessibility_id' || kind === 'accessibilityId'
           ? 'accessibility id'
@@ -248,28 +261,21 @@ export function createXcuitestSession({
     return { ok: true, locator, text: value };
   }
 
-  async function count(locator) {
+  async function findAll(locator) {
     const activeDriver = await ensureDriver();
-    if (typeof activeDriver.count === 'function') {
-      const value = await activeDriver.count(locator);
-      return Number.isFinite(Number(value)) ? Number(value) : null;
+    const converted = driverLocator(locator);
+    let elements;
+    if (typeof activeDriver.findAll === 'function') elements = await activeDriver.findAll(locator);
+    else if (typeof activeDriver.$$ === 'function') elements = await activeDriver.$$(converted.selector);
+    else if (typeof activeDriver.findElements === 'function') elements = await activeDriver.findElements(converted.strategy, converted.value);
+    else {
+      try { return [await find(locator)]; } catch { return []; }
     }
-    if (typeof activeDriver.$$ === 'function') {
-      const elements = await activeDriver.$$(typeof locator === 'string' ? locator : locator?.accessibility_id ?? locator);
-      return Array.isArray(elements) ? elements.length : null;
-    }
-    if (typeof activeDriver.findElements === 'function') {
-      const kind = locatorKind(locator);
-      const strategy = kind === 'accessibility_id' || kind === 'accessibilityId'
-        ? 'accessibility id'
-        : kind === 'text' || kind === 'label' ? 'xpath' : kind;
-      const value = strategy === 'xpath'
-        ? `//XCUIElementTypeAny[@label="${String(locator[kind]).replaceAll('"', '\\"')}"]`
-        : locator?.[kind] ?? locator;
-      const elements = await activeDriver.findElements(strategy, value);
-      return Array.isArray(elements) ? elements.length : null;
-    }
-    return null;
+    return (elements ?? []).map(normalizeElement);
+  }
+
+  async function count(locator) {
+    return (await findAll(locator)).length;
   }
 
   async function readCreatorIdentity(locator) {
@@ -360,8 +366,9 @@ export function createXcuitestSession({
   }
 
   async function close() {
-    if (closed) return;
+    if (closePromise) return closePromise;
     closed = true;
+    closePromise = (async () => {
     try {
       if (resolvedDriver) {
         if (typeof resolvedDriver.deleteSession === 'function') await resolvedDriver.deleteSession();
@@ -375,6 +382,8 @@ export function createXcuitestSession({
       }
       claimed = false;
     }
+    })();
+    return closePromise;
   }
 
   return Object.freeze({
@@ -389,6 +398,7 @@ export function createXcuitestSession({
     tap,
     type,
     count,
+    findAll,
     navigateToCreator,
     readCreatorIdentity,
     screenshot,

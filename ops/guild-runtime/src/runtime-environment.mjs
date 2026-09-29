@@ -7,7 +7,8 @@ export function buildRuntimeEnvironment({ packageRoot, environment = process.env
   const opsRoot = path.join(root, 'ops', 'guild-runtime');
   const pnpmBinRoot = path.join(opsRoot, '.runtime', 'tools', 'pnpm', 'node_modules', '.bin');
   const home = environment.HOME ?? os.homedir();
-  const outreachStateRoot = path.join(home, '.codex', 'tiktok-live-public-outreach');
+  const outreachStateRoot = environment.PUBLIC_OUTREACH_RUNTIME_ROOT
+    ?? path.join(home, '.codex', 'tiktok-live-public-outreach');
   return {
     ...environment,
     CI: 'true',
@@ -29,8 +30,10 @@ export function buildRuntimeEnvironment({ packageRoot, environment = process.env
     // The operator owns profiles and devices; DeerFlow owns claims and receipts.
     PUBLIC_OUTREACH_OPERATOR_ROOT: environment.PUBLIC_OUTREACH_OPERATOR_ROOT
       ?? path.join(opsRoot, 'public-outreach-operator'),
+    PUBLIC_OUTREACH_RUNTIME_ROOT: environment.PUBLIC_OUTREACH_RUNTIME_ROOT
+      ?? outreachStateRoot,
     PUBLIC_OUTREACH_PROFILE_ROOT: environment.PUBLIC_OUTREACH_PROFILE_ROOT
-      ?? path.join(outreachStateRoot, 'profiles'),
+      ?? path.join(outreachStateRoot, 'web-profiles'),
     PUBLIC_OUTREACH_MAX_ACTIVE: environment.PUBLIC_OUTREACH_MAX_ACTIVE
       ?? '10',
     PUBLIC_OUTREACH_IOS_DEVICE_ROOT: environment.PUBLIC_OUTREACH_IOS_DEVICE_ROOT

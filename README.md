@@ -32,6 +32,11 @@ Identity、Self、Role、Relationship、EffectivePersona 与 TurnContext，然�
 不得进行或宣称任何真实平台写入。完整验收见
 [`docs/verification/creator-agent/final-verification.md`](docs/verification/creator-agent/final-verification.md)。
 
+普通账号公开建联现在由原生 Gateway 接入管理的 Playwright/Appium Node 执行器，MCP 与工作台
+共用同一任务和回执仓库。外部写入默认关闭，只有部署明确配置的单号试点 `execute` 会写平台；
+真实 TikTok 读回映射仍需现场验证。配置、权限、资源上限及未知结果恢复见
+[公开建联生产运行说明](docs/verification/creator-agent/public-outreach-production-runbook.md)。
+
 ## Official Website
 
 This fork provides native social profile management in authenticated session

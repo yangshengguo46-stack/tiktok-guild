@@ -5,9 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createDeviceRegistry } from '../src/ios/device-registry.mjs';
-import { executeIosAction } from '../src/ios/tiktok-ios-executor.mjs';
+import { executeIosAction as executeAuthorizedFakeIosAction } from '../src/ios/tiktok-ios-executor.mjs';
 import { createXcuitestSession } from '../src/ios/xcuitest-session.mjs';
 import { createWdaHealthChecker } from '../src/ios/wda-health.mjs';
+
+process.env.PUBLIC_OUTREACH_FAKE_BROWSER = '1';
+const executeIosAction = (options) => executeAuthorizedFakeIosAction({ ...options, payload: { testOnly: true, ...options.payload } });
 
 const readyPrerequisites = {
   platform: true,
@@ -38,7 +41,7 @@ function device(overrides = {}) {
 }
 
 function account(overrides = {}) {
-  return { sender_account_id: 'ios-account-001', ...overrides };
+  return { sender_account_id: 'ios-account-001', external_ref: '@alice', ...overrides };
 }
 
 class FakeElement {
@@ -86,6 +89,7 @@ class FakeDriver {
       message: existingMessageText ? 1 : 0,
     };
     this.controls = new Map();
+    this.controls.set('current-user', new FakeElement({ attributes: { 'data-sender-handle': '@alice' } }));
     this.controls.set('user-profile', new FakeElement({
       attributes: { 'data-creator-uid': 'creator-001', 'data-creator-handle': 'creator' },
     }));
@@ -117,6 +121,7 @@ class FakeDriver {
     this.controls.set('comment-item', commentReceipt);
     this.controls.set('comment-submit', new FakeElement({
       onClick: () => {
+        Object.assign(commentReceipt.attributes, { 'data-sender-handle': '@alice', 'data-creator-uid': 'creator-001' });
         if (this.countIncrementOnSubmit) this.receiptCounts.comment += 1;
         this.receiptSequences.comment += 1;
         commentReceipt.text = commentInput.text;
@@ -136,6 +141,7 @@ class FakeDriver {
     this.controls.set('message-item', messageReceipt);
     this.controls.set('message-submit', new FakeElement({
       onClick: () => {
+        Object.assign(messageReceipt.attributes, { 'data-sender-handle': '@alice', 'data-creator-uid': 'creator-001' });
         if (this.countIncrementOnSubmit) this.receiptCounts.message += 1;
         this.receiptSequences.message += 1;
         messageReceipt.text = messageInput.text;
@@ -679,7 +685,7 @@ test('ordered like comment follow and message return the same receipt envelope',
   assert.equal(result.receipt_payload.receipt_type, 'public_action_receipt');
   assert.deepEqual(result.receipt_payload.actions.map((item) => item.action), ['like', 'comment', 'follow']);
   assert.equal(result.receipt_payload.sender_account_id, 'ios-account-001');
-  assert.match(result.receipt_payload.actions[1].evidence[0], /fresh-count:0->1/);
+  assert.match(result.receipt_payload.actions[1].evidence[0], /fresh-item:new:comment-1/);
 
   const message = await executeIosAction({
     device: {
@@ -694,7 +700,7 @@ test('ordered like comment follow and message return the same receipt envelope',
   });
   assert.equal(message.verified, true);
   assert.equal(message.receipt_payload.receipt_type, 'dm_receipt');
-  assert.match(message.receipt_payload.evidence[0], /fresh-count:0->1/);
+  assert.match(message.receipt_payload.evidence[0], /fresh-item:new:message-1/);
 });
 
 test('evidence can be persisted to the configured root and never proves success alone', async () => {

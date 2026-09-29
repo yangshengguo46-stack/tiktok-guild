@@ -10,8 +10,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.gateway.authz import require_permission
 from app.gateway.deps import get_current_user, require_admin_user
@@ -19,7 +19,43 @@ from deerflow.creator_agent.public_outreach import PublicOutreachWorkflow
 from deerflow.persistence.creator_agent_relationship import CreatorOutreachRepository
 from deerflow.persistence.engine import get_session_factory
 
-router = APIRouter(prefix="/api/public-outreach", tags=["public-outreach"])
+
+async def _resolve_native_internal_owner(request: Request) -> None:
+    """Existing internal auth identifies transport; real User owns permissions."""
+    from starlette.datastructures import Headers
+
+    from app.gateway.auth_disabled import AUTH_SOURCE_SESSION
+    from app.gateway.deps import get_local_provider
+    from app.gateway.internal_auth import INTERNAL_AUTH_HEADER_NAME, INTERNAL_OWNER_USER_ID_HEADER_NAME, is_valid_internal_auth_token
+
+    token = request.headers.get(INTERNAL_AUTH_HEADER_NAME)
+    if token is None:
+        return  # An unauthenticated owner header conveys no identity.
+    if not is_valid_internal_auth_token(token):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    owner = (request.headers.get(INTERNAL_OWNER_USER_ID_HEADER_NAME) or "").strip()
+    if not owner:
+        raise HTTPException(status_code=401, detail="Authenticated owner is required")
+    from app.gateway.auth_disabled import get_auth_disabled_user, is_auth_disabled
+
+    synthetic = get_auth_disabled_user()
+    if is_auth_disabled() and owner == str(synthetic.id):
+        user = synthetic
+    else:
+        user = await get_local_provider().get_user(owner)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authenticated owner is unavailable")
+    request.state.user = user
+    request.state.auth_source = AUTH_SOURCE_SESSION
+    request.state.auth = None
+    # Keep route authorization on the real user path. The generic internal
+    # role has transport privilege elsewhere, not outreach admin privilege.
+    internal_names = {INTERNAL_AUTH_HEADER_NAME.lower().encode(), INTERNAL_OWNER_USER_ID_HEADER_NAME.lower().encode()}
+    request.scope["headers"] = [(key, value) for key, value in request.scope["headers"] if key.lower() not in internal_names]
+    request._headers = Headers(scope=request.scope)
+
+
+router = APIRouter(prefix="/api/public-outreach", tags=["public-outreach"], dependencies=[Depends(_resolve_native_internal_owner)])
 
 _ACTIVE_ACCOUNT_STATUSES = frozenset({"enabled", "healthy", "ready", "active"})
 _RECOVERABLE_ERRORS = frozenset(
@@ -68,6 +104,7 @@ _ADMIN_REQUIRED_DETAIL = "Admin privileges are required to manage public outreac
 
 
 class CreateOutreachTaskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     creator_uid: str = Field(min_length=1, max_length=128)
     sequence_no: int = Field(ge=1)
     sender_account_id: str = Field(min_length=1, max_length=128)
@@ -264,6 +301,7 @@ async def list_outreach_accounts(request: Request) -> dict[str, Any]:
         if isinstance(row, dict) and row.get("sender_account_id") and row.get("owner_user_id") == owner_user_id:
             by_id[row["sender_account_id"]] = {**by_id.get(row["sender_account_id"], {}), **row}
     accounts = [_account_response(row) for row in by_id.values()]
+    capacity = await operator.capacity() if callable(getattr(operator, "capacity", None)) else {"active": 0}
     web_accounts = [row for row in accounts if row.get("channel") == "web"]
     ios_accounts = [row for row in accounts if row.get("channel") == "ios"]
     return {
@@ -272,13 +310,14 @@ async def list_outreach_accounts(request: Request) -> dict[str, Any]:
             "registered": len(web_accounts),
             "maximum": 50,
             "active_limit": 10,
-            "active": sum(row.get("status") in _ACTIVE_ACCOUNT_STATUSES for row in web_accounts),
+            "active": capacity["active"],
+            "ready": sum(row.get("status") in _ACTIVE_ACCOUNT_STATUSES for row in web_accounts),
         },
         "ios_readiness": {
             "registered": len(ios_accounts),
             "ready": sum(row.get("health") in {"healthy", "ready", "active"} for row in ios_accounts),
         },
-        "operator": {"configured": True},
+        "operator": {"configured": True, "external_writes_enabled": getattr(operator, "config", {}).get("pilot", {}).get("enabled") is True},
     }
 
 
@@ -387,6 +426,11 @@ async def pause_outreach_account(sender_account_id: str, request: Request, body:
     _operator(request)
     owner_user_id = await _user_id(request)
     repository = _repository(request)
+    if await repository.read_sender_account(owner_user_id, sender_account_id) is None:
+        raise HTTPException(status_code=404, detail="Sender account not found")
+    operator = _operator(request)
+    if callable(getattr(operator, "cancel_account", None)):
+        await operator.cancel_account(owner_user_id, sender_account_id)
     return await _set_account_status(repository, owner_user_id, sender_account_id, "paused", body.reason)
 
 
@@ -427,6 +471,7 @@ async def request_manual_takeover(task_id: str, request: Request, body: ManualRe
     await _require_outreach_admin(request)
     _operator(request)
     repository, owner_user_id, _, _, model = await _owned_task(request, task_id)
+    await _cancel_execution(request, task_id)
     try:
         refreshed = await repository.request_manual_takeover(
             owner_user_id,
@@ -448,6 +493,7 @@ async def mark_provider_unknown(task_id: str, request: Request, body: ManualReas
     await _require_outreach_admin(request)
     _operator(request)
     repository, owner_user_id, task, _, model = await _owned_task(request, task_id)
+    await _cancel_execution(request, task_id)
     try:
         refreshed = await repository.mark_action_unknown(
             owner_user_id,
@@ -469,6 +515,9 @@ async def close_outreach_sequence(request: Request, body: CloseSequenceRequest) 
     _operator(request)
     repository = _repository(request)
     owner_user_id = await _user_id(request)
+    operator = _operator(request)
+    if callable(getattr(operator, "cancel_sequence", None)):
+        await operator.cancel_sequence(owner_user_id, body.creator_uid, body.sequence_no)
     try:
         result = await repository.close_sequence(
             owner_user_id,
@@ -483,3 +532,119 @@ async def close_outreach_sequence(request: Request, body: CloseSequenceRequest) 
 
 
 __all__ = ["router"]
+
+
+async def _cancel_execution(request: Request, task_id: str) -> None:
+    operator = _operator(request)
+    if callable(getattr(operator, "cancel_task", None)):
+        await operator.cancel_task(task_id)
+
+
+@router.post("/tasks/{task_id}/execute")
+@require_permission("threads", "write")
+async def execute_outreach_task(task_id: str, request: Request) -> dict[str, Any]:
+    import asyncio
+
+    await _require_outreach_admin(request)
+    repository, owner, _, _, _ = await _owned_task(request, task_id)
+    operator = _operator(request)
+    if not callable(getattr(operator, "execute_task", None)):
+        raise HTTPException(status_code=503, detail="Public outreach execution is unavailable")
+    execution = asyncio.create_task(operator.execute_task(owner, task_id))
+
+    async def disconnected() -> None:
+        while not execution.done():
+            if await request.is_disconnected():
+                await operator.cancel_task(task_id)
+                return
+            await asyncio.sleep(0.2)
+
+    monitor = asyncio.create_task(disconnected())
+    try:
+        result = await execution
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        monitor.cancel()
+        await asyncio.gather(monitor, return_exceptions=True)
+    _, _, task, receipts, model = await _owned_task(request, task_id)
+    return {**_task_response(task, receipts, model), "execution_status": result.get("status"), "error_code": result.get("error_code") or task.get("error_code")}
+
+
+class RegisterSenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sender_account_id: str = Field(min_length=1, max_length=128)
+    channel: Literal["web", "ios"]
+    external_ref: str = Field(min_length=1, max_length=255)
+    device_ref: str | None = Field(default=None, max_length=128)
+
+
+@router.post("/native/{method}")
+@require_permission("threads", "read")
+async def native_outreach_adapter(method: str, request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    methods = {"listSenderAccounts", "registerSenderAccount", "healthSenderAccount", "disableSenderAccount", "enqueueAction", "getAction", "claimAction", "executeAction", "completeAction", "failAction", "reconcileActions"}
+    if method not in methods:
+        raise HTTPException(status_code=404, detail="Native outreach method not found")
+    forbidden = {"owner_user_id", "receipt", "receipt_payload", "verified", "provider_ref", "verification_source", "lease_owner", "lease_token"}
+    if forbidden.intersection(body):
+        raise HTTPException(status_code=422, detail="Caller identity, receipts and execution leases cannot be supplied")
+    reads = {"listSenderAccounts", "healthSenderAccount", "getAction", "reconcileActions"}
+    if method not in reads:
+        # The nested write decorator performs the same permission check as the
+        # workbench; the admin check additionally narrows management writes.
+        await _require_outreach_admin(request)
+        from app.gateway.authz import resolve_route_permissions_for_request
+
+        user = request.state.user
+        if "threads:write" not in await resolve_route_permissions_for_request(request, user):
+            raise HTTPException(status_code=403, detail="Permission denied: threads:write")
+    owner = await _user_id(request)
+    repository = _repository(request)
+    _operator(request)
+    if method == "listSenderAccounts":
+        return await list_outreach_accounts(request)
+    if method == "registerSenderAccount":
+        try:
+            registration = RegisterSenderRequest.model_validate(body)
+            row = await repository.register_sender_account(owner, **registration.model_dump())
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid sender registration") from exc
+        return _account_response(row)
+    if method in {"healthSenderAccount", "disableSenderAccount"}:
+        sender = body.get("sender_account_id")
+        row = await repository.read_sender_account(owner, sender or "")
+        if row is None:
+            raise HTTPException(status_code=404, detail="Sender account not found")
+        if method == "disableSenderAccount":
+            operator = _operator(request)
+            if callable(getattr(operator, "cancel_account", None)):
+                await operator.cancel_account(owner, sender)
+            return await _set_account_status(repository, owner, sender, "paused", "operator_disable")
+        return _account_response(row)
+    if method == "enqueueAction":
+        try:
+            definition = CreateOutreachTaskRequest.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="Invalid outreach task definition") from exc
+        return await create_outreach_tasks(request, definition)
+    if method == "reconcileActions":
+        return await list_outreach_tasks(request, body.get("creator_uid"), body.get("sequence_no"))
+    task_id = body.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        raise HTTPException(status_code=422, detail="task_id is required")
+    _, _, task, receipts, model = await _owned_task(request, task_id)
+    if method == "claimAction":
+        raise HTTPException(status_code=409, detail="Task leases belong to the native executor; use explicit execute for provider writes")
+    if method == "executeAction":
+        return await execute_outreach_task(task_id, request)
+    if method == "completeAction" and task["state"] != "completed":
+        raise HTTPException(status_code=409, detail="Completion requires the trusted executor receipt")
+    if method == "failAction":
+        try:
+            reason = ManualReasonRequest(reason=body.get("reason") or "operator_unknown")
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="Invalid manual review reason") from exc
+        return await mark_provider_unknown(task_id, request, reason)
+    return _task_response(task, receipts, model)

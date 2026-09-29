@@ -302,7 +302,7 @@ async def test_message_before_public_is_blocked_and_retries_after_public_complet
 
 
 @pytest.mark.asyncio
-async def test_web_and_ios_unknown_operator_results_are_bounded_and_retryable(repo):
+async def test_web_and_ios_unknown_operator_results_require_explicit_recovery(repo):
     await _creator(repo, creator_uid="web-creator")
     await _creator(repo, creator_uid="ios-creator", sender_account_id="ios:device-001:account-001")
 
@@ -334,7 +334,7 @@ async def test_web_and_ios_unknown_operator_results_are_bounded_and_retryable(re
         assert result["status"] == "unknown"
         assert result["manual_required"] is True
         assert result["error_code"] == "unknown"
-        assert (await repo.read_action_task(tasks[0]["task_id"]))["state"] == "pending"
+        assert (await repo.read_action_task(tasks[0]["task_id"]))["state"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -362,6 +362,7 @@ async def test_unknown_provider_ref_does_not_block_later_verified_receipt(repo):
     )
     assert unknown["status"] == "unknown"
     assert unknown["receipt"]["provider_ref"] is None
+    await repo.retry_action("guild", tasks[0]["task_id"], recoverable_error_codes={"unknown"})
     verified = await workflow.record_public_action_result(
         tasks[0]["task_id"],
         _receipt(

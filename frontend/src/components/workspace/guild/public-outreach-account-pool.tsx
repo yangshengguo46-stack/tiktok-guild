@@ -51,6 +51,7 @@ export function PublicOutreachAccountPool({
     maximum: number;
     active_limit: number;
     active: number;
+    ready?: number;
   };
   iosReadiness: { registered: number; ready: number };
   labels: Labels;
@@ -73,7 +74,7 @@ export function PublicOutreachAccountPool({
             <div className="text-muted-foreground">{labels.web}</div>
             <div className="mt-1 font-medium">
               {webBatchCapacity.active}/{webBatchCapacity.active_limit}{" "}
-              {labels.active}
+              {labels.active} · {webBatchCapacity.ready ?? 0} {labels.ready}
             </div>
           </div>
           <div className="border-border/70 bg-muted/20 rounded-md border px-4 py-3 text-sm">

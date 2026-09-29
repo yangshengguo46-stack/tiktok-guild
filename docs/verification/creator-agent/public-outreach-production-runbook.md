@@ -1,0 +1,50 @@
+# Public outreach production wiring
+
+Gateway owns the native `CreatorOutreachRepository`, `PublicOutreachWorkflow` and a managed Node execution worker. The shipped MCP adapter calls authenticated Gateway routes; it has no task database, claims or browser pool. The workbench and `public_outreach_tasks.execute` use the same explicit execution route. Enqueue, claim, health, list, get and reconcile never write to TikTok. Client claim is rejected because native execution owns leases; complete only reads an already completed task and cannot submit a receipt.
+
+## Deployment gate and private state
+
+External writes are disabled when no execution configuration is supplied. Creating tasks, registering an account or resuming it does not enable writes. `PUBLIC_OUTREACH_EXECUTION_CONFIG` must point to a private JSON file outside Git. The deployment operator must explicitly admit one owner, sender, creator and action allowlist; private messages additionally require `message_enabled: true`.
+
+```json
+{
+  "pilot": {
+    "enabled": false,
+    "owner_user_id": "REPLACE_WITH_AUTHENTICATED_USER_ID",
+    "sender_account_id": "REPLACE_WITH_NATIVE_SENDER_ID",
+    "creator_uid": "REPLACE_WITH_NATIVE_CREATOR_UID",
+    "actions": ["like", "comment", "follow"],
+    "message_enabled": false
+  },
+  "sender": {
+    "owner_user_id": "REPLACE_WITH_AUTHENTICATED_USER_ID",
+    "sender_account_id": "REPLACE_WITH_NATIVE_SENDER_ID",
+    "channel": "web",
+    "headless": false
+  }
+}
+```
+
+Set `PUBLIC_OUTREACH_RUNTIME_ROOT` to the same external directory for every Gateway worker on the host. Its default is `$HOME/.codex/tiktok-live-public-outreach`. Web profiles live below `web-profiles/profiles/<sha256(owner,sender)>`; resource leases live below `slots/`. The ops runtime's doctor profile root defaults to the same `web-profiles` directory. Keep the private deployment file, cookies, screenshots, device records and UDIDs out of Git. Dependencies are installed in the ignored operator `node_modules` directory using the committed lockfile.
+
+Gateway requires native persistence and initializes its executor in lifespan. The Node process is lazy: a closed pilot gate creates no browser/device process. Gateway injects the existing internal token and the resolved runtime user into each owner/thread stdio MCP session; never configure a globally fixed owner or internal token in extensions JSON. Gateway rehydrates that owner through the existing local auth provider and retains the original role and `threads:read/write` checks. A bare owner header is ignored. The existing synthetic `default` admin works only under the existing local nonproduction auth-disabled gate; production never uses that fallback. `PUBLIC_OUTREACH_GATEWAY_URL` is optional; the default is loopback plus the actual configured Gateway port.
+
+## Provider entry and current pilot blockers
+
+Install the pinned operator dependencies, Playwright Chromium and, for iOS, the pinned Appium/XCUITest driver using the existing ops installation flow. These deployment steps are separate from offline tests. The production Web caller uses actual `chromium.launchPersistentContext`, navigates a new blank page to the fixed `https://www.tiktok.com/` origin, then verifies the logged-in sender before navigating to the native creator handoff. The sender must match the native account's `external_ref` by canonical handle or UID; owner and target cannot come from model parameters. Creator URL/handle comes only from the native handoff, and URL navigation is limited to HTTPS TikTok profile URLs.
+
+For iOS the private sender binding additionally supplies `appium_url`, `wda_url`, optional `bundle_id`, and a `device` object with `udid`, `platform_version` and `wda_bundle_id`. The shipped HTTP client uses W3C session creation and element commands, Appium `mobile: activateApp`, `mobile: deepLink`, `mobile: deviceInfo` and `mobile: isLocked`, and DELETE session cleanup. It accepts semantic accessibility id, XPath, iOS predicate and iOS class-chain locators consistently in single and collection reads. It proves the actual session's iOS/XCUITest capabilities and device UDID, then checks the signed WDA build bundle identifier, build time and iOS status. Config booleans cannot substitute for those responses. A failed session or health check prevents platform writes.
+
+**Real TikTok provider selectors and readback mappings remain unverified.** Deployment `sender.locators` can select the observed controls, but current sender/creator and fresh item proof readers require provider attributes such as `data-sender-handle`, `data-creator-uid` and `data-receipt-id`. The offline HTTP fixture intentionally exposes those attributes. Native XCUITest commonly exposes `name`, `label` and `value`; the fixture is not evidence that TikTok exposes the required identity or item fields. A separate single-account pilot must establish the real mapping, and may require a provider-specific readback implementation. Until then, missing identity or fresh item proof fails closed. Do not enable the deployment allowlist based only on passing fixtures, driver installation or static doctor output.
+
+The live pilot must establish sender identity, canonical target identity, inactive-to-active like/follow transitions and fresh comment/message identities scoped to that same sender and target. An increased count, an old matching text or a changing WebDriver element reference is insufficient. Receipts retain observed identities, transition data, actual new item identity, text and scope evidence; an unknown readback never manufactures a verified completion.
+
+## Execution and recovery
+
+Register accounts through the native accounts API/MCP as an authenticated admin, and use the existing native creator claim/sequence binding. Enqueue the ordered native tasks with their stored comment/message text. Execute explicitly with the workbench **Execute pilot action** button, `POST /api/public-outreach/tasks/{task_id}/execute`, or the MCP `execute` child with `task_id`. The server enforces like → comment → follow → message even when a client directly selects a later task. The workbench distinguishes registered accounts, native ready accounts and actual active Web slots; native readiness is not a live TikTok attestation.
+
+Verified completion is durable in the same native repository and cannot be retried. Timeout, executor exit, cancellation or unverified provider result writes a failed native task with `error_code` and manual-required evidence, and pauses the native sender. Automatic re-enqueue or replay is blocked. Inspect the actual platform result, perform the existing explicit manual recovery/retry and resume the account only after reconciling unknown actions. A native receipt supplied by a caller cannot mark a task verified.
+
+The provider deadline is at most 120 seconds, below the native 300 second execution lease. Queueing for the serialized dispatcher occurs before lease acquisition. Request cancellation, pause/takeover/sequence close and Gateway shutdown propagate to the Node action. Shutdown allows bounded cleanup, then terminates the Node process group and its browser children. A killed iOS process may leave a remote Appium session: its shared iPhone slot deliberately stays blocked. Before manually removing that orphan slot, verify and delete the real Appium session and establish that the device is idle. Do not clear a live lease or blindly retry an unknown action.
+
+The shared external root fences at most 50 Web profile registrations, 10 active Web slots across local Gateway/Node processes and one active iPhone. Different owners receive different hashed profile resources. These are host resource locks, not a second business task store. A shared multi-host execution deployment is not supported; use one executor host. Static doctor and offline isolated database tests do not migrate or validate an existing deployment database. Apply the existing required native migrations through the normal deployment workflow before using the feature.

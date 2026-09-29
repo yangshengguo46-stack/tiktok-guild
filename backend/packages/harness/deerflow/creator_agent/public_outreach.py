@@ -7,6 +7,7 @@ persists provider-owned receipts in the native DeerFlow repository.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -60,7 +61,7 @@ def _receipt_id(receipt: dict[str, Any], payload: dict[str, Any]) -> str:
 def _verification_source(receipt: dict[str, Any], *, verified: bool) -> str:
     source = receipt.get("verification_source")
     if isinstance(source, str) and source:
-        return source
+        return source if len(source) <= 64 else "provider_readback"
     if isinstance(source, list) and source and all(isinstance(item, str) and item for item in source):
         return "provider_readback"
     return "provider_readback" if verified else "operator_unknown"
@@ -244,8 +245,12 @@ class PublicOutreachWorkflow:
             stored = None
         finally:
             if claim is not None:
-                await self.repository.release_action_claim(
+                await self.repository.fail_action(
                     task["task_id"],
+                    sender_account_id=task["sender_account_id"],
+                    idempotency_key=task["idempotency_key"],
+                    error_code=error_code,
+                    receipt_id=stored["receipt_id"] if stored else None,
                     lease_owner=claim["lease_owner"],
                     lease_token=claim["lease_token"],
                 )
@@ -715,6 +720,9 @@ class PublicOutreachWorkflow:
             result = callback(**kwargs)
             if inspect.isawaitable(result):
                 result = await result
+        except asyncio.CancelledError:
+            await self._record_unknown_result(task, {"verified": False, "error_code": "cancelled"}, claim=claim)
+            raise
         except Exception as error:
             return await self._record_unknown_result(
                 task,
@@ -734,12 +742,7 @@ class PublicOutreachWorkflow:
                 return await self.record_message_result(task_id, result, _claim=claim)
             return await self.record_public_action_result(task_id, result, _claim=claim)
         except Exception:
-            await self.repository.release_action_claim(
-                task_id,
-                lease_owner=claim["lease_owner"],
-                lease_token=claim["lease_token"],
-            )
-            raise
+            return await self._record_unknown_result(task, {"verified": False, "error_code": "receipt_persistence_failed"}, claim=claim)
 
 
 PublicOutreachCoordinator = PublicOutreachWorkflow

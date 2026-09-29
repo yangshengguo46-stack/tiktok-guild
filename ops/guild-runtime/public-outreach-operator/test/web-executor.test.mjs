@@ -59,6 +59,7 @@ class FakePage {
     existingMessage = null,
   } = {}) {
     this.controls = new Map();
+    this.controls.set(FAKE_LOCATORS.loggedInSender, new FakeLocator({ visible: true, attributes: { 'data-sender-handle': '@alice' } }));
     this.controls.set(FAKE_LOCATORS.loginRequired, new FakeLocator({ visible: login }));
     this.controls.set(FAKE_LOCATORS.challenge, new FakeLocator({ visible: challenge }));
     this.controls.set(FAKE_LOCATORS.profileRoot, new FakeLocator({ visible: true }));
@@ -76,7 +77,7 @@ class FakePage {
     const commentReceipt = new FakeLocator({
       visible: existingComment !== null,
       text: existingComment ?? '',
-      attributes: existingComment !== null ? { 'data-receipt-id': 'old-comment' } : {},
+      attributes: existingComment !== null ? { 'data-receipt-id': 'old-comment', 'data-sender-handle': '@alice', 'data-creator-uid': creatorUid } : {},
     });
     this.controls.set(FAKE_LOCATORS.commentReceipt, commentReceipt);
     this.controls.set(FAKE_LOCATORS.commentInput, new FakeLocator({ visible: true }));
@@ -84,6 +85,7 @@ class FakePage {
       visible: true,
       onClick: async () => {
         const previousCount = commentReceipt.countValue ?? (commentReceipt.visible ? 1 : 0);
+        Object.assign(commentReceipt.attributes, { 'data-sender-handle': '@alice', 'data-creator-uid': creatorUid });
         commentReceipt.visible = true;
         commentReceipt.text = this.controls.get(FAKE_LOCATORS.commentInput).value;
         commentReceipt.countValue = previousCount + 1;
@@ -98,7 +100,7 @@ class FakePage {
     const messageReceipt = new FakeLocator({
       visible: existingMessage !== null,
       text: existingMessage ?? '',
-      attributes: existingMessage !== null ? { 'data-receipt-id': 'old-message' } : {},
+      attributes: existingMessage !== null ? { 'data-receipt-id': 'old-message', 'data-sender-handle': '@alice', 'data-creator-uid': creatorUid } : {},
     });
     this.controls.set(FAKE_LOCATORS.messageReceipt, messageReceipt);
     this.controls.set(FAKE_LOCATORS.messageInput, new FakeLocator({ visible: true }));
@@ -106,6 +108,7 @@ class FakePage {
       visible: true,
       onClick: async () => {
         const previousCount = messageReceipt.countValue ?? (messageReceipt.visible ? 1 : 0);
+        Object.assign(messageReceipt.attributes, { 'data-sender-handle': '@alice', 'data-creator-uid': creatorUid });
         messageReceipt.visible = true;
         messageReceipt.text = this.controls.get(FAKE_LOCATORS.messageInput).value;
         messageReceipt.countValue = previousCount + 1;
@@ -123,6 +126,7 @@ class FakePage {
 
 const account = (page, hooks = {}) => ({
   sender_account_id: 'ordinary_001',
+  external_ref: '@alice',
   page,
   ...hooks,
 });
@@ -346,7 +350,7 @@ test('a claimed pool lease can be passed directly to the web executor', async ()
       async close() {},
     }),
   });
-  await pool.register({ sender_account_id: 'lease_account' });
+  await pool.register({ sender_account_id: 'lease_account', external_ref: '@alice' });
   const lease = await pool.claim('lease_account');
   const result = await executeWebAction({
     account: lease,
