@@ -11,6 +11,22 @@ export const IOS_DEVICE_STATES = Object.freeze([
   'manual_required',
 ]);
 
+export function isVerifiedWdaHealth(result) {
+  const prerequisites = result?.prerequisites;
+  const probe = result?.probe;
+  return result?.ok === true
+    && result?.state === 'ready'
+    && prerequisites?.platform === true
+    && prerequisites?.xcode === true
+    && prerequisites?.wda === true
+    && prerequisites?.paired === true
+    && prerequisites?.online === true
+    && prerequisites?.locked === false
+    && probe?.ready === true
+    && probe?.device_verified === true
+    && probe?.wda_verified === true;
+}
+
 function bool(value) {
   return value === true || value === 'true' || value === 1;
 }

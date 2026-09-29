@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -17,6 +17,15 @@ const readyPrerequisites = {
   online: true,
   locked: false,
 };
+
+function strictHealth() {
+  return {
+    ok: true,
+    state: 'ready',
+    prerequisites: readyPrerequisites,
+    probe: { ready: true, device_verified: true, wda_verified: true },
+  };
+}
 
 function device(overrides = {}) {
   return {
@@ -193,6 +202,44 @@ test('lock heartbeat keeps a slow health probe exclusive past the lease interval
   assert.equal((await second.release({ device_ref: 'iphone-001', session_id: 'slow-owner' })).ok, true);
 });
 
+test('release waits for an in-flight heartbeat and cannot leave a zombie lock', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'ios-release-heartbeat-'));
+  let heartbeatStartedResolve;
+  const heartbeatStarted = new Promise((resolve) => { heartbeatStartedResolve = resolve; });
+  let heartbeatReleaseResolve;
+  const heartbeatRelease = new Promise((resolve) => { heartbeatReleaseResolve = resolve; });
+  let blockHeartbeats = false;
+  const first = createDeviceRegistry({
+    rootDir,
+    healthChecker: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return strictHealth();
+    },
+    lockLeaseMs: 20,
+    lockHeartbeatMs: 5,
+    lockAcquireTimeoutMs: 1_000,
+    lockWriteHook: async (record) => {
+      if (blockHeartbeats && record.heartbeat_at) {
+        heartbeatStartedResolve();
+        await heartbeatRelease;
+      }
+    },
+  });
+  const second = createDeviceRegistry({ rootDir, lockAcquireTimeoutMs: 1_000 });
+  await first.registerDevice(device());
+  await first.claim('iphone-001', { sessionId: 'heartbeat-owner' });
+  blockHeartbeats = true;
+  const healthPromise = first.health('iphone-001');
+  await heartbeatStarted;
+  const releasePromise = second.release({ device_ref: 'iphone-001', session_id: 'heartbeat-owner' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  heartbeatReleaseResolve();
+  assert.equal((await healthPromise).ok, true);
+  assert.equal((await releasePromise).ok, true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await assert.rejects(() => access(path.join(rootDir, 'devices.lock')));
+});
+
 test('missing WDA, locked, offline, and unpaired devices fail closed with explicit states', async () => {
   const wda = await createDeviceRegistry({
     rootDir: await mkdtemp(path.join(os.tmpdir(), 'ios-wda-')),
@@ -255,7 +302,7 @@ test('session uses accessibility locators, launches TikTok, and closes its lease
     device: registered.device,
     driver,
     registry: devices,
-    healthCheck: async () => ({ ok: true, state: 'ready' }),
+    healthCheck: strictHealth,
   });
   await session.launch();
   await session.tap({ accessibility_id: 'like-button' });
@@ -269,6 +316,19 @@ test('session uses accessibility locators, launches TikTok, and closes its lease
   assert.equal((await devices.get('iphone-001')).state, 'ready');
 });
 
+test('session rejects an ok response that does not satisfy the strict WDA contract', async () => {
+  const devices = await registry();
+  const registered = await devices.registerDevice(device());
+  const session = createXcuitestSession({
+    device: registered.device,
+    driver: new FakeDriver(),
+    registry: devices,
+    healthCheck: async () => ({ ok: true, state: 'ready' }),
+  });
+  await assert.rejects(() => session.launch(), { error_code: 'wda_unavailable' });
+  await session.close();
+});
+
 test('launch failure, cancellation, and manual takeover include failure evidence', async () => {
   const devices = await registry();
   const registered = await devices.registerDevice(device());
@@ -277,7 +337,7 @@ test('launch failure, cancellation, and manual takeover include failure evidence
     device: {
       ...registered.device,
       registry: devices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({
       driver: new FakeDriver({ launchError: 'WDA app launch failed' }),
@@ -311,7 +371,7 @@ test('creator handle is searched and canonically read back before a public actio
     device: {
       ...registered.device,
       registry: devices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { handle: 'target_handle' },
@@ -324,7 +384,7 @@ test('creator handle is searched and canonically read back before a public actio
     device: {
       ...registered.device,
       registry: devices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { handle: 'wrong_handle' },
@@ -341,7 +401,7 @@ test('profile URL navigation and missing Enter support fail into bounded manual 
     device: {
       ...urlRegistered.device,
       registry: urlDevices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { profile_url: 'https://www.tiktok.com/@target_handle' },
@@ -358,7 +418,7 @@ test('profile URL navigation and missing Enter support fail into bounded manual 
     device: {
       ...searchRegistered.device,
       registry: searchDevices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: noEnterDriver }),
     creator: { handle: 'target_handle' },
@@ -375,7 +435,7 @@ test('custom iOS locators require pilot authorization and coordinate fallbacks g
     device: {
       ...registered.device,
       registry: devices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { creator_uid: 'creator-001' },
@@ -392,7 +452,7 @@ test('custom iOS locators require pilot authorization and coordinate fallbacks g
     device: {
       ...coordinateRegistered.device,
       registry: coordinateDevices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({
       driver: new FakeDriver(),
@@ -417,7 +477,7 @@ test('ordered like comment follow and message return the same receipt envelope',
     device: {
       ...registered.device,
       registry: devices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { creator_uid: 'creator-001' },
@@ -433,7 +493,7 @@ test('ordered like comment follow and message return the same receipt envelope',
     device: {
       ...registered.device,
       registry: devices,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { creator_uid: 'creator-001' },
@@ -453,7 +513,7 @@ test('evidence can be persisted to the configured root and never proves success 
       ...registered.device,
       registry: devices,
       evidenceRoot,
-      healthCheck: async () => ({ ok: true, state: 'ready' }),
+      healthCheck: strictHealth,
     },
     account: account({ driver: new FakeDriver() }),
     creator: { creator_uid: 'wrong-creator' },

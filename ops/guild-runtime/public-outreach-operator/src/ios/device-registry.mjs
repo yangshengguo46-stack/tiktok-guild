@@ -68,6 +68,7 @@ export function createDeviceRegistry({
   lockLeaseMs = 5_000,
   lockHeartbeatMs = Math.max(25, Math.floor(lockLeaseMs / 3)),
   lockAcquireTimeoutMs = 10_000,
+  lockWriteHook = null,
 } = {}) {
   if (typeof rootDir !== 'string' || !rootDir) throw new TypeError('rootDir is required.');
   const root = path.resolve(rootDir);
@@ -112,6 +113,7 @@ export function createDeviceRegistry({
   }
 
   async function writeLockRecord(record) {
+    if (typeof lockWriteHook === 'function') await lockWriteHook(record);
     const temporary = `${lockFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(record)}\n`, 'utf8');
     await rename(temporary, lockFile);
@@ -155,30 +157,58 @@ export function createDeviceRegistry({
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
     }
-    let heartbeatLost = false;
-    const heartbeat = setInterval(async () => {
-      const current = await readJson(lockFile, null);
-      if (current?.token !== token) {
-        heartbeatLost = true;
-        return;
-      }
-      try {
-        await writeLockRecord({
-          ...current,
-          heartbeat_at: Date.now(),
-          lease_until: Date.now() + lockLeaseMs,
-        });
-      } catch {
-        heartbeatLost = true;
-      }
+    const leaseState = {
+      active: true,
+      generation: 1,
+      heartbeatLost: false,
+      tail: Promise.resolve(),
+    };
+    const queueLeaseWrite = (work) => {
+      const previous = leaseState.tail;
+      let release;
+      leaseState.tail = new Promise((resolve) => { release = resolve; });
+      return (async () => {
+        await previous;
+        try {
+          return await work();
+        } finally {
+          release();
+        }
+      })();
+    };
+    const heartbeat = setInterval(() => {
+      const generation = leaseState.generation;
+      void queueLeaseWrite(async () => {
+        if (!leaseState.active || generation !== leaseState.generation) return;
+        const current = await readJson(lockFile, null);
+        if (current?.token !== token) {
+          leaseState.heartbeatLost = true;
+          return;
+        }
+        try {
+          if (!leaseState.active || generation !== leaseState.generation) return;
+          await writeLockRecord({
+            ...current,
+            heartbeat_at: Date.now(),
+            lease_until: Date.now() + lockLeaseMs,
+          });
+        } catch {
+          leaseState.heartbeatLost = true;
+        }
+      }).catch(() => {
+        leaseState.heartbeatLost = true;
+      });
     }, lockHeartbeatMs);
     heartbeat.unref?.();
     try {
       const result = await work();
-      if (heartbeatLost) throw new Error('iOS device registry lock was lost during the operation.');
+      if (leaseState.heartbeatLost) throw new Error('iOS device registry lock was lost during the operation.');
       return result;
     } finally {
+      leaseState.active = false;
+      leaseState.generation += 1;
       clearInterval(heartbeat);
+      await leaseState.tail;
       const current = await readJson(lockFile, null);
       if (current?.token === token) await rm(lockFile, { force: true });
     }

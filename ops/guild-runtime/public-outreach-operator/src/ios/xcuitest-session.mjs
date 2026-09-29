@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { createWdaHealthChecker } from './wda-health.mjs';
+import { createWdaHealthChecker, isVerifiedWdaHealth } from './wda-health.mjs';
 
 const DEFAULT_BUNDLE_ID = 'com.zhiliaoapp.musically';
 const SAFE_LOCATOR_KEYS = new Set(['accessibility_id', 'accessibilityId', 'text', 'label', 'predicate', 'class_chain']);
@@ -124,7 +124,13 @@ export function createXcuitestSession({
 
   async function ensureHealth() {
     const result = await (healthCheck ?? defaultHealthCheck)({ device, driver: resolvedDriver });
-    if (!result?.ok) throw new IosSessionError(result?.error_code ?? 'wda_unavailable', result?.message, result);
+    if (!isVerifiedWdaHealth(result)) {
+      throw new IosSessionError(
+        result?.error_code ?? 'wda_unavailable',
+        result?.message ?? 'The WDA health contract was not verified.',
+        result,
+      );
+    }
     return result;
   }
 
