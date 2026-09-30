@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.scheduler.social_followups import SocialFollowupScheduler
 from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemoryChange, SocialRepository
 from deerflow.social.contracts import MemoryCandidate, SocialScope, TurnResult
 from deerflow.social.intelligence import ConversationStage, CreatorEvidence, build_snapshot, plan_conversation
@@ -38,6 +39,9 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     """Run one fixture through native event, memory, stage gate and restore."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     scope = SocialScope("fixture-owner", "fixture-account", raw["creator_ref"], "fixture-thread")
+    evidence = tuple(CreatorEvidence(scope, item["id"], "operator_note", item["source_id"], datetime.now(UTC), None, item["confidence"], item["kind"], item["text"]) for item in raw["evidence"])
+    intelligence = build_snapshot(scope, evidence, revision=1)
+    first_plan = plan_conversation(intelligence, stage=ConversationStage.first_contact)
     first = await repository.record_event(scope, ExternalEvent("turn-1", f"fixture:{raw['creator_ref']}:turn:1", "creator_message", "Synthetic first turn"))
     first = await repository.set_boundaries(scope, expected_revision=first.revision, update=BoundaryUpdate(True, False, False, (f"fixture:{raw['creator_ref']}:turn:1",)))
     result = TurnResult(None, memory_delta=(MemoryCandidate("assert", "memory-1", "relationship", (f"fixture:{raw['creator_ref']}:turn:1",), "Accepted synthetic preference"),))
@@ -63,13 +67,41 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
         formal_allowed = True
     except ValueError:
         formal_allowed = False
+
+    class FollowupRepo:
+        def __init__(self):
+            self.tasks = []
+
+        async def list_by_user(self, user_id):
+            return self.tasks
+
+        async def create(self, **kwargs):
+            self.tasks.append({"id": kwargs["task_id"], "user_id": kwargs["user_id"], "schedule_spec": kwargs["schedule_spec"]})
+
+        async def get_internal(self, task_id):
+            return next((item for item in self.tasks if item["id"] == task_id), None)
+
+        async def get_active_run_status(self, task_id):
+            return None
+
+        async def pause_with_queue_cancellation(self, task_id, **kwargs):
+            return "paused"
+
+    followup_repo = FollowupRepo()
+    followup_scheduler = SocialFollowupScheduler(followup_repo)
+    from deerflow.social.contracts import FollowUp
+
+    followup_id = await followup_scheduler.schedule(scope, thread_id=scope.channel_thread_ref, followup=FollowUp("synthetic check", "new event"), expected_revision=second.revision, cancel_event_id="turn-2")
+    cancelled = await followup_scheduler.cancel_for_creator_event(scope, "turn-3")
     return {
         "creator_ref": raw["creator_ref"],
         "intelligence_snapshot_revision": committed.snapshot.revision,
-        "plan_stage": "discovery",
-        "estimate": {"p50_turns": 4, "p80_turns": 8},
+        "plan_stage": plan_conversation(intelligence, stage=ConversationStage.discovery).stage.value,
+        "estimate": dict(first_plan.estimate),
         "memory_promotions": [item["memory_id"] for item in restored.relationship if item["status"] == "active"],
-        "verified_funnel_stage": "discovery",
+        "verified_funnel_stage": "discovery" if not formal_allowed else "formal_invite",
         "formal_invite_allowed": formal_allowed,
         "second_turn_loaded_memory": bool(restored.relationship),
+        "followup_task_id": followup_id,
+        "followup_cancelled": followup_id in cancelled,
     }

@@ -60,6 +60,7 @@ async def test_runtime_intelligence_case_derives_memory_and_consent_gate(tmp_pat
         assert result["second_turn_loaded_memory"] is True
         assert result["memory_promotions"] == ["memory-1"]
         assert result["formal_invite_allowed"] is False
+        assert result["followup_cancelled"] is True and result["followup_task_id"]
     finally:
         await engine.dispose()
 

@@ -198,7 +198,7 @@ async def run_live(args):
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
             repository = SocialRepository(async_sessionmaker(engine, expire_on_commit=False))
-            fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "social_intelligence"
+            fixtures = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "social_intelligence"
             report["intelligence"] = [await evaluate_runtime_fixture(path, repository) for path in sorted(fixtures.glob("creator_*.json"))]
             await run_cases(repository, budget, report["results"])
             report["complete"] = True
