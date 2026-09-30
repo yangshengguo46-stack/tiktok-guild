@@ -219,6 +219,29 @@ async def test_followup_enqueue_failure_leaves_durable_reconciliation_marker(mon
 
 
 @pytest.mark.asyncio
+async def test_host_reconciliation_retries_exact_followup_and_clears_marker(monkeypatch, repo):
+    attempts = []
+
+    async def fail_schedule(*args, **kwargs):
+        raise RuntimeError("scheduled task store unavailable")
+
+    async def successful_schedule(*args, **kwargs):
+        attempts.append(kwargs)
+        return "social-followup-reconciled"
+
+    model = ScriptedModel(responses=[AIMessage(content=json.dumps({"reply": None, "state_delta": [], "followup": {"check": "tomorrow", "cancel_when": "new message"}}))])
+    graph, config = await assembly(monkeypatch, repo, model, binding_changes={"schedule_followup": fail_schedule})
+    await graph.ainvoke({"messages": [HumanMessage(content="wait")]}, config)
+    runtime = api()
+    binding = config["context"]["__social_binding"]
+    reconciled = runtime.SocialRuntime(replace(binding, schedule_followup=successful_schedule))
+    assert await reconciled.reconcile_followup() is True
+    saved = await repo.restore(SCOPE)
+    assert saved.followup_schedule_error is None
+    assert attempts and attempts[0]["expected_revision"] == saved.revision - 1
+
+
+@pytest.mark.asyncio
 async def test_external_social_request_keeps_frozen_kernel_without_operator_soul(monkeypatch, repo):
     """The social output contract must not erase the actual conversation policy."""
     model = ScriptedModel(responses=[AIMessage(content='{"reply":"hello"}')])

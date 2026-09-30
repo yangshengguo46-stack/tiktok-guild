@@ -14,7 +14,7 @@ from deerflow.persistence.social import SocialConflictError, SocialRepository
 from deerflow.runtime.journal import RunJournal
 from deerflow.runtime.private_model import private_model_callbacks, private_model_copy
 from deerflow.social.context import RelationshipMemoryItem, RelationshipSnapshot, SelfMemoryItem, SocialContextSnapshot, TurnContext
-from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_text
+from deerflow.social.contracts import ClaimPatch, FollowUp, IdentityProfile, RoleProfile, SocialScope, bounded_text
 from deerflow.social.intelligence import ConversationPlan, ConversationStage, build_snapshot, plan_conversation
 from deerflow.social.middleware import SocialContextMiddleware
 from deerflow.social.persona.catalog import load_persona_catalog
@@ -185,6 +185,32 @@ class SocialRuntime:
             creator_sources,
         )
         return self.context
+
+    async def reconcile_followup(self) -> bool:
+        """Retry a durable followup intent from a host reconciliation pass.
+
+        This method intentionally does not invoke a model or infer a new
+        message.  It restores the committed ``followup`` projection, asks the
+        host scheduler to idempotently enqueue the exact revision, then clears
+        the error marker with a CAS.  A safety boundary or scheduler failure
+        leaves the marker intact for the next pass.
+        """
+        if self.binding.schedule_followup is None:
+            return False
+        snapshot = await self.repository.restore(self.binding.scope)
+        if snapshot.followup is None or contact_blocked(snapshot):
+            return False
+        followup = FollowUp(**snapshot.followup)
+        await self.binding.schedule_followup(
+            self.binding.scope,
+            thread_id=self.binding.scope.channel_thread_ref,
+            followup=followup,
+            expected_revision=snapshot.revision,
+            cancel_event_id=self.binding.event_id,
+        )
+        if snapshot.followup_schedule_error is not None:
+            await self.repository.clear_followup_schedule_failure(self.binding.scope, expected_revision=snapshot.revision)
+        return True
 
     def snapshot_for(self, scope):
         if self.context is None or scope != self.binding.scope:
