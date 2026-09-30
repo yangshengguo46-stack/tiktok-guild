@@ -1,0 +1,7 @@
+{
+  "creator_ref": "synthetic-creator-001",
+  "evidence": [
+    {"id": "c001-work-1", "source_id": "fixture:c001:work:1", "kind": "content", "text": "Synthetic live tutorial about organizing a small studio.", "confidence": 0.9},
+    {"id": "c001-goal-1", "source_id": "fixture:c001:goal:1", "kind": "goal", "text": "Wants to improve live audience retention.", "confidence": 0.8}
+  ]
+}

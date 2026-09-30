@@ -2001,3 +2001,7 @@ Your unwavering commitment and expertise have been the driving force behind Deer
 ## Star History
 
 [![Star History Chart](https://star-history.dera.page/svg?repos=bytedance/deer-flow&type=Date)](https://star-history.dera.page/#bytedance/deer-flow&Date)
+
+### Creator Intelligence 离线预验收
+
+离线预验收使用合成、public-like fixture，报告记录 snapshot revision、plan stage、P50/P80 回合估计、合成记忆提升和 verified funnel stage。它只证明来源约束、记忆连续性和 consent gate；没有明确同意或 verified receipt 时不会写成申请、签约或 TikTok 转化。真实 provider、手机、客户安装和平台回执仍需独立验收。

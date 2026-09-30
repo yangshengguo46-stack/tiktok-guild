@@ -32,6 +32,17 @@ def test_cli_rejects_raw_output_outside_ignored_workspace(tmp_path):
         module().output_path(tmp_path / "raw.json")
 
 
+def test_synthetic_intelligence_cases_bound_plan_and_funnel_stage():
+    from pathlib import Path
+
+    from scripts.benchmark.social_preflight.intelligence_cases import evaluate_fixtures
+
+    cases = evaluate_fixtures(Path(__file__).parent / "fixtures" / "social_intelligence")
+    assert len(cases) == 2
+    assert all(case["intelligence_snapshot_revision"] == 1 for case in cases)
+    assert all(case["plan_stage"] == "discovery" and case["formal_invite_allowed"] is False for case in cases)
+
+
 @pytest.mark.asyncio
 async def test_budget_stops_before_extra_transport_call():
     from scripts.benchmark.social_preflight.runner import Budget

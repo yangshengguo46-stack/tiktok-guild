@@ -67,3 +67,7 @@ cd backend
 `memory_changes`；保存的 followup 尚无调度消费者，也没有进入下一轮社交上下文。
 这些属于待实现连接，不能仅归为“真实效果待验证”。本次没有另建记忆账本、调度服务
 或臆造承诺/回执协议。
+
+### Creator Intelligence 离线评估边界
+
+预验收使用两个合成、public-like fixture，并记录 `intelligence_snapshot_revision`、`plan_stage`、`estimate`（P50/P80 是达到阶段目标的估计回合数，不是转化概率）、`memory_promotions` 与 `verified_funnel_stage`。第二轮只加载有来源的已接受记忆；正式邀约前必须有 consent/receipt。结果不代表真实身份、provider 回执、申请、签约或收入转化。

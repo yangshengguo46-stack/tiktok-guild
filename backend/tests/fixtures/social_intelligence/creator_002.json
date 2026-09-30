@@ -1,0 +1,7 @@
+{
+  "creator_ref": "synthetic-creator-002",
+  "evidence": [
+    {"id": "c002-work-1", "source_id": "fixture:c002:work:1", "kind": "content", "text": "Synthetic gaming stream recap with a clear teaching format.", "confidence": 0.88},
+    {"id": "c002-constraint-1", "source_id": "fixture:c002:constraint:1", "kind": "constraint", "text": "Prefers concise, low-pressure conversations.", "confidence": 0.84}
+  ]
+}

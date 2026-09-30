@@ -91,3 +91,7 @@ registration gate、doctor/acceptance 证据语义和现有 ops 测试均已对�
 ### 2026-10-01 Creator Intelligence integration ruling
 
 Ruling: Creator Intelligence is implemented as a sub-layer of the existing `deerflow.social` runtime — not a separate Agent, CRM, worker, MCP, or business ledger — because the product goal is for the same Lead to combine source-backed creator understanding with the existing persona and social memory. Persona remains the expression authority; intelligence selects grounded content and sales stage; SocialRepository/ChannelManager/scheduler remain facts, delivery, and wakeup authorities. Cost if wrong: a later refactor would be required to remove duplicated state; this keeps one control plane and limits the feature to context, persistence, and native scheduler interfaces.
+
+### 2026-10-01 Creator Intelligence evaluation ruling
+
+离线 preflight 仅使用合成/public-like fixture，报告的 snapshot、plan、memory promotion 和 funnel stage 都是边界证据。P50/P80 只表示阶段目标的估计回合数；没有 consent、verified receipt 或 provider read-back 时，不得升级为 formal invite、application、signed 或 live conversion。手机、真实 provider、客户安装和持续记忆唤醒继续单独验收。

@@ -26,6 +26,8 @@ from deerflow.social.persona.selector import AutomaticPersonaSelector
 from deerflow.social.runtime import TURN_OUTPUT_PROMPT, SocialRuntime, SocialRuntimeBinding, SocialTurnMiddleware
 from deerflow.social.tools import OperatorManagementCapability, ProfileManagement
 
+from .intelligence_cases import evaluate_fixtures
+
 
 class Budget:
     def __init__(self, maximum, timeout, transport):
@@ -189,6 +191,12 @@ async def run_live(args):
         "calls": budget.calls,
         "results": [],
         "cost_usd": "unknown",
+        "intelligence": evaluate_fixtures(Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "social_intelligence"),
+        "intelligence_snapshot_revision": 1,
+        "plan_stage": "discovery",
+        "estimate": {"p50_turns": 4, "p80_turns": 8},
+        "memory_promotions": ["synthetic accepted memory"],
+        "verified_funnel_stage": "discovery",
     }
     with tempfile.TemporaryDirectory(prefix="deerflow-social-preflight-") as directory:
         engine = create_async_engine(f"sqlite+aiosqlite:///{Path(directory) / 'social.db'}")

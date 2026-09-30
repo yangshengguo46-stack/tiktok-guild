@@ -388,3 +388,7 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 ## 2026-10-01 Creator Intelligence implementation direction
 
 The owner clarified the target: a mature broker-style Lead should inspect a creator's sourced profile and works, know the appropriate opening and staged path toward formal guild admission, and update its approach from confirmed outcomes. The implementation is explicitly integrated into the existing Agent stack: `CreatorEvidence`/`ConversationPlan` live under `deerflow.social`, are injected into the native Social Runtime beside the resolved persona, and reuse existing SocialRepository, ChannelManager, checkpoint, and scheduler. It must not become a second Agent, CRM, worker, MCP, or business ledger. Persona controls expression; intelligence controls grounded content and sales stage; memory controls durable continuity. The success target is verified application/signing, while refusal, uncertainty, or provider unknown results pause or hand off.
+
+## 2026-10-01 Creator Intelligence evaluation boundary
+
+Two synthetic/public-like fixtures exercise planner continuity, accepted-memory promotion, stage progression and the formal-invite consent gate. Preflight fields `intelligence_snapshot_revision`, `plan_stage`, `estimate`, `memory_promotions`, and `verified_funnel_stage` are offline evidence only; they do not establish live conversion, provider receipt, phone readiness, customer installation, or TikTok delivery.
