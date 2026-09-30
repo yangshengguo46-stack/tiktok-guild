@@ -2185,8 +2185,8 @@ class ChannelManager:
         schedule_followup = resolved.schedule_followup
         if schedule_followup is None and self._social_followup_scheduler is not None:
 
-            async def schedule_followup(**kwargs):
-                return await self._social_followup_scheduler.schedule(**kwargs, revision_reader=resolved.repository.restore)
+            async def schedule_followup(scope, **kwargs):
+                return await self._social_followup_scheduler.schedule(scope, **kwargs, revision_reader=resolved.repository.restore)
         elif schedule_followup is not None and not callable(schedule_followup):
             schedule_followup = getattr(schedule_followup, "schedule", schedule_followup)
 
