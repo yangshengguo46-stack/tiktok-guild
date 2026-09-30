@@ -24,7 +24,7 @@ from deerflow.config.model_config import ModelConfig
 from deerflow.config.sandbox_config import SandboxConfig
 from deerflow.persistence.base import Base
 from deerflow.persistence.creator_agent_relationship.model import CreatorAgentRelationshipRow
-from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemoryChange, SocialRepository
+from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemoryChange, SocialConflictError, SocialRepository
 from deerflow.social.contracts import IdentityProfile, RoleProfile, SocialScope, TurnResult
 from deerflow.social.intelligence import ConversationStage, CreatorEvidence
 from deerflow.social.persona.models import ProfileScope
@@ -137,6 +137,15 @@ async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evid
         conversation_plan=context.conversation_plan.to_payload(),
     )
     assert saved.snapshot.conversation_plan["stage"] == "first_contact"
+    with pytest.raises(SocialConflictError):
+        await repo.commit_turn(
+            SCOPE,
+            expected_revision=current.revision,
+            event_id="e1",
+            result=TurnResult(None),
+            persona_fingerprint=current.effective_persona.fingerprint,
+            conversation_plan={"stage": "rapport"},
+        )
 
 
 def install_host_journal(config, journal):

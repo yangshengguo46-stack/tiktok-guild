@@ -415,7 +415,15 @@ class SocialRepository:
         if conversation_plan is not None and not isinstance(conversation_plan, dict):
             raise ValueError("conversation_plan must be a host-owned JSON projection")
         adjustment_payload = turn_adjustment.to_payload() if turn_adjustment else None
-        digest = _digest({"result": asdict(result), "memory_changes": [asdict(item) for item in memory_changes], "persona_fingerprint": persona_fingerprint, "turn_adjustment": adjustment_payload})
+        digest = _digest(
+            {
+                "result": asdict(result),
+                "memory_changes": [asdict(item) for item in memory_changes],
+                "persona_fingerprint": persona_fingerprint,
+                "turn_adjustment": adjustment_payload,
+                "conversation_plan": deepcopy(conversation_plan),
+            }
+        )
         async with self._write(scope) as session:
             snapshot = await self._snapshot(session, scope)
             event_where = (*_event_scope(scope), social_event.c.source_event_id == event_id)
