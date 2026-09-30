@@ -128,6 +128,18 @@ def _evidence(snapshot, refs):
         raise ValueError("evidence references must belong to this channel scope")
 
 
+def _consent_event_refs(snapshot):
+    """Return creator-authored event refs carrying host-typed consent."""
+    refs = []
+    for event in snapshot.events:
+        consent = event.get("creator_consent")
+        if event.get("source_kind") != "creator_message" or not isinstance(consent, dict):
+            continue
+        if consent.get("purpose") == "formal_invite" and consent.get("granted") is True and consent.get("source_ref") == event.get("source_ref"):
+            refs.append(event["source_ref"])
+    return tuple(refs)
+
+
 def _patch(items, patch, *, id_key):
     items = deepcopy(list(items))
     identifier = patch[id_key]
@@ -299,6 +311,9 @@ class SocialRepository:
     async def record_event(self, scope: SocialScope, event: ExternalEvent, *, expected_revision: int | None = None) -> SocialSnapshot:
         if not isinstance(event, ExternalEvent):
             raise ValueError("event must be an ExternalEvent")
+        if event.creator_consent is not None:
+            if event.source_kind != "creator_message" or event.creator_consent.source_ref != event.source_ref:
+                raise ValueError("creator consent must belong to the creator event source")
         body = asdict(event)
         digest = _digest(body)
         async with self._write(scope) as session:
@@ -373,8 +388,13 @@ class SocialRepository:
             known_refs.update(ref for action in snapshot.outbound for ref in action.evidence_ids)
             if not set(evidence_ids) <= known_refs:
                 raise ValueError("stage evidence must belong to this channel scope")
-            if target in {ConversationStage.formal_invite, ConversationStage.application, ConversationStage.signed} and snapshot.receipt_state not in {"known", "accepted", "delivered"}:
-                raise ValueError("formal sales stages require verified consent or receipt evidence")
+            if target == ConversationStage.formal_invite:
+                if not set(evidence_ids) & set(_consent_event_refs(snapshot)):
+                    if current == ConversationStage.first_contact:
+                        raise ValueError("formal invitation requires verified consent evidence (typed creator consent)")
+                    raise ValueError("formal sales stages require verified consent evidence")
+            if target in {ConversationStage.application, ConversationStage.signed} and snapshot.receipt_state not in {"accepted", "delivered"}:
+                raise ValueError("application and signing require an explicit provider receipt")
             if current in {ConversationStage.paused, ConversationStage.human_takeover} and target != current:
                 raise ValueError("paused or human takeover stages are terminal")
             if target not in {ConversationStage.paused, ConversationStage.human_takeover} and current in order and target in order:
@@ -386,6 +406,38 @@ class SocialRepository:
             history = list(projection.get("boundary_history", ()))
             history.append({"conversation_stage": target.value, "evidence_ids": list(evidence_ids), "reason": reason, "revision": expected_revision + 1})
             projection["boundary_history"] = history
+            await _save(session, scope, projection)
+            return await self._snapshot(session, scope)
+
+    async def mark_followup_schedule_failure(self, scope: SocialScope, *, expected_revision: int, error: str) -> SocialSnapshot:
+        """Persist a retry marker after a turn commit outruns task enqueue.
+
+        Social turns and the generic scheduled-task repository intentionally
+        use separate native transactions.  If enqueue fails after the social
+        commit, the followup intent is still durable in ``followup``; this
+        marker lets a host reconciliation loop distinguish it from an
+        intentionally unscheduled turn without exposing provider details.
+        """
+        bounded_text(error, "error", 512)
+        async with self._write(scope) as session:
+            snapshot = await self._snapshot(session, scope)
+            _check_revision(snapshot.revision, expected_revision, snapshot)
+            if snapshot.followup is None:
+                return snapshot
+            projection = _projection(snapshot)
+            projection.update({"followup_schedule_error": error, "revision": expected_revision + 1})
+            await _save(session, scope, projection)
+            return await self._snapshot(session, scope)
+
+    async def clear_followup_schedule_failure(self, scope: SocialScope, *, expected_revision: int) -> SocialSnapshot:
+        """Clear a reconciled followup marker with the same CAS discipline."""
+        async with self._write(scope) as session:
+            snapshot = await self._snapshot(session, scope)
+            _check_revision(snapshot.revision, expected_revision, snapshot)
+            if snapshot.followup_schedule_error is None:
+                return snapshot
+            projection = _projection(snapshot)
+            projection.update({"followup_schedule_error": None, "revision": expected_revision + 1})
             await _save(session, scope, projection)
             return await self._snapshot(session, scope)
 

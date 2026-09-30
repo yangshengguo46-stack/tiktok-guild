@@ -214,6 +214,14 @@ class ChannelService:
         ready_count = sum(1 for ready in ready_status.values() if ready)
         logger.info("ChannelService started with %d/%d ready channels", ready_count, len(ready_status))
 
+    async def set_social_boundaries(self, connection_id: str, *, expected_revision: int, update: Any, event_id: str) -> Any:
+        """Host-owned safety mutation; delegates to the native manager."""
+        return await self.manager.set_social_boundaries(connection_id, expected_revision=expected_revision, update=update, event_id=event_id)
+
+    async def advance_social_stage(self, connection_id: str, *, expected_revision: int, target_stage: str, evidence_ids: tuple[str, ...], reason: str) -> Any:
+        """Host-owned sales-stage transition with repository CAS."""
+        return await self.manager.advance_social_stage(connection_id, expected_revision=expected_revision, target_stage=target_stage, evidence_ids=evidence_ids, reason=reason)
+
     async def ensure_ready_channels(self, *, attempts: int = 1) -> dict[str, bool]:
         """Start or restart enabled configured channels that are not ready."""
         ready_status: dict[str, bool] = {}

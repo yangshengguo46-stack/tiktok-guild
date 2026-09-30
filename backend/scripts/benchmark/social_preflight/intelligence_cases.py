@@ -17,8 +17,26 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     """Run one fixture through native event, memory, stage gate and restore."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     scope = SocialScope("fixture-owner", "fixture-account", raw["creator_ref"], "fixture-thread")
-    evidence = tuple(CreatorEvidence(scope, item["id"], "operator_note", item["source_id"], datetime.now(UTC), None, item["confidence"], item["kind"], item["text"]) for item in raw["evidence"])
+    evidence = tuple(
+        CreatorEvidence(
+            scope,
+            item["id"],
+            item.get("source_kind", "tkdesk"),
+            item["source_id"],
+            datetime.now(UTC),
+            None,
+            item["confidence"],
+            item["kind"],
+            item["text"],
+            tuple(tuple(fact) for fact in item.get("facts", [])),
+        )
+        for item in raw["evidence"]
+    )
     _intelligence = build_snapshot(scope, evidence, revision=1)
+    assert len(_intelligence.identity) == 1
+    assert len(_intelligence.works) >= 3
+    assert any(item.kind == "goal" for item in _intelligence.signals)
+    assert any(item.kind == "constraint" for item in _intelligence.signals)
     first = await repository.record_event(scope, ExternalEvent("turn-1", f"fixture:{raw['creator_ref']}:turn:1", "operator_note", "Synthetic first turn"))
     first = await repository.set_boundaries(scope, expected_revision=first.revision, update=BoundaryUpdate(True, False, False, (f"fixture:{raw['creator_ref']}:turn:1",)))
     identity = IdentityProfile("fixture-ai", "1", "Synthetic AI", "ai_agent", "Synthetic Guild", "Synthetic only", ())

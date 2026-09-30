@@ -1,7 +1,11 @@
 {
   "creator_ref": "synthetic-creator-001",
   "evidence": [
-    {"id": "c001-work-1", "source_id": "fixture:c001:work:1", "kind": "content", "text": "Synthetic live tutorial about organizing a small studio.", "confidence": 0.9},
-    {"id": "c001-goal-1", "source_id": "fixture:c001:goal:1", "kind": "goal", "text": "Wants to improve live audience retention.", "confidence": 0.8}
+    {"id": "c001-profile-1", "source_id": "fixture:c001:profile", "source_kind": "tkdesk", "kind": "identity", "text": "Studio creator profile", "facts": [["display_name", "Mia Studio"], ["format", "live tutorial"]], "confidence": 0.95},
+    {"id": "c001-work-1", "source_id": "fixture:c001:work:1", "source_kind": "tikhub", "kind": "content", "text": "Synthetic live tutorial about organizing a small studio.", "confidence": 0.9},
+    {"id": "c001-work-2", "source_id": "fixture:c001:work:2", "source_kind": "tikhub", "kind": "content", "text": "Synthetic before-and-after studio setup clip.", "confidence": 0.88},
+    {"id": "c001-work-3", "source_id": "fixture:c001:work:3", "source_kind": "crawler", "kind": "content", "text": "Synthetic Q&A about keeping viewers engaged during a live.", "confidence": 0.84},
+    {"id": "c001-goal-1", "source_id": "fixture:c001:goal:1", "source_kind": "tkdesk", "kind": "goal", "text": "Wants to improve live audience retention.", "confidence": 0.8},
+    {"id": "c001-constraint-1", "source_id": "fixture:c001:constraint:1", "source_kind": "tkdesk", "kind": "constraint", "text": "Needs a low-pressure trial before committing.", "confidence": 0.83}
   ]
 }

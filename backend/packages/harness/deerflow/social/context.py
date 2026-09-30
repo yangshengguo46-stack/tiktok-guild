@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from html import escape
 from types import MappingProxyType
-from typing import Literal
+from typing import Any, Literal
 
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_refs, bounded_text
 from deerflow.social.intelligence import ConversationPlan
@@ -120,6 +120,7 @@ class SocialContextSnapshot:
     effective_persona: EffectivePersona
     turn: TurnContext
     conversation_plan: ConversationPlan | None = None
+    creator_sources: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -130,6 +131,21 @@ class SocialContextSnapshot:
             raise ValueError("self_memory must contain SelfMemoryItem values")
         if self.conversation_plan is not None and not isinstance(self.conversation_plan, ConversationPlan):
             raise ValueError("conversation_plan must be a ConversationPlan")
+        if not isinstance(self.creator_sources, tuple) or len(self.creator_sources) > 64:
+            raise ValueError("creator_sources must contain at most 64 entries")
+        allowed = {"evidence_id", "source_ref", "source_kind", "captured_at", "expires_at", "confidence", "freshness"}
+        frozen = []
+        for item in self.creator_sources:
+            if not isinstance(item, Mapping) or set(item) != allowed:
+                raise ValueError("creator_sources must contain bounded source metadata")
+            for key in ("evidence_id", "source_ref", "source_kind", "captured_at", "freshness"):
+                bounded_text(item[key], f"creator source {key}", 512)
+            if item["expires_at"] is not None:
+                bounded_text(item["expires_at"], "creator source expires_at", 64)
+            if not isinstance(item["confidence"], (int, float)) or isinstance(item["confidence"], bool) or not 0 <= item["confidence"] <= 1:
+                raise ValueError("creator source confidence must be between 0 and 1")
+            frozen.append(MappingProxyType(dict(item)))
+        object.__setattr__(self, "creator_sources", tuple(frozen))
 
 
 def _safe(value: str, limit: int = 256) -> str:
@@ -190,6 +206,7 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
             "unanswered_questions": [item[:256] for item in turn.unanswered_questions[:_LIST_LIMIT]],
             "temporary_style": {key[:64]: value[:256] for key, value in list(turn.temporary_style.items())[:_LIST_LIMIT]},
         },
+        "creator_sources": [dict(item) for item in snapshot.creator_sources[:64]],
     }
     if snapshot.conversation_plan is not None:
         plan = snapshot.conversation_plan
@@ -210,6 +227,7 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         payload["turn"]["unanswered_questions"],
         payload["relationship"]["shared_topics"],
         payload["relationship"]["preferences"],
+        payload["creator_sources"],
     ]
     expression = payload["persona"]["behavior"]
     temporary_style = payload["turn"]["temporary_style"]

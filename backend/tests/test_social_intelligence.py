@@ -76,9 +76,30 @@ def test_plan_stage_transitions_and_explicit_consent_gate():
     assert plan.stage is ConversationStage.permission_to_invite
     assert plan.turns[0]["next_if_yes"] == "formal_invite"
     assert plan.turns[0]["next_if_no"] == "paused"
-    formal = plan_conversation(snapshot, stage=ConversationStage.formal_invite)
+    with pytest.raises(ValueError, match="consent"):
+        plan_conversation(snapshot, stage=ConversationStage.formal_invite)
+    formal = plan_conversation(snapshot, stage=ConversationStage.formal_invite, consent_evidence_ids=("creator:consent",))
     assert formal.turns[0]["objective"]
-    assert formal.consent_checkpoint == "before_formal_invitation"
+    assert formal.consent_evidence_ids == ("creator:consent",)
+    restored = type(formal).from_payload(formal.to_payload())
+    assert restored == formal
+
+
+def test_persisted_formal_plan_without_consent_fails_closed():
+    with pytest.raises(ValueError, match="consent"):
+        from deerflow.social.intelligence.planner import ConversationPlan
+
+        ConversationPlan(
+            "p",
+            1,
+            ConversationStage.formal_invite,
+            (),
+            (),
+            ({"objective": "send terms", "allowed_evidence_ids": (), "success_signal": "reply", "next_if_yes": "application", "next_if_no": "paused"},),
+            "before_formal_invitation",
+            ("stop",),
+            {"p50_turns": 1, "p80_turns": 2, "confidence": 0.5, "basis": ("x",)},
+        )
 
 
 def test_provider_protocol_is_runtime_checkable_by_shape():

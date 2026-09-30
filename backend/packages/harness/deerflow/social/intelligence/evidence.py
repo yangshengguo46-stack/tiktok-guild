@@ -64,6 +64,21 @@ class CreatorEvidence:
         _utc(at, "at")
         return self.expires_at <= at
 
+    def source_metadata(self, at: datetime | None = None) -> dict:
+        """Return only bounded provenance metadata safe for Lead context."""
+        at = at or datetime.now(UTC)
+        _utc(at, "at")
+        freshness = "expired" if self.is_expired(at) else "fresh"
+        return {
+            "evidence_id": self.evidence_id,
+            "source_ref": self.source_ref,
+            "source_kind": self.source_kind,
+            "captured_at": self.captured_at.isoformat(),
+            "expires_at": self.expires_at.isoformat() if self.expires_at is not None else None,
+            "confidence": self.confidence,
+            "freshness": freshness,
+        }
+
 
 class CreatorEvidenceProvider(Protocol):
     async def collect(self, scope: SocialScope, *, creator_ref: str) -> tuple[CreatorEvidence, ...]: ...

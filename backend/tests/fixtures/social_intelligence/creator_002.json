@@ -1,7 +1,11 @@
 {
   "creator_ref": "synthetic-creator-002",
   "evidence": [
-    {"id": "c002-work-1", "source_id": "fixture:c002:work:1", "kind": "content", "text": "Synthetic gaming stream recap with a clear teaching format.", "confidence": 0.88},
-    {"id": "c002-constraint-1", "source_id": "fixture:c002:constraint:1", "kind": "constraint", "text": "Prefers concise, low-pressure conversations.", "confidence": 0.84}
+    {"id": "c002-profile-1", "source_id": "fixture:c002:profile", "source_kind": "homepage", "kind": "identity", "text": "Gaming educator profile", "facts": [["display_name", "Kai Plays"], ["format", "gaming education"]], "confidence": 0.92},
+    {"id": "c002-work-1", "source_id": "fixture:c002:work:1", "source_kind": "tikhub", "kind": "content", "text": "Synthetic gaming stream recap with a clear teaching format.", "confidence": 0.88},
+    {"id": "c002-work-2", "source_id": "fixture:c002:work:2", "source_kind": "tikhub", "kind": "content", "text": "Synthetic ranked strategy breakdown with annotated clips.", "confidence": 0.86},
+    {"id": "c002-work-3", "source_id": "fixture:c002:work:3", "source_kind": "crawler", "kind": "content", "text": "Synthetic viewer question response about stream pacing.", "confidence": 0.82},
+    {"id": "c002-goal-1", "source_id": "fixture:c002:goal:1", "source_kind": "tkdesk", "kind": "goal", "text": "Wants to build a repeatable live teaching format.", "confidence": 0.81},
+    {"id": "c002-constraint-1", "source_id": "fixture:c002:constraint:1", "source_kind": "tkdesk", "kind": "constraint", "text": "Prefers concise, low-pressure conversations.", "confidence": 0.84}
   ]
 }

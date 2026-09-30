@@ -122,6 +122,9 @@ async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evid
     assert context.conversation_plan.stage == ConversationStage.first_contact
     assert "work-current" in context.conversation_plan.opening_candidates[0]["evidence_ids"]
     assert "work-old" not in repr(context.conversation_plan)
+    assert context.creator_sources[0]["source_ref"] == "video:1"
+    assert {"source_ref", "source_kind", "captured_at", "expires_at", "confidence", "freshness"} <= set(context.creator_sources[0])
+    assert "A current work" not in repr(context.creator_sources)
     from deerflow.social.context import build_social_context_data
 
     rendered = build_social_context_data(context)
@@ -137,6 +140,10 @@ async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evid
         conversation_plan=context.conversation_plan.to_payload(),
     )
     assert saved.snapshot.conversation_plan["stage"] == "first_contact"
+    restored_runtime = runtime.SocialRuntime(replace(binding, creator_evidence=()))
+    restored_context = await restored_runtime.restore_context()
+    assert restored_context.conversation_plan is not None
+    assert restored_context.conversation_plan.stage == ConversationStage.first_contact
     with pytest.raises(SocialConflictError):
         await repo.commit_turn(
             SCOPE,
@@ -195,6 +202,20 @@ async def test_real_lead_commits_before_streaming_only_reply(monkeypatch, repo, 
     assert decoded["relationship"]["identity_verified"] is True
     assert decoded["relationship"]["receipt_state"] == "none"
     assert decoded["persona"]["fingerprint"] == before.effective_persona.fingerprint
+
+
+@pytest.mark.asyncio
+async def test_followup_enqueue_failure_leaves_durable_reconciliation_marker(monkeypatch, repo):
+    async def fail_schedule(*args, **kwargs):
+        raise RuntimeError("scheduled task store unavailable")
+
+    model = ScriptedModel(responses=[AIMessage(content=json.dumps({"reply": None, "state_delta": [], "followup": {"check": "tomorrow", "cancel_when": "new message"}}))])
+    graph, config = await assembly(monkeypatch, repo, model, binding_changes={"schedule_followup": fail_schedule})
+    result = await graph.ainvoke({"messages": [HumanMessage(content="wait")]}, config)
+    assert result["messages"][-1].content == ""
+    saved = await repo.restore(SCOPE)
+    assert saved.followup is not None
+    assert saved.followup_schedule_error == "RuntimeError: scheduled task store unavailable"
 
 
 @pytest.mark.asyncio

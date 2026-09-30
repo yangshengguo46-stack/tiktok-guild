@@ -2223,14 +2223,22 @@ class ChannelManager:
         # exceptions are swallowed and cannot prove provider acceptance.
         result = await channel.send_social(outbound, action_id=claim.outbound.action_id)
         if not isinstance(result, SocialProviderResult) or not result.evidence_ref:
+            if followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_scope_event"):
+                await followup_scheduler.cancel_for_scope_event(envelope.scope, f"provider-unknown:{action.action_id}", reason="provider-unknown")
             return
         if result.state in {"accepted", "delivered"} and not result.provider_ref:
+            if followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_scope_event"):
+                await followup_scheduler.cancel_for_scope_event(envelope.scope, f"provider-unknown:{action.action_id}", reason="provider-unknown")
             return
         if result.state == "delivered" and (not capabilities.receipts or not result.receipt_ref or result.receipt_ref != result.evidence_ref):
+            if followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_scope_event"):
+                await followup_scheduler.cancel_for_scope_event(envelope.scope, f"provider-unknown:{action.action_id}", reason="provider-unknown")
             return
         await repository.record_outbound_result(
             envelope.scope, action.action_id, expected_revision=claim.outbound.revision, state="failed" if result.state == "rejected" else result.state, provider_ref=result.provider_ref, evidence_ids=(result.evidence_ref,)
         )
+        if result.state == "unknown" and followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_scope_event"):
+            await followup_scheduler.cancel_for_scope_event(envelope.scope, f"provider-unknown:{action.action_id}", reason="provider-unknown")
 
     async def handle_social_receipt(self, channel_name: str, raw_receipt: Any) -> None:
         """Reconcile a provider-authenticated receipt; never sends or retries."""
@@ -2265,8 +2273,39 @@ class ChannelManager:
             await resolved.repository.record_outbound_result(
                 resolved.scope, action.action_id, expected_revision=action.revision, state="failed" if result.state == "rejected" else result.state, provider_ref=result.provider_ref, evidence_ids=(result.evidence_ref,)
             )
+            if result.state == "unknown":
+                followup_scheduler = resolved.schedule_followup or self._social_followup_scheduler
+                if followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_scope_event"):
+                    await followup_scheduler.cancel_for_scope_event(resolved.scope, f"provider-unknown:{receipt.receipt_id}", reason="provider-unknown")
         except Exception:
             logger.warning("Social receipt refused or unavailable: channel=%s", channel_name)
+
+    async def set_social_boundaries(self, connection_id: str, *, expected_revision: int, update: BoundaryUpdate, event_id: str) -> Any:
+        """Apply an authenticated host boundary mutation and stop followups.
+
+        Channel adapters never construct this call from creator text.  The
+        caller must resolve a connection owned by this manager and provide a
+        typed ``BoundaryUpdate`` plus evidence already admitted to the social
+        repository.  DNC, takeover, and identity revocation all cancel queued
+        social followups while the scheduled-task repository keeps its running
+        execution fence intact.
+        """
+        resolved = self._social_connections.get(connection_id)
+        if not isinstance(resolved, SocialConnection) or not isinstance(update, BoundaryUpdate):
+            raise ValueError("unknown social connection or invalid boundary update")
+        snapshot = await resolved.repository.set_boundaries(resolved.scope, expected_revision=expected_revision, update=update)
+        if update.do_not_contact or update.human_takeover or not update.identity_verified:
+            scheduler = resolved.schedule_followup or self._social_followup_scheduler
+            if scheduler is not None and hasattr(scheduler, "cancel_for_scope_event"):
+                await scheduler.cancel_for_scope_event(resolved.scope, event_id, reason="safety boundary")
+        return snapshot
+
+    async def advance_social_stage(self, connection_id: str, *, expected_revision: int, target_stage: str, evidence_ids: tuple[str, ...], reason: str) -> Any:
+        """Advance a sales stage from a host-owned event with repository CAS."""
+        resolved = self._social_connections.get(connection_id)
+        if not isinstance(resolved, SocialConnection):
+            raise ValueError("unknown social connection")
+        return await resolved.repository.advance_conversation_stage(resolved.scope, expected_revision=expected_revision, target_stage=target_stage, evidence_ids=evidence_ids, reason=reason)
 
     # -- chat handling -----------------------------------------------------
 

@@ -481,6 +481,39 @@ async def test_conversation_stage_is_host_only_and_requires_verified_receipt(rep
 
 
 @pytest.mark.asyncio
+async def test_manager_exposes_host_stage_and_boundary_mutations_with_followup_fence(repository, tmp_path):
+    fixture = await channel_fixture(repository, tmp_path)
+
+    class SchedulerSpy:
+        def __init__(self):
+            self.cancelled = []
+
+        async def cancel_for_scope_event(self, scope, event_id, *, reason):
+            self.cancelled.append((scope, event_id, reason))
+            return []
+
+    scheduler = SchedulerSpy()
+    fixture.manager._social_followup_scheduler = scheduler
+    moved = await fixture.manager.advance_social_stage(
+        "connection",
+        expected_revision=(await repository.restore(SCOPE)).revision,
+        target_stage="rapport",
+        evidence_ids=(REF,),
+        reason="authenticated creator reply",
+    )
+    assert moved.conversation_stage == "rapport"
+    snapshot = await repository.restore(SCOPE)
+    stopped = await fixture.manager.set_social_boundaries(
+        "connection",
+        expected_revision=snapshot.revision,
+        update=BoundaryUpdate(True, False, True, (REF,)),
+        event_id="operator-dnc-1",
+    )
+    assert stopped.do_not_contact is True
+    assert scheduler.cancelled == [(SCOPE, "operator-dnc-1", "safety boundary")]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state,want", [("accepted", "accepted"), ("delivered", "delivered"), ("rejected", "failed"), ("unknown", "unknown")])
 async def test_social_publish_once_after_commit_records_only_provider_evidence(repository, tmp_path, state, want):
     fixture = await channel_fixture(repository, tmp_path, result=state)

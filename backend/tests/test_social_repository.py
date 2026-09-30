@@ -365,6 +365,33 @@ asyncio.run(main())
 
 
 @pytest.mark.asyncio
+async def test_formal_invite_requires_typed_creator_consent_and_application_receipt(db):
+    social, repo, _ = db
+    first = await repo.record_event(SCOPE, event(social))
+    consent_ref = "creator:consent"
+    consent = await repo.record_event(
+        SCOPE,
+        social.ExternalEvent(
+            "consent",
+            consent_ref,
+            "creator_message",
+            "Yes, send me the formal guild terms.",
+            social.CreatorConsent("formal_invite", True, consent_ref),
+        ),
+        expected_revision=first.revision,
+    )
+    with pytest.raises(ValueError, match="typed creator consent"):
+        await repo.advance_conversation_stage(SCOPE, expected_revision=consent.revision, target_stage="formal_invite", evidence_ids=("ref1",), reason="without typed consent evidence")
+    current = consent
+    for target in ("rapport", "discovery", "value_fit", "objection_handling", "permission_to_invite"):
+        current = await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage=target, evidence_ids=(consent_ref,), reason="synthetic progression")
+    current = await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage="formal_invite", evidence_ids=(consent_ref,), reason="creator consented")
+    assert current.conversation_stage == "formal_invite"
+    with pytest.raises(ValueError, match="explicit provider receipt"):
+        await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage="application", evidence_ids=(consent_ref,), reason="no application receipt")
+
+
+@pytest.mark.asyncio
 async def test_profile_versions_are_immutable_and_registration_has_cas(db):
     social, repo, _ = db
     scope = ProfileScope("owner", "account")

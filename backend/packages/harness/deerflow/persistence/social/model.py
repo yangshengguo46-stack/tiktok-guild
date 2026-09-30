@@ -15,6 +15,27 @@ from deerflow.social.persona.models import EffectivePersona, PersonaBindings, Pr
 
 
 @dataclass(frozen=True)
+class CreatorConsent:
+    """Typed creator permission attached to one creator-authored event.
+
+    Consent is an event property supplied by the host/provider.  It is not
+    inferred from message text or a model decision.  The source reference is
+    checked against the enclosing event when the event is persisted.
+    """
+
+    purpose: Literal["formal_invite"]
+    granted: bool
+    source_ref: str
+
+    def __post_init__(self):
+        if self.purpose != "formal_invite":
+            raise ValueError("creator consent purpose must be formal_invite")
+        if type(self.granted) is not bool:
+            raise ValueError("creator consent granted must be a boolean")
+        bounded_text(self.source_ref, "consent source_ref", 128)
+
+
+@dataclass(frozen=True)
 class SocialConnectionGuard:
     """Host-resolved connection identity revalidated at send authorization."""
 
@@ -35,11 +56,14 @@ class ExternalEvent:
     source_ref: str
     source_kind: Literal["creator_message", "operator_note", "platform_observation"]
     text: str
+    creator_consent: CreatorConsent | None = None
 
     def __post_init__(self):
         bounded_text(self.source_event_id, "source_event_id", 128)
         bounded_text(self.source_ref, "source_ref", 128)
         bounded_text(self.text, "text", 16384)
+        if self.creator_consent is not None and not isinstance(self.creator_consent, CreatorConsent):
+            raise ValueError("creator_consent must be a typed CreatorConsent")
         if self.source_kind not in {"creator_message", "operator_note", "platform_observation"}:
             raise ValueError("invalid source_kind")
 
@@ -129,6 +153,10 @@ class SocialSnapshot:
     persona_evaluation: dict | None = None
     conversation_stage: str = "first_contact"
     conversation_plan: dict | None = None
+    # Durable handoff marker used when the native scheduled-task transaction
+    # fails after a social turn has committed.  The followup intent itself
+    # remains in ``followup`` and can be reconciled by a host-owned retry.
+    followup_schedule_error: str | None = None
 
 
 @dataclass(frozen=True)

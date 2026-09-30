@@ -72,6 +72,7 @@ class ConversationPlan:
     consent_checkpoint: str
     stop_conditions: tuple[str, ...]
     estimate: Mapping[str, Any]
+    consent_evidence_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         bounded_text(self.plan_id, "plan_id", 128)
@@ -105,6 +106,9 @@ class ConversationPlan:
         object.__setattr__(self, "turns", tuple(frozen_turns))
         bounded_text(self.consent_checkpoint, "consent_checkpoint", 128)
         bounded_refs(self.stop_conditions, "stop_conditions", maximum=16, minimum=1)
+        bounded_refs(self.consent_evidence_ids, "consent_evidence_ids", maximum=16)
+        if self.stage == ConversationStage.formal_invite and not self.consent_evidence_ids:
+            raise ValueError("formal_invite plan requires consent evidence")
         if not isinstance(self.estimate, Mapping):
             raise ValueError("estimate must be a mapping")
         if set(self.estimate) != {"p50_turns", "p80_turns", "confidence", "basis"}:
@@ -129,14 +133,89 @@ class ConversationPlan:
             "consent_checkpoint": self.consent_checkpoint,
             "stop_conditions": list(self.stop_conditions),
             "estimate": dict(self.estimate),
+            "consent_evidence_ids": list(self.consent_evidence_ids),
         }
 
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> ConversationPlan:
+        """Validate and rehydrate a host-persisted plan projection.
 
-def plan_conversation(snapshot: CreatorIntelligenceSnapshot, *, stage: ConversationStage, relationship_signals=(), goal: str | None = None) -> ConversationPlan:
+        Persisted plans are data, not authority.  Rehydration deliberately
+        accepts only the exact bounded JSON shape emitted by ``to_payload``;
+        malformed or extended projections fail closed at the runtime boundary.
+        """
+        if not isinstance(payload, Mapping) or set(payload) != {
+            "plan_id",
+            "snapshot_revision",
+            "stage",
+            "opening_candidates",
+            "avoid",
+            "turns",
+            "consent_checkpoint",
+            "stop_conditions",
+            "estimate",
+            "consent_evidence_ids",
+        }:
+            raise ValueError("persisted conversation_plan has invalid fields")
+        try:
+            stage = ConversationStage(payload["stage"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("persisted conversation_plan has invalid stage") from exc
+        openings = payload["opening_candidates"]
+        turns = payload["turns"]
+        estimate = payload["estimate"]
+        avoid = payload["avoid"]
+        stop_conditions = payload["stop_conditions"]
+        consent_evidence_ids = payload["consent_evidence_ids"]
+        if (
+            not isinstance(openings, (list, tuple))
+            or not isinstance(turns, (list, tuple))
+            or not isinstance(estimate, Mapping)
+            or not isinstance(avoid, (list, tuple))
+            or not isinstance(stop_conditions, (list, tuple))
+            or not isinstance(consent_evidence_ids, (list, tuple))
+        ):
+            raise ValueError("persisted conversation_plan has invalid nested values")
+        normalized_openings = tuple(
+            {"text": item["text"], "evidence_ids": tuple(item["evidence_ids"])} if isinstance(item, Mapping) and set(item) == {"text", "evidence_ids"} and isinstance(item["evidence_ids"], (list, tuple)) else item for item in openings
+        )
+        normalized_turns = tuple(
+            {**item, "allowed_evidence_ids": tuple(item["allowed_evidence_ids"])} if isinstance(item, Mapping) and set(item) == _REQUIRED_TURN_KEYS and isinstance(item["allowed_evidence_ids"], (list, tuple)) else item for item in turns
+        )
+        normalized_estimate = dict(estimate)
+        raw_basis = normalized_estimate.get("basis")
+        if not isinstance(raw_basis, (list, tuple)):
+            raise ValueError("persisted conversation_plan has invalid estimate basis")
+        normalized_estimate["basis"] = tuple(raw_basis)
+        return cls(
+            payload["plan_id"],
+            payload["snapshot_revision"],
+            stage,
+            normalized_openings,
+            tuple(avoid),
+            normalized_turns,
+            payload["consent_checkpoint"],
+            tuple(stop_conditions),
+            normalized_estimate,
+            tuple(consent_evidence_ids),
+        )
+
+
+def plan_conversation(
+    snapshot: CreatorIntelligenceSnapshot,
+    *,
+    stage: ConversationStage,
+    relationship_signals=(),
+    goal: str | None = None,
+    consent_evidence_ids: tuple[str, ...] = (),
+) -> ConversationPlan:
     if not isinstance(snapshot, CreatorIntelligenceSnapshot) or not isinstance(stage, ConversationStage):
         raise ValueError("snapshot and stage are required")
     if goal is not None:
         bounded_text(goal, "goal", 512)
+    bounded_refs(consent_evidence_ids, "consent_evidence_ids", maximum=16)
+    if stage == ConversationStage.formal_invite and not consent_evidence_ids:
+        raise ValueError("formal_invite planning requires typed creator consent evidence")
     records = [(item, 0) for item in snapshot.works] + [(item, 1) for item in snapshot.identity]
     records.sort(key=lambda pair: (pair[0].captured_at, -pair[1], pair[0].evidence_id), reverse=True)
     selected = records[:3]
@@ -150,12 +229,12 @@ def plan_conversation(snapshot: CreatorIntelligenceSnapshot, *, stage: Conversat
     objective = _OBJECTIVES[stage]
     if stage == ConversationStage.discovery and goal is not None:
         objective = f"verify whether the creator wants help with {goal}"
-    allowed = tuple(snapshot.evidence_refs)
+    allowed = tuple(dict.fromkeys((*snapshot.evidence_refs, *consent_evidence_ids)))
     turns = ({"objective": objective, "allowed_evidence_ids": allowed, "success_signal": "creator responds or corrects the picture", "next_if_yes": _NEXT[stage], "next_if_no": "paused"},)
     basis = ["current scoped evidence", f"stage:{stage.value}"]
     confidence = 0.35 if not relationship_signals else 0.5
     basis.append("no verified response history" if not relationship_signals else "verified response history")
-    raw_id = f"{snapshot.revision}:{stage.value}:{','.join(snapshot.evidence_refs)}"
+    raw_id = f"{snapshot.revision}:{stage.value}:{','.join(allowed)}"
     return ConversationPlan(
         "plan-" + hashlib.sha256(raw_id.encode()).hexdigest()[:16],
         snapshot.revision,
@@ -166,4 +245,5 @@ def plan_conversation(snapshot: CreatorIntelligenceSnapshot, *, stage: Conversat
         "before_formal_invitation",
         ("creator says stop", "identity uncertain", "provider result unknown"),
         {"p50_turns": 4, "p80_turns": 8, "confidence": confidence, "basis": tuple(basis)},
+        tuple(consent_evidence_ids),
     )

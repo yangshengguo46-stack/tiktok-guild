@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.scheduler.social_followups import SocialFollowupScheduler
 from deerflow.social.contracts import FollowUp, SocialScope
@@ -29,6 +30,21 @@ class FakeRepository:
         return "executing" if self.active.get(task_id) in {"launching", "running"} else "paused"
 
 
+class RaceRepository(FakeRepository):
+    """Simulate a second writer winning the native task insert."""
+
+    def __init__(self):
+        super().__init__()
+        self._first_create = True
+
+    async def create(self, **kwargs):
+        if self._first_create:
+            self._first_create = False
+            self.tasks.append(kwargs | {"id": kwargs["task_id"]})
+            raise IntegrityError("duplicate", {}, None)
+        await super().create(**kwargs)
+
+
 @pytest.mark.asyncio
 async def test_followup_replay_returns_same_native_task_id():
     scheduler = SocialFollowupScheduler(FakeRepository())
@@ -36,6 +52,30 @@ async def test_followup_replay_returns_same_native_task_id():
     first = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=followup, expected_revision=4, cancel_event_id="event-4")
     second = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=followup, expected_revision=4, cancel_event_id="event-4")
     assert second == first
+
+
+@pytest.mark.asyncio
+async def test_followup_same_revision_recovers_even_when_cancel_event_differs():
+    repo = FakeRepository()
+    scheduler = SocialFollowupScheduler(repo)
+    followup = FollowUp("check in", "new message")
+    first = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=followup, expected_revision=4, cancel_event_id="event-4")
+    second = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=followup, expected_revision=4, cancel_event_id="redelivery-4")
+    assert second == first
+
+
+@pytest.mark.asyncio
+async def test_followup_insert_race_recovers_existing_same_revision():
+    repo = RaceRepository()
+    scheduler = SocialFollowupScheduler(repo)
+    task_id = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=FollowUp("check", "new"), expected_revision=7, cancel_event_id="first")
+    assert task_id == "social-followup-" + scheduler._key(SCOPE, 7)
+
+
+@pytest.mark.parametrize("delay", [0, -1, True, 1.5])
+def test_followup_default_delay_must_be_positive_integer(delay):
+    with pytest.raises(ValueError, match="positive integer"):
+        SocialFollowupScheduler(FakeRepository(), default_delay_seconds=delay)
 
 
 @pytest.mark.asyncio

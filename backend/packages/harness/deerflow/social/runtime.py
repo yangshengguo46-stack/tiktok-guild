@@ -132,13 +132,36 @@ class SocialRuntime:
         self.snapshot = snapshot
         claims = tuple(ClaimPatch("assert", row["claim_id"], tuple(row["evidence_ids"]), row["text"], row["kind"], row["facet"]) for row in snapshot.claims if row["status"] == "active")
         conversation_plan: ConversationPlan | None = None
+        intelligence = None
         if self.binding.creator_evidence:
             intelligence = build_snapshot(self.binding.scope, self.binding.creator_evidence, snapshot.revision)
             try:
                 stage = ConversationStage(snapshot.conversation_stage)
             except (AttributeError, ValueError):
                 stage = ConversationStage.first_contact
-            conversation_plan = plan_conversation(intelligence, stage=stage, goal=self.binding.conversation_goal)
+            consent_refs = tuple(
+                event_row["source_ref"]
+                for event_row in snapshot.events
+                if event_row.get("source_kind") == "creator_message"
+                and isinstance(event_row.get("creator_consent"), dict)
+                and event_row["creator_consent"].get("purpose") == "formal_invite"
+                and event_row["creator_consent"].get("granted") is True
+                and event_row["creator_consent"].get("source_ref") == event_row.get("source_ref")
+            )
+            conversation_plan = plan_conversation(intelligence, stage=stage, goal=self.binding.conversation_goal, consent_evidence_ids=consent_refs)
+        elif snapshot.conversation_plan is not None:
+            # A later native Lead may not have the public-evidence adapter
+            # available.  Rehydrate the last host projection only after strict
+            # shape validation; malformed/stale stage data fails closed rather
+            # than silently disappearing from context.
+            try:
+                persisted = ConversationPlan.from_payload(snapshot.conversation_plan)
+                if persisted.stage.value != snapshot.conversation_stage:
+                    raise ValueError("persisted plan stage does not match funnel stage")
+                conversation_plan = persisted
+            except (TypeError, ValueError) as exc:
+                raise ValueError("persisted conversation_plan failed validation") from exc
+        creator_sources = () if intelligence is None else tuple(item.source_metadata() for group in (intelligence.identity, intelligence.works, intelligence.signals) for item in group)
         self.context = SocialContextSnapshot(
             self.binding.scope,
             self.binding.identity,
@@ -159,6 +182,7 @@ class SocialRuntime:
             snapshot.effective_persona,
             TurnContext(event["source_event_id"], event["text"][:4096], tuple(row["text"][:512] for row in snapshot.events[-9:] if row["source_event_id"] != event["source_event_id"]), (), {}, source_ref=event["source_ref"]),
             conversation_plan,
+            creator_sources,
         )
         return self.context
 
@@ -246,8 +270,33 @@ class SocialTurnMiddleware(SocialContextMiddleware):
             return ModelResponse(result=[AIMessage(content="")])
         runtime.result = result
         runtime.snapshot = saved.snapshot
+        followup_schedule_error = None
         if result.followup is not None and runtime.binding.schedule_followup is not None and not contact_blocked(saved.snapshot):
-            await runtime.binding.schedule_followup(runtime.binding.scope, thread_id=runtime.binding.scope.channel_thread_ref, followup=result.followup, expected_revision=saved.snapshot.revision, cancel_event_id=runtime.binding.event_id)
+            try:
+                await runtime.binding.schedule_followup(
+                    runtime.binding.scope,
+                    thread_id=runtime.binding.scope.channel_thread_ref,
+                    followup=result.followup,
+                    expected_revision=saved.snapshot.revision,
+                    cancel_event_id=runtime.binding.event_id,
+                )
+                if saved.snapshot.followup_schedule_error is not None:
+                    runtime.snapshot = await runtime.repository.clear_followup_schedule_failure(runtime.binding.scope, expected_revision=saved.snapshot.revision)
+                    saved = type(saved)(snapshot=runtime.snapshot, outbound=saved.outbound)
+            except Exception as exc:
+                # The social commit and generic scheduled-task insert are
+                # separate native transactions. Preserve the committed
+                # followup intent and leave a durable marker for a host-owned
+                # reconciliation loop; do not turn a successful reply into a
+                # second, non-idempotent model attempt.
+                followup_schedule_error = f"{type(exc).__name__}: {str(exc)[:400]}"
+                try:
+                    runtime.snapshot = await runtime.repository.mark_followup_schedule_failure(runtime.binding.scope, expected_revision=saved.snapshot.revision, error=followup_schedule_error)
+                    saved = type(saved)(snapshot=runtime.snapshot, outbound=saved.outbound)
+                except Exception:
+                    # The intent remains in the already committed snapshot;
+                    # a later host restore can reconcile it conservatively.
+                    pass
         progress = {"scope": asdict(runtime.binding.scope), "relationship_revision": saved.snapshot.revision, "self_revision": saved.snapshot.revision, "latest_external_event_id": runtime.binding.event_id}
         if saved.outbound:
             progress["pending_action_id"] = saved.outbound.action_id
