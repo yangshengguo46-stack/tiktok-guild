@@ -67,6 +67,7 @@ class SocialConnection:
     identity_verified: bool = False
     creator_evidence: tuple = ()
     conversation_goal: str | None = None
+    schedule_followup: object | None = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):

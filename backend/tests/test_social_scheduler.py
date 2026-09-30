@@ -1,0 +1,44 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from app.scheduler.social_followups import SocialFollowupScheduler
+from deerflow.social.contracts import FollowUp, SocialScope
+
+SCOPE = SocialScope("owner", "account", "creator", "thread")
+
+
+class FakeRepository:
+    def __init__(self):
+        self.tasks = []
+        self.active = {}
+
+    async def list_by_user(self, user_id):
+        return [task for task in self.tasks if task["user_id"] == user_id]
+
+    async def create(self, **kwargs):
+        self.tasks.append(kwargs | {"id": kwargs["task_id"]})
+
+    async def get_active_run_status(self, task_id):
+        return self.active.get(task_id)
+
+    async def pause_with_queue_cancellation(self, task_id, **kwargs):
+        return "executing" if self.active.get(task_id) in {"launching", "running"} else "paused"
+
+
+@pytest.mark.asyncio
+async def test_followup_replay_returns_same_native_task_id():
+    scheduler = SocialFollowupScheduler(FakeRepository())
+    followup = FollowUp("check in", "new message", (datetime.now(UTC) + timedelta(minutes=5)).isoformat())
+    first = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=followup, expected_revision=4, cancel_event_id="event-4")
+    second = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=followup, expected_revision=4, cancel_event_id="event-4")
+    assert second == first
+
+
+@pytest.mark.asyncio
+async def test_running_followup_is_never_cancelled():
+    repo = FakeRepository()
+    scheduler = SocialFollowupScheduler(repo)
+    task_id = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=FollowUp("check", "new"), expected_revision=1, cancel_event_id="event-1")
+    repo.active[task_id] = "running"
+    assert await scheduler.cancel_for_creator_event(SCOPE, "event-2") == []

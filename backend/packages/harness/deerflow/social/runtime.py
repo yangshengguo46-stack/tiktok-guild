@@ -50,6 +50,7 @@ class SocialRuntimeBinding:
     selector: Any = None
     creator_evidence: tuple = ()
     conversation_goal: str | None = None
+    schedule_followup: Any = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -65,6 +66,8 @@ class SocialRuntimeBinding:
             raise ValueError("creator_evidence must contain scoped CreatorEvidence values")
         if self.conversation_goal is not None:
             bounded_text(self.conversation_goal, "conversation_goal", 512)
+        if self.schedule_followup is not None and not callable(self.schedule_followup):
+            raise ValueError("schedule_followup must be callable")
 
 
 def binding_for_lead(config, *, user_id):
@@ -243,6 +246,8 @@ class SocialTurnMiddleware(SocialContextMiddleware):
             return ModelResponse(result=[AIMessage(content="")])
         runtime.result = result
         runtime.snapshot = saved.snapshot
+        if result.followup is not None and runtime.binding.schedule_followup is not None and not contact_blocked(saved.snapshot):
+            await runtime.binding.schedule_followup(runtime.binding.scope, thread_id=runtime.binding.scope.channel_thread_ref, followup=result.followup, expected_revision=saved.snapshot.revision, cancel_event_id=runtime.binding.event_id)
         progress = {"scope": asdict(runtime.binding.scope), "relationship_revision": saved.snapshot.revision, "self_revision": saved.snapshot.revision, "latest_external_event_id": runtime.binding.event_id}
         if saved.outbound:
             progress["pending_action_id"] = saved.outbound.action_id

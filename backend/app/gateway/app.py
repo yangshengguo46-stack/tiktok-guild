@@ -425,6 +425,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             from app.channels.service import start_channel_service
             from app.gateway.services import launch_social_channel_turn
+            from app.scheduler.social_followups import SocialFollowupScheduler
 
             # Closure over `app` (mirrors ScheduledTaskService's `launch_run`
             # above) rather than resolving `app.state.stream_bridge` here
@@ -439,6 +440,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 startup_config,
                 get_stream_bridge=lambda: getattr(app.state, "stream_bridge", None),
                 launch_social_turn=lambda **kwargs: launch_social_channel_turn(app=app, **kwargs),
+                social_followup_scheduler=SocialFollowupScheduler(app.state.scheduled_task_repo) if getattr(app.state, "scheduled_task_repo", None) is not None else None,
             )
             logger.info("Channel service started: %s", channel_service.get_status())
         except Exception:

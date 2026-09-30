@@ -1210,6 +1210,7 @@ class ChannelManager:
         social_channels: Mapping[str, Any] | None = None,
         social_connections: Mapping[str, SocialConnection] | None = None,
         launch_social_turn: Callable[..., Awaitable[bool]] | None = None,
+        social_followup_scheduler: Any | None = None,
     ) -> None:
         if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency <= 0:
             raise ValueError("max_concurrency must be a positive integer")
@@ -1230,6 +1231,7 @@ class ChannelManager:
         self._social_channels = dict(social_channels or {})
         self._social_connections = dict(social_connections or {})
         self._launch_social_turn = launch_social_turn
+        self._social_followup_scheduler = social_followup_scheduler
         self._require_bound_identity = require_bound_identity
         # Zero-arg accessor for the FastAPI app's StreamBridge singleton,
         # threaded in from app.py's lifespan via start_channel_service() ->
@@ -2177,6 +2179,9 @@ class ChannelManager:
                 snapshot = await repository.restore(envelope.scope)
         if not snapshot.identity_verified:
             return
+        followup_scheduler = resolved.schedule_followup or self._social_followup_scheduler
+        if followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_creator_event"):
+            await followup_scheduler.cancel_for_creator_event(envelope.scope, envelope.source_event_id)
         binding = SocialRuntimeBinding(
             repository,
             envelope.scope,
@@ -2186,6 +2191,7 @@ class ChannelManager:
             resolved.channel_safe_tool_names,
             creator_evidence=resolved.creator_evidence,
             conversation_goal=resolved.conversation_goal,
+            schedule_followup=getattr(resolved.schedule_followup or self._social_followup_scheduler, "schedule", resolved.schedule_followup or self._social_followup_scheduler),
         )
         action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
         if action is not None and action.state != "pending":
