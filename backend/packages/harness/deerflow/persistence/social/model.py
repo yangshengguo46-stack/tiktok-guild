@@ -127,6 +127,8 @@ class SocialSnapshot:
     effective_persona: EffectivePersona | None = None
     evaluated_persona_evidence_version: int = 0
     persona_evaluation: dict | None = None
+    conversation_stage: str = "first_contact"
+    conversation_plan: dict | None = None
 
 
 @dataclass(frozen=True)

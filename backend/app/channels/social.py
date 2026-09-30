@@ -65,6 +65,8 @@ class SocialConnection:
     chat_id: str
     channel_safe_tool_names: frozenset[str] = frozenset()
     identity_verified: bool = False
+    creator_evidence: tuple = ()
+    conversation_goal: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -75,6 +77,8 @@ class SocialConnection:
             bounded_text(getattr(self, name), name, 128)
         if not isinstance(self.channel_safe_tool_names, frozenset) or any(not isinstance(name, str) or not name for name in self.channel_safe_tool_names):
             raise ValueError("channel-safe tools must be a host-owned frozenset")
+        if not isinstance(self.creator_evidence, tuple):
+            raise ValueError("creator_evidence must be a host-owned tuple")
 
 
 @dataclass(frozen=True)

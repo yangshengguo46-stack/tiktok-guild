@@ -15,6 +15,7 @@ from deerflow.runtime.journal import RunJournal
 from deerflow.runtime.private_model import private_model_callbacks, private_model_copy
 from deerflow.social.context import RelationshipMemoryItem, RelationshipSnapshot, SelfMemoryItem, SocialContextSnapshot, TurnContext
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_text
+from deerflow.social.intelligence import ConversationPlan, ConversationStage, build_snapshot, plan_conversation
 from deerflow.social.middleware import SocialContextMiddleware
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
@@ -47,6 +48,8 @@ class SocialRuntimeBinding:
     event_id: str
     channel_safe_tool_names: frozenset[str] = frozenset()
     selector: Any = None
+    creator_evidence: tuple = ()
+    conversation_goal: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -54,6 +57,14 @@ class SocialRuntimeBinding:
         bounded_text(self.event_id, "event_id", 128)
         if not isinstance(self.channel_safe_tool_names, frozenset) or any(not isinstance(name, str) or not name for name in self.channel_safe_tool_names):
             raise ValueError("channel-safe tools must be a host-owned frozenset")
+        if not isinstance(self.creator_evidence, tuple):
+            raise ValueError("creator_evidence must be a host-owned tuple")
+        from deerflow.social.intelligence import CreatorEvidence
+
+        if any(not isinstance(item, CreatorEvidence) or item.scope != self.scope for item in self.creator_evidence):
+            raise ValueError("creator_evidence must contain scoped CreatorEvidence values")
+        if self.conversation_goal is not None:
+            bounded_text(self.conversation_goal, "conversation_goal", 512)
 
 
 def binding_for_lead(config, *, user_id):
@@ -117,6 +128,14 @@ class SocialRuntime:
                 snapshot = current
         self.snapshot = snapshot
         claims = tuple(ClaimPatch("assert", row["claim_id"], tuple(row["evidence_ids"]), row["text"], row["kind"], row["facet"]) for row in snapshot.claims if row["status"] == "active")
+        conversation_plan: ConversationPlan | None = None
+        if self.binding.creator_evidence:
+            intelligence = build_snapshot(self.binding.scope, self.binding.creator_evidence, snapshot.revision)
+            try:
+                stage = ConversationStage(snapshot.conversation_stage)
+            except (AttributeError, ValueError):
+                stage = ConversationStage.first_contact
+            conversation_plan = plan_conversation(intelligence, stage=stage, goal=self.binding.conversation_goal)
         self.context = SocialContextSnapshot(
             self.binding.scope,
             self.binding.identity,
@@ -136,6 +155,7 @@ class SocialRuntime:
             ),
             snapshot.effective_persona,
             TurnContext(event["source_event_id"], event["text"][:4096], tuple(row["text"][:512] for row in snapshot.events[-9:] if row["source_event_id"] != event["source_event_id"]), (), {}, source_ref=event["source_ref"]),
+            conversation_plan,
         )
         return self.context
 

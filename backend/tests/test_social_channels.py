@@ -466,6 +466,17 @@ async def test_social_intentional_and_failed_silence_has_no_bus_or_provider_outp
 
 
 @pytest.mark.asyncio
+async def test_conversation_stage_is_host_only_and_requires_verified_receipt(repository):
+    from deerflow.social.intelligence import ConversationStage
+
+    snapshot = await repository.restore(SCOPE)
+    with pytest.raises(ValueError, match="verified consent"):
+        await repository.advance_conversation_stage(SCOPE, expected_revision=snapshot.revision, target_stage=ConversationStage.formal_invite.value, evidence_ids=(REF,), reason="draft")
+    with pytest.raises(ValueError):
+        await repository.advance_conversation_stage(SCOPE, expected_revision=snapshot.revision, target_stage=ConversationStage.signed.value, evidence_ids=(REF,), reason="model confidence")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state,want", [("accepted", "accepted"), ("delivered", "delivered"), ("rejected", "failed"), ("unknown", "unknown")])
 async def test_social_publish_once_after_commit_records_only_provider_evidence(repository, tmp_path, state, want):
     fixture = await channel_fixture(repository, tmp_path, result=state)

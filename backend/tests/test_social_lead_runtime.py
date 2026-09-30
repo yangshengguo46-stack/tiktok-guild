@@ -3,8 +3,10 @@
 import asyncio
 import importlib.util
 import json
+import re
 import sys
 from dataclasses import asdict, replace
+from datetime import UTC, datetime, timedelta
 from html import unescape
 from typing import Any
 
@@ -24,6 +26,7 @@ from deerflow.persistence.base import Base
 from deerflow.persistence.creator_agent_relationship.model import CreatorAgentRelationshipRow
 from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemoryChange, SocialRepository
 from deerflow.social.contracts import IdentityProfile, RoleProfile, SocialScope, TurnResult
+from deerflow.social.intelligence import ConversationStage, CreatorEvidence
 from deerflow.social.persona.models import ProfileScope
 from deerflow.social.persona.selector import AutomaticPersonaSelector
 
@@ -95,6 +98,35 @@ async def assembly(monkeypatch, repo, model, *, tools=(), binding_changes=None, 
     # Assembly may read catalogs/configuration; generation and SQL remain async.
     assembled = await asyncio.to_thread(lead.assemble_lead_agent, config, app_config=app)
     return assembled.graph, config
+
+
+@pytest.mark.asyncio
+async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evidence(monkeypatch, repo):
+    runtime = api()
+    now = datetime.now(UTC)
+    binding = runtime.SocialRuntimeBinding(
+        repository=repo,
+        scope=SCOPE,
+        identity=IDENTITY,
+        role=ROLE,
+        event_id="e1",
+        creator_evidence=(
+            CreatorEvidence(SCOPE, "work-current", "tikhub", "video:1", now, None, 0.9, "content", "A current work"),
+            CreatorEvidence(SCOPE, "work-old", "tikhub", "video:old", now - timedelta(days=2), now - timedelta(days=1), 0.9, "content", "Expired work"),
+        ),
+        conversation_goal="grow live audience",
+    )
+    social_runtime = runtime.SocialRuntime(binding)
+    context = await social_runtime.restore_context()
+    assert context.conversation_plan is not None
+    assert context.conversation_plan.stage == ConversationStage.first_contact
+    assert "work-current" in context.conversation_plan.opening_candidates[0]["evidence_ids"]
+    assert "work-old" not in repr(context.conversation_plan)
+    from deerflow.social.context import build_social_context_data
+
+    rendered = build_social_context_data(context)
+    encoded = json.loads(unescape(re.search(r"<social-runtime-data>\n(.*)\n</social-runtime-data>", rendered, re.S).group(1)))
+    assert "conversation_plan" in encoded and len(rendered) <= 10000
 
 
 def install_host_journal(config, journal):

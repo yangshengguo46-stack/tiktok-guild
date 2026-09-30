@@ -2177,7 +2177,16 @@ class ChannelManager:
                 snapshot = await repository.restore(envelope.scope)
         if not snapshot.identity_verified:
             return
-        binding = SocialRuntimeBinding(repository, envelope.scope, resolved.identity, resolved.role, envelope.source_event_id, resolved.channel_safe_tool_names)
+        binding = SocialRuntimeBinding(
+            repository,
+            envelope.scope,
+            resolved.identity,
+            resolved.role,
+            envelope.source_event_id,
+            resolved.channel_safe_tool_names,
+            creator_evidence=resolved.creator_evidence,
+            conversation_goal=resolved.conversation_goal,
+        )
         action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
         if action is not None and action.state != "pending":
             return

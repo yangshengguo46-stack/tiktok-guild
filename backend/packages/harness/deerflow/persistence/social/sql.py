@@ -340,6 +340,53 @@ class SocialRepository:
             await _save(session, scope, {**_projection(snapshot), **{key: value[key] for key in ("identity_verified", "human_takeover", "do_not_contact")}, "revision": expected_revision + 1, "boundary_history": history})
             return await self._snapshot(session, scope)
 
+    async def advance_conversation_stage(self, scope: SocialScope, *, expected_revision: int, target_stage: str, evidence_ids: tuple[str, ...], reason: str) -> SocialSnapshot:
+        """Advance the host-owned sales stage with CAS and provider evidence."""
+        from deerflow.social.intelligence import ConversationStage
+
+        try:
+            target = ConversationStage(target_stage)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid conversation stage") from exc
+        bounded_refs(evidence_ids, "evidence_ids", minimum=1, maximum=16)
+        bounded_text(reason, "reason", 512)
+        stages = (
+            ConversationStage.first_contact,
+            ConversationStage.rapport,
+            ConversationStage.discovery,
+            ConversationStage.value_fit,
+            ConversationStage.objection_handling,
+            ConversationStage.permission_to_invite,
+            ConversationStage.formal_invite,
+            ConversationStage.application,
+            ConversationStage.signed,
+        )
+        order = {stage: index for index, stage in enumerate(stages)}
+        async with self._write(scope) as session:
+            snapshot = await self._snapshot(session, scope)
+            _check_revision(snapshot.revision, expected_revision, snapshot)
+            try:
+                current = ConversationStage(snapshot.conversation_stage)
+            except ValueError:
+                current = ConversationStage.first_contact
+            known_refs = {event["source_ref"] for event in snapshot.events}
+            known_refs.update(ref for action in snapshot.outbound for ref in action.evidence_ids)
+            if not set(evidence_ids) <= known_refs:
+                raise ValueError("stage evidence must belong to this channel scope")
+            if target in {ConversationStage.formal_invite, ConversationStage.application, ConversationStage.signed} and snapshot.receipt_state not in {"known", "accepted", "delivered"}:
+                raise ValueError("formal sales stages require verified consent or receipt evidence")
+            if target not in {ConversationStage.paused, ConversationStage.human_takeover} and current in order and target in order:
+                next_stage = tuple(order)[min(order[current] + 1, len(order) - 1)]
+                if target not in {current, next_stage}:
+                    raise ValueError("conversation stage transition is not monotonic")
+            projection = _projection(snapshot)
+            projection.update({"conversation_stage": target.value, "conversation_plan": None, "revision": expected_revision + 1})
+            history = list(projection.get("boundary_history", ()))
+            history.append({"conversation_stage": target.value, "evidence_ids": list(evidence_ids), "reason": reason, "revision": expected_revision + 1})
+            projection["boundary_history"] = history
+            await _save(session, scope, projection)
+            return await self._snapshot(session, scope)
+
     async def commit_turn(
         self,
         scope: SocialScope,

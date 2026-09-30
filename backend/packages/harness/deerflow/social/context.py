@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_refs, bounded_text
+from deerflow.social.intelligence import ConversationPlan
 from deerflow.social.persona.models import EffectivePersona
 
 _LIST_LIMIT = 8
@@ -118,6 +119,7 @@ class SocialContextSnapshot:
     relationship: RelationshipSnapshot
     effective_persona: EffectivePersona
     turn: TurnContext
+    conversation_plan: ConversationPlan | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -126,6 +128,8 @@ class SocialContextSnapshot:
             raise ValueError("social context requires immutable snapshots")
         if any(not isinstance(item, SelfMemoryItem) for item in self.self_memory):
             raise ValueError("self_memory must contain SelfMemoryItem values")
+        if self.conversation_plan is not None and not isinstance(self.conversation_plan, ConversationPlan):
+            raise ValueError("conversation_plan must be a ConversationPlan")
 
 
 def _safe(value: str, limit: int = 256) -> str:
@@ -187,6 +191,16 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
             "temporary_style": {key[:64]: value[:256] for key, value in list(turn.temporary_style.items())[:_LIST_LIMIT]},
         },
     }
+    if snapshot.conversation_plan is not None:
+        plan = snapshot.conversation_plan
+        payload["conversation_plan"] = {
+            "stage": plan.stage.value,
+            "opening_candidates": [{"text": item["text"][:512], "evidence_ids": tuple(item["evidence_ids"][:8])} for item in plan.opening_candidates[:3]],
+            "current_objective": plan.turns[0]["objective"][:512],
+            "evidence_ids": tuple(plan.turns[0]["allowed_evidence_ids"][:64]),
+            "stop_conditions": tuple(plan.stop_conditions[:16]),
+            "estimate": dict(plan.estimate),
+        }
     removable_lists = [
         payload["turn"]["prior_messages"],
         payload["relationship"]["claims"],
