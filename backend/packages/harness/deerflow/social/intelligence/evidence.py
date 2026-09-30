@@ -35,10 +35,10 @@ class CreatorEvidence:
     def __post_init__(self) -> None:
         if not isinstance(self.scope, SocialScope):
             raise ValueError("scope must be a SocialScope")
-        bounded_text(self.evidence_id, "evidence_id", 256)
+        bounded_text(self.evidence_id, "evidence_id", 128)
         if self.source_kind not in _SOURCE_KINDS:
             raise ValueError("source_kind is not allowed")
-        bounded_text(self.source_ref, "source_ref", 512)
+        bounded_text(self.source_ref, "source_ref", 128)
         _utc(self.captured_at, "captured_at")
         if self.expires_at is not None:
             _utc(self.expires_at, "expires_at")

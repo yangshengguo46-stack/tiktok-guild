@@ -80,6 +80,10 @@ class SocialConnection:
             raise ValueError("channel-safe tools must be a host-owned frozenset")
         if not isinstance(self.creator_evidence, tuple):
             raise ValueError("creator_evidence must be a host-owned tuple")
+        from deerflow.social.intelligence import CreatorEvidence
+
+        if any(not isinstance(item, CreatorEvidence) or item.scope != self.scope for item in self.creator_evidence):
+            raise ValueError("creator_evidence must contain scoped CreatorEvidence values")
 
 
 @dataclass(frozen=True)

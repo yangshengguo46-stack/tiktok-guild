@@ -89,7 +89,7 @@ git commit -m "feat: add evidence-backed creator conversation planner"
 - `MemoryCandidate(op, memory_id, category, evidence_ids, text=None)` lives in `social.contracts`; it validates the same four categories and bounds as `SelfMemoryChange` without importing persistence.
 - `TurnResult` gains `memory_delta: tuple[MemoryCandidate, ...] = ()` after `followup`; existing positional calls remain valid.
 - `parse_turn_result` accepts only the additional top-level field `memory_delta`, parses at most 16 candidates, and rejects unknown fields, empty evidence, or duplicate IDs.
-- `commit_turn(repository, snapshot, *, event_id, result)` converts `result.memory_delta` to host-owned `SelfMemoryChange` and passes it to the existing atomic `SocialRepository.commit_turn` call.
+- `commit_turn(repository, snapshot, *, event_id, result)` converts `result.memory_delta` to host-owned `SelfMemoryChange` and passes it to the existing atomic `SocialRepository.commit_turn` call. The native runtime also passes the host-validated current creator evidence IDs/source refs so a memory may cite a TikHub/work record without admitting arbitrary model refs.
 - `TURN_OUTPUT_PROMPT` documents `memory_delta` as optional, evidence-backed, and never authoritative for identity, boundaries, or platform receipts.
 
 - [ ] **Step 1: Write failing parser and commit tests**
@@ -141,7 +141,7 @@ git commit -m "feat: persist evidence-backed social memory candidates"
 - `SocialContextSnapshot` gains optional `conversation_plan: ConversationPlan | None = None` after existing fields, preserving existing positional constructors.
 - `build_social_context_data` serializes a bounded `conversation_plan` block with stage, opening candidates, current objective, evidence IDs, stop conditions, and estimate; it must not include raw provider payloads.
 - `SocialRepository` projection stores `conversation_stage` and `conversation_plan` as JSON in the existing snapshot column; restore returns them and `commit_turn` preserves them.
-- `advance_conversation_stage(scope, *, expected_revision, target_stage, evidence_ids, reason)` is host-only, validates monotonic/allowed transitions, and refuses `formal_invite`, `application`, or `signed` unless the required consent/receipt evidence is present.
+- `advance_conversation_stage(scope, *, expected_revision, target_stage, evidence_ids, reason)` is host-only, validates monotonic/allowed transitions, and refuses `formal_invite`, `application`, or `signed` unless the required consent/receipt evidence is present. Application/signing evidence must be a receipt from an outbound action after the current formal-invite/application anchor; an unrelated earlier accepted action cannot satisfy the gate.
 
 - [ ] **Step 1: Write failing context and stage tests**
 
@@ -180,7 +180,7 @@ git commit -m "feat: inject creator intelligence and sales stages"
 - Test: `backend/tests/test_social_channels.py`
 
 **Interfaces:**
-- `SocialFollowupScheduler.schedule(scope, *, thread_id, followup, expected_revision, cancel_event_id) -> str` creates a native one-time scheduled task with owner, thread, prompt, and `scheduled_task_id` metadata; duplicate `(scope, expected_revision)` requests return the existing task ID.
+- `SocialFollowupScheduler.schedule(scope, *, thread_id, followup, expected_revision, cancel_event_id) -> str` creates a native one-time scheduled task with owner, thread, prompt, and `scheduled_task_id` metadata; duplicate `(scope, expected_revision)` requests return the existing task ID. Gateway wiring supplies a social revision reader before and after insertion; a creator event racing the insertion fences and cancels the stale task.
 - `SocialFollowupScheduler.cancel_for_creator_event(scope, event_id)` cancels queued/launching occurrences through `ScheduledTaskRepository`, never cancels a running run, and records a host-owned cancellation reason.
 - `SocialRuntimeBinding` gains optional `schedule_followup` callback, supplied only by Gateway/ChannelManager host wiring. Tests may omit it; in that case the followup remains durable but is not dispatched.
 - `SocialTurnMiddleware` invokes the callback only after the social commit succeeds, and only when the snapshot is not blocked and the followup has a valid future `not_before` or an explicit scheduler default.

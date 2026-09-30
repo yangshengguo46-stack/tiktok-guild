@@ -63,10 +63,10 @@ cd backend
 
 ## 尚未实现的业务连接
 
-本轮同时确认：`SelfMemoryChange` 仅由测试预埋，生产 turn 没有填充仓库的
-`memory_changes`；保存的 followup 尚无调度消费者，也没有进入下一轮社交上下文。
-这些属于待实现连接，不能仅归为“真实效果待验证”。本次没有另建记忆账本、调度服务
-或臆造承诺/回执协议。
+本轮同时确认：生产 turn 现在会把带当前主播证据引用的 `memory_delta` 交给原生 CAS
+提交；保存的 followup 通过原生调度器入队，若入队事务失败会留下可重试标记，并可在
+后续 host reconciliation 中恢复。真实 TikTok provider、身份授权、回执、申请/签约和
+客户安装仍未验证。本次没有另建记忆账本、调度服务或臆造承诺/回执协议。
 
 ### Creator Intelligence 离线评估边界
 
