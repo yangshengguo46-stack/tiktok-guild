@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
@@ -43,6 +44,18 @@ async def bound(repo, channel="ios"):
     for task in tasks:
         await repo.update_action_payload("owner", task["task_id"], {"comment": "hello", "message": "hello"})
     return tasks
+
+
+@pytest.fixture
+def web_proxy_server():
+    # The fake Chromium never uses this socket; it verifies the real preflight's TCP gate.
+    endpoint = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    endpoint.bind(("127.0.0.1", 0))
+    endpoint.listen(16)
+    try:
+        yield f"http://127.0.0.1:{endpoint.getsockname()[1]}"
+    finally:
+        endpoint.close()
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -178,6 +191,102 @@ async def test_default_gate_never_starts_executor_or_claims_native_task(repo, tm
     assert (await service.execute_task("owner", tasks[0]["task_id"]))["error_code"] == "pilot_required"
     assert transport.process is None
     assert (await repo.read_action_task(tasks[0]["task_id"]))["attempt_count"] == 0
+
+
+class PreparedWebTransport:
+    def __init__(self, *, ready=True):
+        self.ready = ready
+        self.events = []
+
+    async def prepare_web(self, **request):
+        self.events.append(("prepare", request["account"]["sender_account_id"]))
+        if not self.ready:
+            return {"ready": False, "error_code": "egress_country_mismatch"}
+        return {"ready": True, "preparation_id": "prepared-once", "observed_country": "US"}
+
+    async def execute(self, **request):
+        self.events.append(("execute", request.get("preparation_id")))
+        return {
+            "verified": True,
+            "provider_ref": "web-readback-like-1",
+            "verification_source": "provider_readback",
+            "receipt_payload": {
+                "receipt_type": "public_action_receipt",
+                "action": request["action"],
+                "sender_account_id": request["account"]["sender_account_id"],
+                "creator_uid": request["creator"]["creator_uid"],
+                "evidence": ["synthetic-provider-readback"],
+            },
+        }
+
+    async def release_web(self, **request):
+        self.events.append(("release", request["preparation_id"]))
+        return {"released": True}
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_web_network_failure_blocks_before_native_claim_or_external_attempt(repo):
+    tasks = await bound(repo, channel="web")
+    transport = PreparedWebTransport(ready=False)
+    service = PublicOutreachService(repo, transport, config=config("http://127.0.0.1:1"))
+    result = await service.execute_task("owner", tasks[0]["task_id"])
+    assert result["status"] == "blocked"
+    assert result["error_code"] == "egress_country_mismatch"
+    current = await repo.read_action_task(tasks[0]["task_id"])
+    assert current["state"] == "pending"
+    assert current["attempt_count"] == 0
+    assert transport.events == [("prepare", "sender")]
+
+
+@pytest.mark.asyncio
+async def test_web_action_uses_prepared_browser_and_releases_it_after_native_result(repo):
+    tasks = await bound(repo, channel="web")
+    transport = PreparedWebTransport()
+    service = PublicOutreachService(repo, transport, config=config("http://127.0.0.1:1"))
+    result = await service.execute_task("owner", tasks[0]["task_id"])
+    assert result["task"]["state"] == "completed"
+    assert transport.events == [("prepare", "sender"), ("execute", "prepared-once"), ("release", "prepared-once")]
+
+
+@pytest.mark.asyncio
+async def test_explicit_network_preflight_releases_browser_and_checks_owner(repo):
+    await bound(repo, channel="web")
+    transport = PreparedWebTransport()
+    service = PublicOutreachService(repo, transport, config=config("http://127.0.0.1:1"))
+    with pytest.raises(ValueError, match="not found"):
+        await service.preflight_web_account("other", "sender")
+    result = await service.preflight_web_account("owner", "sender")
+    assert result == {"ready": True, "observed_country": "US"}
+    assert transport.events == [("prepare", "sender"), ("release", "prepared-once")]
+
+
+@pytest.mark.asyncio
+async def test_prepared_browser_is_released_when_native_workflow_returns_before_action(repo, monkeypatch):
+    tasks = await bound(repo, channel="web")
+    transport = PreparedWebTransport()
+    service = PublicOutreachService(repo, transport, config=config("http://127.0.0.1:1"))
+
+    async def return_before_claim(self, task_id, *, creator):
+        return {"status": "blocked", "error_code": "sender_paused", "task": await repo.read_action_task(task_id)}
+
+    monkeypatch.setattr(PublicOutreachWorkflow, "execute_task", return_before_claim)
+    result = await service.execute_task("owner", tasks[0]["task_id"])
+    assert result["status"] == "blocked"
+    assert transport.events == [("prepare", "sender"), ("release", "prepared-once")]
+    assert (await repo.read_action_task(tasks[0]["task_id"]))["attempt_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_ios_action_does_not_prepare_web_browser(repo):
+    tasks = await bound(repo, channel="ios")
+    transport = PreparedWebTransport()
+    service = PublicOutreachService(repo, transport, config=config("http://127.0.0.1:1"))
+    result = await service.execute_task("owner", tasks[0]["task_id"])
+    assert result["task"]["state"] == "completed"
+    assert transport.events == [("execute", None)]
 
 
 @pytest.mark.asyncio
@@ -385,10 +494,10 @@ async def test_mcp_pooled_stdio_credentials_follow_runtime_identity_not_config(t
 
 
 @pytest.mark.asyncio
-async def test_native_web_sequence_uses_shipped_node_composition_and_method_shaped_chromium(repo, tmp_path):
+async def test_native_web_sequence_uses_shipped_node_composition_and_method_shaped_chromium(repo, tmp_path, web_proxy_server):
     tasks = await bound(repo, "web")
     configuration = config("http://127.0.0.1:1")
-    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web"}
+    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web", "web_route": {"proxy_server": web_proxy_server, "expected_country": "US"}}
     source = tmp_path / "web-config.json"
     source.write_text(json.dumps(configuration))
     worker = ROOT / "ops/guild-runtime/public-outreach-operator/fixtures/web-worker.mjs"
@@ -617,10 +726,10 @@ asyncio.run(main())
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["follow", "message"])
-async def test_reviewer_web_worker_final_action_cancel_after_commit_has_advanced_native_claim(repo, tmp_path, monkeypatch, action):
+async def test_reviewer_web_worker_final_action_cancel_after_commit_has_advanced_native_claim(repo, tmp_path, monkeypatch, action, web_proxy_server):
     tasks = await bound(repo, "web")
     configuration = config("http://127.0.0.1:1")
-    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web"}
+    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web", "web_route": {"proxy_server": web_proxy_server, "expected_country": "US"}}
     source = tmp_path / "web-config.json"
     source.write_text(json.dumps(configuration))
     worker = ROOT / "ops/guild-runtime/public-outreach-operator/fixtures/web-worker.mjs"

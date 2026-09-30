@@ -19,7 +19,11 @@ function page() {
     controls[`${action}Input`] = element({}, action);
     controls[`${action}Submit`] = element({}, '', async () => receipts[action].push(element({ 'data-receipt-id': `new-${action}`, 'data-sender-handle': '@alice', 'data-creator-uid': 'creator' }, values[action])));
   }
-  return { async goto(url) { if (url !== 'https://www.tiktok.com/') throw Error('untrusted navigation'); opened = true; }, async close() {},
+  return { async goto(url) {
+      if (url === 'https://www.cloudflare.com/cdn-cgi/trace') return { status: () => 200, text: async () => 'ip=203.0.113.10\nloc=US\n' };
+      if (url !== 'https://www.tiktok.com/') throw Error('untrusted navigation');
+      opened = true;
+    }, async close() {},
     locator(selector) { const key = Object.keys(PILOT_LOCATORS).find((name) => PILOT_LOCATORS[name] === selector);
       const elements = key?.endsWith('Receipt') ? receipts[key.slice(0,-7)] : controls[key] ? [controls[key]] : [];
       const missing = { isVisible: async () => false };

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 from pathlib import Path
@@ -12,6 +13,8 @@ from uuid import uuid4
 
 from deerflow.creator_agent.public_outreach import PublicOutreachWorkflow
 from deerflow.persistence.creator_agent_relationship import CreatorOutreachRepository
+
+logger = logging.getLogger(__name__)
 
 
 class NodeExecutorTransport:
@@ -31,9 +34,19 @@ class NodeExecutorTransport:
         self._lock = asyncio.Lock()
 
     async def execute(self, **request: Any) -> dict[str, Any]:
+        return await self._request("execute", **request)
+
+    async def prepare_web(self, *, account: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("prepare_web", account=account)
+
+    async def release_web(self, *, preparation_id: str) -> dict[str, Any]:
+        return await self._request("release_web", preparation_id=preparation_id)
+
+    async def _request(self, operation: str, **request: Any) -> dict[str, Any]:
+        failure_key = "verified" if operation == "execute" else "ready" if operation == "prepare_web" else "released"
         async with self._lock:
             if self.config_path is None:
-                return {"verified": False, "error_code": "pilot_required"}
+                return {failure_key: False, "error_code": "pilot_required"}
             if self.process is None:
                 self.process = await asyncio.create_subprocess_exec(
                     self.node,
@@ -52,7 +65,7 @@ class NodeExecutorTransport:
                 assert process.stdin is not None and process.stdout is not None
                 # Cancellation is process-owned and never serialized as model data.
                 request.pop("signal", None)
-                process.stdin.write((json.dumps({"id": request_id, **request}) + "\n").encode())
+                process.stdin.write((json.dumps({"id": request_id, "operation": operation, **request}) + "\n").encode())
                 await process.stdin.drain()
                 line = await asyncio.wait_for(process.stdout.readline(), self.timeout_seconds)
                 if not line:
@@ -66,10 +79,10 @@ class NodeExecutorTransport:
                 raise
             except TimeoutError:
                 await self.close()
-                return {"verified": False, "error_code": "timeout", "message": "Executor result is unknown; manual review is required."}
+                return {failure_key: False, "error_code": "timeout", "message": "Executor result is unknown; manual review is required."}
             except Exception:
                 await self.close()
-                return {"verified": False, "error_code": "operator_unavailable", "message": "Executor result is unknown; manual review is required."}
+                return {failure_key: False, "error_code": "operator_unavailable", "message": "Executor result is unknown; manual review is required."}
 
     async def close(self) -> None:
         process = self.process
@@ -180,17 +193,42 @@ class PublicOutreachService:
         if sender is None:
             raise ValueError("Registered sender not found")
 
+        account = {key: sender.get(key) for key in ("owner_user_id", "sender_account_id", "external_ref", "channel", "device_ref")}
+        preparation_id: str | None = None
+
         async def callback(**kwargs):
-            kwargs["account"] = {key: sender.get(key) for key in ("owner_user_id", "sender_account_id", "external_ref", "channel", "device_ref")}
+            kwargs["account"] = account
             kwargs["payload"] = {key: (task.get("payload_json") or {}).get(key) for key in ("comment", "message")}
+            if preparation_id is not None:
+                kwargs["preparation_id"] = preparation_id
             return await self.transport.execute(**kwargs)
 
         workflow = PublicOutreachWorkflow(self.repository, web_operator=callback, ios_operator=callback, lease_seconds=300)
 
         async def run_native():
+            nonlocal preparation_id
             # Waiting for a serialized transport never consumes a native lease.
             async with self._dispatch_lock:
-                return await workflow.execute_task(task_id, creator=creator)
+                if sender["channel"] == "web":
+                    try:
+                        preparation = await self.transport.prepare_web(account=account)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("Web account preparation failed before native task claim")
+                        preparation = {"ready": False, "error_code": "operator_unavailable"}
+                    if preparation.get("ready") is not True or not isinstance(preparation.get("preparation_id"), str):
+                        return {"status": "blocked", "error_code": preparation.get("error_code") or "operator_unavailable", "task": task}
+                    preparation_id = preparation["preparation_id"]
+                try:
+                    return await workflow.execute_task(task_id, creator=creator)
+                finally:
+                    if preparation_id is not None:
+                        try:
+                            await self.transport.release_web(preparation_id=preparation_id)
+                        except Exception:
+                            # The worker owns its cleanup fence. A cleanup error cannot rewrite a native receipt.
+                            logger.exception("Prepared Web browser release failed")
 
         execution = asyncio.create_task(run_native(), name=f"outreach:{task_id}")
         self._active[task_id] = execution
@@ -212,6 +250,32 @@ class PublicOutreachService:
         if execution is not None:
             execution.cancel()
             await asyncio.gather(execution, return_exceptions=True)
+
+    async def preflight_web_account(self, owner_user_id: str, sender_account_id: str) -> dict[str, Any]:
+        sender = await self.repository.read_sender_account(owner_user_id, sender_account_id)
+        if sender is None:
+            raise ValueError("Sender account not found")
+        if sender["channel"] != "web":
+            raise ValueError("Sender account is not Web")
+        account = {key: sender.get(key) for key in ("owner_user_id", "sender_account_id", "external_ref", "channel", "device_ref")}
+        async with self._dispatch_lock:
+            try:
+                preparation = await self.transport.prepare_web(account=account)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Explicit Web network preflight failed")
+                return {"ready": False, "error_code": "operator_unavailable"}
+            if preparation.get("ready") is not True or not isinstance(preparation.get("preparation_id"), str):
+                return {"ready": False, "error_code": preparation.get("error_code") or "operator_unavailable"}
+            try:
+                result = await self.transport.release_web(preparation_id=preparation["preparation_id"])
+            except Exception:
+                logger.exception("Explicit Web network preflight cleanup failed")
+                return {"ready": False, "error_code": "browser_cleanup_failed"}
+            if result.get("released") is not True:
+                return {"ready": False, "error_code": result.get("error_code") or "browser_cleanup_failed"}
+            return {"ready": True, "observed_country": preparation.get("observed_country")}
 
     async def cancel_account(self, owner: str, sender_account_id: str) -> None:
         for task_id in list(self._active):

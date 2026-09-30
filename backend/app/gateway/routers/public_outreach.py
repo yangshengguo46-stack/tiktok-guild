@@ -422,6 +422,20 @@ async def retry_outreach_task(task_id: str, request: Request, body: RetryTaskReq
     return _task_response(refreshed, receipts, model)
 
 
+@router.post("/accounts/{sender_account_id}/network-preflight")
+@require_permission("threads", "write")
+async def preflight_outreach_account_network(sender_account_id: str, request: Request) -> dict[str, Any]:
+    await _require_outreach_admin(request)
+    operator = _operator(request)
+    owner_user_id = await _user_id(request)
+    try:
+        return await operator.preflight_web_account(owner_user_id, sender_account_id)
+    except ValueError as exc:
+        if str(exc) == "Sender account not found":
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/accounts/{sender_account_id}/pause")
 @require_permission("threads", "write")
 async def pause_outreach_account(sender_account_id: str, request: Request, body: ManualReasonRequest) -> dict[str, Any]:

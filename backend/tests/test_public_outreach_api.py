@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.gateway.auth_disabled import AUTH_SOURCE_AUTH_DISABLED
+from app.gateway.public_outreach_service import PublicOutreachService
 from app.gateway.routers.public_outreach import (
     CloseSequenceRequest,
     CreateOutreachTaskRequest,
@@ -18,6 +19,7 @@ from app.gateway.routers.public_outreach import (
     get_outreach_task,
     list_outreach_accounts,
     mark_provider_unknown,
+    preflight_outreach_account_network,
     retry_outreach_task,
 )
 from deerflow.persistence.base import Base
@@ -316,6 +318,39 @@ async def test_admin_boundary_is_retained_on_management_writes(repo):
             non_admin,
         )
     assert getattr(error.value, "status_code", None) == 403
+
+
+@pytest.mark.asyncio
+async def test_network_preflight_route_is_admin_only_and_owner_scoped(repo):
+    await _bound(repo)
+
+    class Transport:
+        def __init__(self):
+            self.events = []
+
+        async def execute(self, **request):
+            raise AssertionError("Network preflight must not execute an action")
+
+        async def prepare_web(self, *, account):
+            self.events.append(("prepare", account["sender_account_id"]))
+            return {"ready": True, "preparation_id": "one", "observed_country": "US"}
+
+        async def release_web(self, *, preparation_id):
+            self.events.append(("release", preparation_id))
+            return {"released": True}
+
+    transport = Transport()
+    operator = PublicOutreachService(repo, transport, config={})
+    with pytest.raises(HTTPException) as non_admin:
+        await call_unwrapped(preflight_outreach_account_network, "web-1", _Request(repo, admin=False, operator=operator))
+    assert non_admin.value.status_code == 403
+    with pytest.raises(HTTPException) as other_owner:
+        await call_unwrapped(preflight_outreach_account_network, "web-1", _Request(repo, owner_user_id="owner-b", operator=operator))
+    assert other_owner.value.status_code == 404
+    assert transport.events == []
+    result = await call_unwrapped(preflight_outreach_account_network, "web-1", _Request(repo, operator=operator))
+    assert result == {"ready": True, "observed_country": "US"}
+    assert transport.events == [("prepare", "web-1"), ("release", "one")]
 
 
 @pytest.mark.asyncio
