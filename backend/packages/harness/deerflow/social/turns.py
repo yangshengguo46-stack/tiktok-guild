@@ -92,7 +92,7 @@ def contact_blocked(snapshot) -> bool:
     return snapshot.identity_verified is not True or snapshot.do_not_contact is not False or snapshot.human_takeover is not False or receipt_status(snapshot) == "unknown"
 
 
-async def commit_turn(repository, snapshot, *, event_id: str, result: TurnResult):
+async def commit_turn(repository, snapshot, *, event_id: str, result: TurnResult, conversation_plan=None):
     """No retry: the repository owns transaction, evidence, fingerprint and CAS."""
     if not isinstance(result, TurnResult):
         raise ValueError("result must be a TurnResult")
@@ -105,4 +105,5 @@ async def commit_turn(repository, snapshot, *, event_id: str, result: TurnResult
         memory_changes=memory_changes,
         persona_fingerprint=snapshot.effective_persona.fingerprint,
         enforce_contact_boundaries=True,
+        conversation_plan=conversation_plan.to_payload() if conversation_plan is not None else None,
     )

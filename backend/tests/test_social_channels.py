@@ -475,6 +475,10 @@ async def test_conversation_stage_is_host_only_and_requires_verified_receipt(rep
     with pytest.raises(ValueError):
         await repository.advance_conversation_stage(SCOPE, expected_revision=snapshot.revision, target_stage=ConversationStage.signed.value, evidence_ids=(REF,), reason="model confidence")
 
+    moved = await repository.advance_conversation_stage(SCOPE, expected_revision=snapshot.revision, target_stage=ConversationStage.rapport.value, evidence_ids=(REF,), reason="creator replied")
+    with pytest.raises(ValueError, match="formal sales"):
+        await repository.advance_conversation_stage(SCOPE, expected_revision=moved.revision, target_stage=ConversationStage.formal_invite.value, evidence_ids=(REF,), reason="jump")
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state,want", [("accepted", "accepted"), ("delivered", "delivered"), ("rejected", "failed"), ("unknown", "unknown")])

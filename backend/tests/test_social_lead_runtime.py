@@ -127,6 +127,16 @@ async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evid
     rendered = build_social_context_data(context)
     encoded = json.loads(unescape(re.search(r"<social-runtime-data>\n(.*)\n</social-runtime-data>", rendered, re.S).group(1)))
     assert "conversation_plan" in encoded and len(rendered) <= 10000
+    current = await repo.restore(SCOPE)
+    saved = await repo.commit_turn(
+        SCOPE,
+        expected_revision=current.revision,
+        event_id="e1",
+        result=TurnResult(None),
+        persona_fingerprint=current.effective_persona.fingerprint,
+        conversation_plan=context.conversation_plan.to_payload(),
+    )
+    assert saved.snapshot.conversation_plan["stage"] == "first_contact"
 
 
 def install_host_journal(config, journal):

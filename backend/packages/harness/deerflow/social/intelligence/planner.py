@@ -117,6 +117,20 @@ class ConversationPlan:
         bounded_refs(basis, "estimate basis", maximum=16, minimum=1)
         object.__setattr__(self, "estimate", _freeze(dict(self.estimate)))
 
+    def to_payload(self) -> dict:
+        """Bounded JSON projection safe for the social snapshot."""
+        return {
+            "plan_id": self.plan_id,
+            "snapshot_revision": self.snapshot_revision,
+            "stage": self.stage.value,
+            "opening_candidates": [{"text": item["text"], "evidence_ids": list(item["evidence_ids"])} for item in self.opening_candidates],
+            "avoid": list(self.avoid),
+            "turns": [{**turn, "allowed_evidence_ids": list(turn["allowed_evidence_ids"])} for turn in self.turns],
+            "consent_checkpoint": self.consent_checkpoint,
+            "stop_conditions": list(self.stop_conditions),
+            "estimate": dict(self.estimate),
+        }
+
 
 def plan_conversation(snapshot: CreatorIntelligenceSnapshot, *, stage: ConversationStage, relationship_signals=(), goal: str | None = None) -> ConversationPlan:
     if not isinstance(snapshot, CreatorIntelligenceSnapshot) or not isinstance(stage, ConversationStage):

@@ -367,7 +367,7 @@ class SocialRepository:
             _check_revision(snapshot.revision, expected_revision, snapshot)
             try:
                 current = ConversationStage(snapshot.conversation_stage)
-            except ValueError:
+            except (TypeError, ValueError):
                 current = ConversationStage.first_contact
             known_refs = {event["source_ref"] for event in snapshot.events}
             known_refs.update(ref for action in snapshot.outbound for ref in action.evidence_ids)
@@ -375,6 +375,8 @@ class SocialRepository:
                 raise ValueError("stage evidence must belong to this channel scope")
             if target in {ConversationStage.formal_invite, ConversationStage.application, ConversationStage.signed} and snapshot.receipt_state not in {"known", "accepted", "delivered"}:
                 raise ValueError("formal sales stages require verified consent or receipt evidence")
+            if current in {ConversationStage.paused, ConversationStage.human_takeover} and target != current:
+                raise ValueError("paused or human takeover stages are terminal")
             if target not in {ConversationStage.paused, ConversationStage.human_takeover} and current in order and target in order:
                 next_stage = tuple(order)[min(order[current] + 1, len(order) - 1)]
                 if target not in {current, next_stage}:
@@ -398,6 +400,7 @@ class SocialRepository:
         memory_changes: tuple[SelfMemoryChange, ...] = (),
         turn_adjustment: TurnAdjustment | None = None,
         enforce_contact_boundaries: bool = False,
+        conversation_plan: dict | None = None,
     ) -> CommitResult:
         if not isinstance(result, TurnResult):
             raise ValueError("result must be TurnResult")
@@ -409,6 +412,8 @@ class SocialRepository:
             raise ValueError("persona_fingerprint must be a SHA-256 digest")
         if turn_adjustment is not None and not isinstance(turn_adjustment, TurnAdjustment):
             raise ValueError("turn_adjustment must be a host-owned TurnAdjustment")
+        if conversation_plan is not None and not isinstance(conversation_plan, dict):
+            raise ValueError("conversation_plan must be a host-owned JSON projection")
         adjustment_payload = turn_adjustment.to_payload() if turn_adjustment else None
         digest = _digest({"result": asdict(result), "memory_changes": [asdict(item) for item in memory_changes], "persona_fingerprint": persona_fingerprint, "turn_adjustment": adjustment_payload})
         async with self._write(scope) as session:
@@ -448,6 +453,8 @@ class SocialRepository:
                 projection[section] = _patch(projection[section], asdict(change), id_key="memory_id")
             projection["revision"] = expected_revision + 1
             projection["followup"] = asdict(result.followup) if result.followup else None
+            if conversation_plan is not None:
+                projection["conversation_plan"] = deepcopy(conversation_plan)
             action_id = None
             if result.reply is not None:
                 action_id = _digest([scope.owner_user_id, scope.account_id, scope.person_ref, scope.channel_thread_ref, scope.agent_instance_id, event_id])

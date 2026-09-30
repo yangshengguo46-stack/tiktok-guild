@@ -237,7 +237,7 @@ class SocialTurnMiddleware(SocialContextMiddleware):
         runtime.finished = True
         try:
             result = parse_turn_result(private_output_text(message.content))
-            saved = await commit_turn(runtime.repository, runtime.snapshot, event_id=runtime.binding.event_id, result=result)
+            saved = await commit_turn(runtime.repository, runtime.snapshot, event_id=runtime.binding.event_id, result=result, conversation_plan=runtime.context.conversation_plan)
         except (ValueError, TypeError, SocialConflictError):
             runtime.snapshot = await runtime.repository.restore(runtime.binding.scope)
             return ModelResponse(result=[AIMessage(content="")])
