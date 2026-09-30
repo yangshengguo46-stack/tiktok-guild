@@ -20,3 +20,9 @@ Validation:
 - `git diff --check` — clean.
 
 Concerns: provider adapters and live credentials remain intentionally unimplemented; the planner is advisory context and does not authorize delivery or scheduling. The frozen dataclasses protect contract fields while nested plan dictionaries remain ordinary payload mappings for runtime serialization.
+
+## Round-one fixes
+
+Addressed review findings by defensively freezing opening candidates, turn payloads, and estimate mappings with immutable mappings; validating candidate schemas, turn fields, estimate bounds/confidence/basis, and goal length/content before interpolation; and including newest scoped identity/profile observations alongside work observations in bounded opening candidates. Added mutation and validation regression tests.
+
+Round-one validation: focused intelligence tests 9 passed; broader social contract/state/lead/intelligence suite 170 passed; Ruff clean.

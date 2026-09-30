@@ -83,3 +83,35 @@ def test_plan_stage_transitions_and_explicit_consent_gate():
 
 def test_provider_protocol_is_runtime_checkable_by_shape():
     assert hasattr(CreatorEvidenceProvider, "collect")
+
+
+def test_plan_nested_payloads_are_immutable():
+    plan = plan_conversation(build_snapshot(SCOPE, (WORK, PROFILE), revision=3), stage=ConversationStage.discovery)
+    with pytest.raises(TypeError):
+        plan.opening_candidates[0]["text"] = "changed"
+    with pytest.raises(TypeError):
+        plan.turns[0]["objective"] = "changed"
+    with pytest.raises(TypeError):
+        plan.estimate["p50_turns"] = 99
+
+
+def test_plan_validates_candidate_estimate_and_goal_bounds():
+    snapshot = build_snapshot(SCOPE, (WORK, PROFILE), revision=3)
+    with pytest.raises(ValueError):
+        plan_conversation(snapshot, stage=ConversationStage.discovery, goal=" ")
+    with pytest.raises(ValueError):
+        plan_conversation(snapshot, stage=ConversationStage.discovery, goal="x" * 513)
+    with pytest.raises(ValueError):
+        from deerflow.social.intelligence.planner import ConversationPlan
+
+        ConversationPlan(
+            "p",
+            1,
+            ConversationStage.discovery,
+            ({"text": "x", "evidence_ids": ()},),
+            (),
+            ({"objective": "x", "allowed_evidence_ids": (), "success_signal": "x", "next_if_yes": "x", "next_if_no": "x"},),
+            "before_formal_invitation",
+            ("stop",),
+            {"p50_turns": 1, "p80_turns": 2, "confidence": 0.5, "basis": ()},
+        )
