@@ -41,14 +41,14 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     raw = json.loads(path.read_text(encoding="utf-8"))
     scope = SocialScope("fixture-owner", "fixture-account", raw["creator_ref"], "fixture-thread")
     evidence = tuple(CreatorEvidence(scope, item["id"], "operator_note", item["source_id"], datetime.now(UTC), None, item["confidence"], item["kind"], item["text"]) for item in raw["evidence"])
-    intelligence = build_snapshot(scope, evidence, revision=1)
+    _intelligence = build_snapshot(scope, evidence, revision=1)
     first = await repository.record_event(scope, ExternalEvent("turn-1", f"fixture:{raw['creator_ref']}:turn:1", "operator_note", "Synthetic first turn"))
     first = await repository.set_boundaries(scope, expected_revision=first.revision, update=BoundaryUpdate(True, False, False, (f"fixture:{raw['creator_ref']}:turn:1",)))
     identity = IdentityProfile("fixture-ai", "1", "Synthetic AI", "ai_agent", "Synthetic Guild", "Synthetic only", ())
     role = RoleProfile("fixture-role", "1", "Synthetic evaluation", ("conversation",), "fixture")
     first_runtime = SocialRuntime(SocialRuntimeBinding(repository, scope, identity, role, "turn-1", creator_evidence=evidence))
     await first_runtime.restore_context()
-    assert first_runtime.context.conversation_plan.snapshot_revision == intelligence.revision
+    assert first_runtime.context.conversation_plan.snapshot_revision == first.revision
     result = TurnResult(None, memory_delta=(MemoryCandidate("assert", "memory-1", "relationship", (f"fixture:{raw['creator_ref']}:turn:1",), "Accepted synthetic preference"),))
     memory_change = SelfMemoryChange(
         "assert",
