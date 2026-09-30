@@ -19,6 +19,9 @@ class FakeRepository:
     async def create(self, **kwargs):
         self.tasks.append(kwargs | {"id": kwargs["task_id"]})
 
+    async def get_internal(self, task_id):
+        return next((task for task in self.tasks if task["id"] == task_id), None)
+
     async def get_active_run_status(self, task_id):
         return self.active.get(task_id)
 
@@ -42,3 +45,14 @@ async def test_running_followup_is_never_cancelled():
     task_id = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=FollowUp("check", "new"), expected_revision=1, cancel_event_id="event-1")
     repo.active[task_id] = "running"
     assert await scheduler.cancel_for_creator_event(SCOPE, "event-2") == []
+
+
+@pytest.mark.asyncio
+async def test_past_not_before_is_rejected_and_cross_scope_is_preserved():
+    repo = FakeRepository()
+    scheduler = SocialFollowupScheduler(repo)
+    with pytest.raises(ValueError, match="future"):
+        await scheduler.schedule(SCOPE, thread_id="thread-1", followup=FollowUp("check", "new", (datetime.now(UTC) - timedelta(minutes=1)).isoformat()), expected_revision=2, cancel_event_id="event-2")
+    await scheduler.schedule(SCOPE, thread_id="thread-1", followup=FollowUp("check", "new"), expected_revision=2, cancel_event_id="event-2")
+    other_scope = SocialScope("owner", "account", "creator", "other-thread")
+    assert await scheduler.cancel_for_creator_event(other_scope, "event-3") == []
