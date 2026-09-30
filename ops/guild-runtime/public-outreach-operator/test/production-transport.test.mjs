@@ -43,13 +43,16 @@ test('global slot leases fence ten active web sessions across independent execut
 });
 test('production Web opens trusted TikTok home before reading sender from a blank page', async () => {
  const root=await mkdtemp(path.join(os.tmpdir(),'web-startup-'));let url='about:blank';let active=false;let closed=false;
+ const proxy=await server((_req,res)=>res.end());
  const element=(attrs={})=>({isVisible:async()=>url!=='about:blank',getAttribute:async(key)=>attrs[key]??null,textContent:async()=>'',click:async()=>{active=true;}});
  const controls={'[sender]':element({'data-sender-handle':'@alice'}),'[profile]':element({'data-creator-uid':'creator'}),'[like]':{...element(),getAttribute:async()=>String(active)}};
- const page={goto:async(target)=>{assert.equal(target,'https://www.tiktok.com/');url=target;},locator:(selector)=>({first:()=>controls[selector]??{isVisible:async()=>false},count:async()=>controls[selector]?1:0}),close:async()=>{}};
- const config={pilot:{enabled:true,owner_user_id:'owner',sender_account_id:'alice',creator_uid:'creator',actions:['like']},sender:{owner_user_id:'owner',sender_account_id:'alice',channel:'web',locators:{loggedInSender:'[sender]',creatorIdentity:'[profile]',profileRoot:'[profile]',likeButton:'[like]'}}};
+ const page={goto:async(target)=>{if(target.includes('cloudflare.com'))return {status:()=>200,text:async()=> 'ip=203.0.113.7\nloc=US\n'};assert.equal(target,'https://www.tiktok.com/');url=target;},locator:(selector)=>({first:()=>controls[selector]??{isVisible:async()=>false},count:async()=>controls[selector]?1:0}),close:async()=>{}};
+ const config={pilot:{enabled:true,owner_user_id:'owner',sender_account_id:'alice',creator_uid:'creator',actions:['like']},sender:{owner_user_id:'owner',sender_account_id:'alice',channel:'web',web_route:{proxy_server:proxy.url,expected_country:'US'},locators:{loggedInSender:'[sender]',creatorIdentity:'[profile]',profileRoot:'[profile]',likeButton:'[like]'}}};
  const executor=createProductionExecutor({runtimeRoot:root,config,chromium:{launchPersistentContext:async()=>({newPage:async()=>page,close:async()=>{closed=true;}})}});
- const result=await executor.execute({account:{owner_user_id:'owner',sender_account_id:'alice',channel:'web',external_ref:'@alice'},creator:{creator_uid:'creator'},action:'like'});
- assert.equal(result.verified,true);assert.equal(closed,true);await executor.close();
+ try {const account={owner_user_id:'owner',sender_account_id:'alice',channel:'web',external_ref:'@alice'};
+ const preparation=await executor.prepareWeb({account});assert.equal(preparation.ready,true);
+ const result=await executor.execute({account,creator:{creator_uid:'creator'},action:'like',preparation_id:preparation.preparation_id});
+ assert.equal(result.verified,true);assert.equal(closed,true);await executor.close();} finally {await proxy.close();}
 });
 test('an orphaned iPhone slot requires manual Appium session cleanup before reuse', async () => {
  const { spawn } = await import('node:child_process');

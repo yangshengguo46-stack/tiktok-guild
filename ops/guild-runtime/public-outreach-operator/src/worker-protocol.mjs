@@ -12,7 +12,11 @@ export function serveExecutionWorker(executor) {
       let id;
       try {
         const request = JSON.parse(line); id = request.id;
-        const result = await executor.execute({ ...request, signal: abort.signal });
+        const result = request.operation === 'prepare_web'
+          ? await executor.prepareWeb(request)
+          : request.operation === 'release_web'
+            ? await executor.releaseWeb(request)
+            : await executor.execute({ ...request, signal: abort.signal });
         process.stdout.write(`${JSON.stringify({ id, result })}\n`);
       } catch { process.stdout.write(`${JSON.stringify({ id, result: { verified: false, error_code: 'operator_error' } })}\n`); }
     });

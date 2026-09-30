@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import test from 'node:test';
 import { createPlaywrightPool } from '../src/web/playwright-pool.mjs';
 import { createProductionExecutor } from '../src/production-executor.mjs';
@@ -25,8 +26,11 @@ test('failed context close retains profile and context ownership for bounded shu
   await other.close();
 });
 
-test('production retains the host slot after failed browser cleanup and releases only after confirmed close', async () => {
+test('production retains the host slot after failed browser cleanup and releases only after confirmed close', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'production-close-fence-'));
+  const proxy = net.createServer((socket) => socket.end());
+  await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+  t.after(() => proxy.close());
   let live = 0; let launches = 0; let closes = 0;
   const page = () => {
     let liked = false;
@@ -35,15 +39,17 @@ test('production retains the host slot after failed browser cleanup and releases
       '[profile]': { isVisible: async () => true, getAttribute: async (key) => key === 'data-creator-uid' ? 'creator' : null },
       '[like]': { isVisible: async () => true, getAttribute: async () => String(liked), click: async () => { liked = true; } },
     };
-    return { goto: async () => {}, close: async () => {}, locator: (selector) => ({ first: () => controls[selector] ?? { isVisible: async () => false } }) };
+    return { goto: async (url) => url.includes('cloudflare.com') ? { status: () => 200, text: async () => 'ip=203.0.113.7\nloc=US\n' } : undefined, close: async () => {}, locator: (selector) => ({ first: () => controls[selector] ?? { isVisible: async () => false } }) };
   };
-  const config = { pilot: { enabled: true, owner_user_id: 'owner', sender_account_id: 'sender', creator_uid: 'creator', actions: ['like'] }, sender: { owner_user_id: 'owner', sender_account_id: 'sender', channel: 'web', locators: { loggedInSender: '[sender]', profileRoot: '[profile]', creatorIdentity: '[profile]', likeButton: '[like]' } } };
+  const config = { pilot: { enabled: true, owner_user_id: 'owner', sender_account_id: 'sender', creator_uid: 'creator', actions: ['like'] }, sender: { owner_user_id: 'owner', sender_account_id: 'sender', channel: 'web', web_route: { proxy_server: `http://127.0.0.1:${proxy.address().port}`, expected_country: 'US' }, locators: { loggedInSender: '[sender]', profileRoot: '[profile]', creatorIdentity: '[profile]', likeButton: '[like]' } } };
   const executor = createProductionExecutor({ runtimeRoot: root, config, chromium: { launchPersistentContext: async () => {
     launches++; live++;
     return { newPage: async () => page(), close: async () => { if (++closes === 1) throw Error('browser stays alive'); live--; } };
   } } });
   const request = { account: { owner_user_id: 'owner', sender_account_id: 'sender', channel: 'web', external_ref: '@alice' }, creator: { creator_uid: 'creator' }, action: 'like' };
-  await assert.rejects(executor.execute(request), /browser stays alive/);
+  const preparation = await executor.prepareWeb({ account: request.account });
+  assert.equal(preparation.ready, true);
+  await assert.rejects(executor.execute({ ...request, preparation_id: preparation.preparation_id }), /browser stays alive/);
   assert.equal((await readdir(path.join(root, 'slots', 'web'))).filter((name) => name.endsWith('.lock')).length, 1);
   assert.equal((await executor.execute(request)).verified, false);
   assert.equal(launches, 1); assert.equal(live, 1);
