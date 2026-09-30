@@ -398,3 +398,13 @@ Two synthetic/public-like fixtures exercise planner continuity, accepted-memory 
 Final review of the creator-intelligence range found no Critical/Important findings. The final focused suite passed 321 tests; blocking-I/O passed 144 tests with only upstream deprecation warnings; `ops/guild-runtime` passed 111 tests; Ruff and `git diff --check` passed. The full backend non-live run was 17,665 passed, 189 skipped, and 21 failures in existing browser/MCP/pnpm/extension environment coverage; the isolated social concurrency failure passed when rerun.
 
 Current HEAD is `cc7275369` (implementation hardening through `97c331208`). The implementation remains native and offline-bounded: no live TikTok delivery, provider receipt, Android readiness, signing, customer installation, or conversion is claimed.
+
+## 2026-10-01 手机前非现场收口批次
+
+用户授权继续完成 P3/P5/P6/P7/P8 的本地工程补齐。本批仍复用原生 Lead、Channel、SocialRepository 和 ops 入口，没有新增 Agent、CRM、worker 或业务账本。
+
+- **P5 统一收发基础**：原生 `message_bus` 提供统一 inbound/outbound envelope、身份与回复路由、adapter-owned message ID 去重、typed delivery receipt 和 `GET /api/channels/unified` 管理读口。没有 provider receipt 的发送保持 `unknown`；TikTok 在 provider 未核验时保持 `manual_required`。这批不是 TikTok 实际发信验收。
+- **P6/P8 资料与质量**：CreatorEvidence 之上新增来源约束的主页/作品预分析摘要（hooks、风险、开放问题、证据引用、新鲜度和置信度），并接入 SocialContext；新增离线多轮评测报告，检查阶段推进、人格指纹一致性、证据覆盖、JSON 合同失败和 P50/P95 延迟。评测只使用合成 fixture，不升级为真实转化结论。
+- **P3/P7 运维入口**：ops 增加 `npm run install:customer` 和 `npm run acceptance:deployment`，固定 Node/Java/Android/Appium 合同路径、安装状态、生产认证、loopback 发布、迁移、健康路由和日志轮转检查。macOS 通过受控 Homebrew，Windows 通过 winget 编排缺失 Java/Android 工具；Linux 缺少固定工具时 fail-closed。固定 Node/SDK artifacts 或受信镜像仍需产品化，不能记为客户安装完成。
+
+本批验证：backend 统一收发、Social/Intelligence、preflight、scheduler、repository 聚焦 **334 passed**（FastAPI 上游弃用警告 1 条）；Ruff 与 `git diff --check` 通过；`ops/guild-runtime` **121 passed**；部署静态合同 **5 项通过**；本机 doctor 因 Java Runtime 缺失失败，属于现场依赖阻塞。真实 TikTok provider、手机、平台回执、客户跨平台安装和生产部署仍未验收。

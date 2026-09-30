@@ -9,7 +9,7 @@ from pathlib import Path
 from app.scheduler.social_followups import SocialFollowupScheduler
 from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemoryChange, SocialRepository
 from deerflow.social.contracts import IdentityProfile, MemoryCandidate, RoleProfile, SocialScope, TurnResult
-from deerflow.social.intelligence import CreatorEvidence, build_snapshot
+from deerflow.social.intelligence import CreatorEvidence, analyze_creator_snapshot, build_snapshot, evaluate_conversation
 from deerflow.social.runtime import SocialRuntime, SocialRuntimeBinding
 
 
@@ -33,6 +33,7 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
         for item in raw["evidence"]
     )
     _intelligence = build_snapshot(scope, evidence, revision=1)
+    creator_analysis = analyze_creator_snapshot(_intelligence)
     assert len(_intelligence.identity) == 1
     assert len(_intelligence.works) >= 3
     assert any(item.kind == "goal" for item in _intelligence.signals)
@@ -42,7 +43,7 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     identity = IdentityProfile("fixture-ai", "1", "Synthetic AI", "ai_agent", "Synthetic Guild", "Synthetic only", ())
     role = RoleProfile("fixture-role", "1", "Synthetic evaluation", ("conversation",), "fixture")
     first_runtime = SocialRuntime(SocialRuntimeBinding(repository, scope, identity, role, "turn-1", creator_evidence=evidence))
-    await first_runtime.restore_context()
+    first_context = await first_runtime.restore_context()
     assert first_runtime.context.conversation_plan.snapshot_revision == first.revision
     result = TurnResult(None, memory_delta=(MemoryCandidate("assert", "memory-1", "relationship", (f"fixture:{raw['creator_ref']}:turn:1",), "Accepted synthetic preference"),))
     memory_change = SelfMemoryChange(
@@ -66,6 +67,14 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     second = await repository.advance_conversation_stage(scope, expected_revision=second.revision, target_stage="discovery", evidence_ids=(f"fixture:{raw['creator_ref']}:turn:2",), reason="synthetic discovery")
     second_runtime = SocialRuntime(SocialRuntimeBinding(repository, scope, identity, role, "turn-2", creator_evidence=evidence))
     second_context = await second_runtime.restore_context()
+    conversation_evaluation = evaluate_conversation(
+        raw["creator_ref"],
+        (
+            {"plan": first_context.conversation_plan, "persona_fingerprint": first_context.effective_persona.fingerprint, "latency_ms": 0.0, "contract_error": None},
+            {"plan": second_context.conversation_plan, "persona_fingerprint": second_context.effective_persona.fingerprint, "latency_ms": 0.0, "contract_error": None},
+        ),
+        required_evidence_ids=_intelligence.evidence_refs,
+    )
     try:
         await repository.advance_conversation_stage(scope, expected_revision=second.revision, target_stage="formal_invite", evidence_ids=(f"fixture:{raw['creator_ref']}:turn:2",), reason="synthetic pre-consent attempt")
         formal_allowed = True
@@ -108,4 +117,6 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
         "second_turn_loaded_memory": any(item.memory_id == "memory-1" for item in second_context.relationship.notes),
         "followup_task_id": followup_id,
         "followup_cancelled": followup_id in cancelled,
+        "creator_analysis": creator_analysis.to_payload(),
+        "conversation_evaluation": conversation_evaluation.to_payload(),
     }

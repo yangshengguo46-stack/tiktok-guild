@@ -1,5 +1,20 @@
 # TikTok LIVE 公会 DeerFlow CreatorAgent
 
+客户安装与部署验收入口：
+
+```bash
+npm run install:customer
+npm run acceptance:deployment
+```
+
+`install:customer` 使用 `ops/guild-runtime/.runtime` 下的固定运行时目录，准备
+DeerFlow、安卓执行器和 pnpm 依赖，检查 Android SDK/Java/ADB 合同，并写入安装状态；
+安装过程保持外部 provider 写入关闭。客户仍需在手机端开启调试并授权一台设备。
+macOS 缺少 Java 17 或 Android command-line tools 时由受控入口调用固定 Homebrew cask，
+Windows 使用固定 winget 包；Linux 缺依赖时会 fail-closed 给出诊断，不会猜测发行版安装命令。
+`acceptance:deployment` 检查生产认证、loopback 发布、迁移证据、健康路由和日志轮转；
+静态通过不代表真实 TikTok provider 或手机已连接。
+
 本目录为当前 DeerFlow fork 的默认 Lead 提供本机运维配置。2026-09-24 起，产品唯一生效规格是用户提供的 `CreatorAgent_FINAL_PERSONA_REV1_20260924.zip` 及 [AI 自动切换人格修订](../../docs/superpowers/specs/2026-09-24-deerflow-auto-persona-design.md)。较早的招募运行时、关系摘要、方法卡、通道来源和旧计划均已作废；只保留了原有“工作台”的路由、导航、翻译和诚实占位。
 
 当前包内容：

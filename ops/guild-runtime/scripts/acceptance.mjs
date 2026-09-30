@@ -9,9 +9,11 @@ import { runCommand } from '../src/process.mjs';
 import { GUILD_EXTENSIONS_CONFIG } from '../src/constants.mjs';
 import {
   formatDoctorReport,
+  inspectDatabaseRevision,
   inspectApprovedCatalogs,
   runDoctor,
 } from './doctor.mjs';
+import { inspectDeploymentContract, probeRuntimeHealth } from './deployment.mjs';
 import { inspectPublicOutreachCatalog } from '../src/mcp-catalog.mjs';
 
 export async function runAcceptance({
@@ -19,6 +21,8 @@ export async function runAcceptance({
   doctor = (options) => runDoctor(options),
   runTests = runCommand,
   live = false,
+  deployment,
+  probeHealth = probeRuntimeHealth,
 } = {}) {
   const root = path.resolve(packageRoot);
   const opsRoot = path.join(root, 'ops', 'guild-runtime');
@@ -43,6 +47,26 @@ export async function runAcceptance({
   if (operatorTests.code !== 0) {
     throw new Error(`Public outreach operator tests failed: ${operatorTests.stderr || operatorTests.stdout}`);
   }
+
+  const deploymentReport = await (deployment ?? ((options) => inspectDeploymentContract(options)))({
+    packageRoot: root,
+    environment: {
+      ...process.env,
+      // Static acceptance exercises the production auth decision even when the
+      // caller has not started a service. An explicit production bypass still
+      // fails the contract.
+      DEER_FLOW_ENV: process.env.DEER_FLOW_ENV ?? 'production',
+      DEER_FLOW_AUTH_DISABLED: process.env.DEER_FLOW_AUTH_DISABLED ?? '0',
+    },
+    inspectMigration: () => inspectDatabaseRevision({
+      databasePath: path.join(root, 'backend', '.deer-flow', 'data', 'deerflow.db'),
+    }),
+  });
+  if (!deploymentReport.ok) {
+    const failed = deploymentReport.checks.filter(({ ok }) => !ok).map(({ name }) => name).join(', ');
+    throw new Error(`Deployment contract failed: ${failed}.\n${deploymentReport.checks.map(({ name, detail }) => `${name}: ${detail}`).join('\n')}`);
+  }
+  const health = live ? await probeHealth() : { ok: true, status: 'static-routes-verified' };
 
   const fakeAdapterCalls = [];
   const { createPublicOutreachRouter } = await import(
@@ -122,6 +146,8 @@ export async function runAcceptance({
     publicOutreachFakeAdapter: 'verified-no-provider-writes',
     catalogEvidence: 'static-approved-snapshots',
     nativeGuildLead: true,
+    deploymentContract: deploymentReport.checks.map(({ name }) => name),
+    health: health.status ?? 'live',
     ...(live ? { runtimeEvidence: doctorReport.checks.filter(({ evidence }) => evidence && evidence !== 'static'),
       gatewayLoadedCatalog: doctorReport.gatewayLoadedCatalog ?? { status: 'unverified' } } : {}),
   };

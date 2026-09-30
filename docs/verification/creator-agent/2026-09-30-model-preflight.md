@@ -71,3 +71,8 @@ cd backend
 ### Creator Intelligence 离线评估边界
 
 预验收使用两个合成、public-like fixture，并记录 `intelligence_snapshot_revision`、`plan_stage`、`estimate`（P50/P80 是达到阶段目标的估计回合数，不是转化概率）、`memory_promotions` 与 `verified_funnel_stage`。第二轮只加载有来源的已接受记忆；正式邀约前必须有 consent/receipt。结果不代表真实身份、provider 回执、申请、签约或收入转化。
+
+本批又把主页/作品预分析输出为 `CreatorProfileAnalysis`，并在离线报告中增加
+`stage_progression`、`persona_consistent`、`evidence_coverage`、`contract_failures`、
+`latency_p50_ms` 和 `latency_p95_ms`。这些字段用于定位多轮质量问题，仍不具备平台写入或
+漏斗推进权限。

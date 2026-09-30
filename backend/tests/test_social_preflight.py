@@ -50,6 +50,16 @@ async def test_runtime_intelligence_case_derives_memory_and_consent_gate(tmp_pat
         assert result["memory_promotions"] == ["memory-1"]
         assert result["formal_invite_allowed"] is False
         assert result["followup_cancelled"] is True and result["followup_task_id"]
+        assert result["creator_analysis"]["evidence_ids"] == [
+            "c001-profile-1",
+            "c001-work-1",
+            "c001-work-2",
+            "c001-work-3",
+            "c001-goal-1",
+            "c001-constraint-1",
+        ]
+        assert result["conversation_evaluation"]["evidence_coverage"] == 1.0
+        assert result["conversation_evaluation"]["stage_progression"] == ["first_contact", "discovery"]
     finally:
         await engine.dispose()
 

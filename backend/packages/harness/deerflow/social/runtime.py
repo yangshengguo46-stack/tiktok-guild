@@ -15,7 +15,7 @@ from deerflow.runtime.journal import RunJournal
 from deerflow.runtime.private_model import private_model_callbacks, private_model_copy
 from deerflow.social.context import RelationshipMemoryItem, RelationshipSnapshot, SelfMemoryItem, SocialContextSnapshot, TurnContext
 from deerflow.social.contracts import ClaimPatch, FollowUp, IdentityProfile, RoleProfile, SocialScope, bounded_text
-from deerflow.social.intelligence import ConversationPlan, ConversationStage, build_snapshot, plan_conversation
+from deerflow.social.intelligence import ConversationPlan, ConversationStage, analyze_creator_snapshot, build_snapshot, plan_conversation
 from deerflow.social.middleware import SocialContextMiddleware
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
@@ -133,8 +133,10 @@ class SocialRuntime:
         claims = tuple(ClaimPatch("assert", row["claim_id"], tuple(row["evidence_ids"]), row["text"], row["kind"], row["facet"]) for row in snapshot.claims if row["status"] == "active")
         conversation_plan: ConversationPlan | None = None
         intelligence = None
+        creator_analysis = None
         if self.binding.creator_evidence:
             intelligence = build_snapshot(self.binding.scope, self.binding.creator_evidence, snapshot.revision)
+            creator_analysis = analyze_creator_snapshot(intelligence)
             try:
                 stage = ConversationStage(snapshot.conversation_stage)
             except (AttributeError, ValueError):
@@ -183,6 +185,7 @@ class SocialRuntime:
             TurnContext(event["source_event_id"], event["text"][:4096], tuple(row["text"][:512] for row in snapshot.events[-9:] if row["source_event_id"] != event["source_event_id"]), (), {}, source_ref=event["source_ref"]),
             conversation_plan,
             creator_sources,
+            creator_analysis,
         )
         return self.context
 

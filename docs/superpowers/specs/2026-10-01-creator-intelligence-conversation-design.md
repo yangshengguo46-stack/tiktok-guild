@@ -137,6 +137,13 @@ The learning loop has three separately auditable outputs:
 
 No single success or failure rewrites the strategy catalog. A later correction always wins over an earlier unsupported hypothesis at the same scope. A strategy with repeated negative consent signals is disabled for that scope and surfaced to an operator.
 
+The current offline implementation exposes this read model as `CreatorProfileAnalysis`
+and evaluates synthetic multi-turn runs with `ConversationEvaluationReport`. The
+analysis carries hooks, risks, open questions, evidence IDs, source refs, freshness,
+and confidence into the existing SocialContext. The evaluator reports stage
+progression, persona consistency, evidence coverage, contract failures, and P50/P95
+latency; it never advances a funnel stage or writes a provider receipt.
+
 ## Acceptance criteria
 
 - A synthetic creator fixture containing profile metadata, three works, one explicit goal, and one constraint produces a versioned snapshot with source references and no inferred demographics.

@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 from deerflow.social.contracts import ClaimPatch, IdentityProfile, RoleProfile, SocialScope, bounded_refs, bounded_text
-from deerflow.social.intelligence import ConversationPlan
+from deerflow.social.intelligence import ConversationPlan, CreatorProfileAnalysis
 from deerflow.social.persona.models import EffectivePersona
 
 _LIST_LIMIT = 8
@@ -121,6 +121,7 @@ class SocialContextSnapshot:
     turn: TurnContext
     conversation_plan: ConversationPlan | None = None
     creator_sources: tuple[Mapping[str, Any], ...] = ()
+    creator_analysis: CreatorProfileAnalysis | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -131,6 +132,8 @@ class SocialContextSnapshot:
             raise ValueError("self_memory must contain SelfMemoryItem values")
         if self.conversation_plan is not None and not isinstance(self.conversation_plan, ConversationPlan):
             raise ValueError("conversation_plan must be a ConversationPlan")
+        if self.creator_analysis is not None and not isinstance(self.creator_analysis, CreatorProfileAnalysis):
+            raise ValueError("creator_analysis must be a CreatorProfileAnalysis")
         if not isinstance(self.creator_sources, tuple) or len(self.creator_sources) > 64:
             raise ValueError("creator_sources must contain at most 64 entries")
         allowed = {"evidence_id", "source_ref", "source_kind", "captured_at", "expires_at", "confidence", "freshness"}
@@ -208,6 +211,8 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         },
         "creator_sources": [dict(item) for item in snapshot.creator_sources[:64]],
     }
+    if snapshot.creator_analysis is not None:
+        payload["creator_analysis"] = snapshot.creator_analysis.to_payload()
     if snapshot.conversation_plan is not None:
         plan = snapshot.conversation_plan
         payload["conversation_plan"] = {
@@ -229,6 +234,14 @@ def build_social_context_data(snapshot: SocialContextSnapshot) -> str:
         payload["relationship"]["preferences"],
         payload["creator_sources"],
     ]
+    if snapshot.creator_analysis is not None:
+        removable_lists.extend(
+            [
+                payload["creator_analysis"]["hooks"],
+                payload["creator_analysis"]["risks"],
+                payload["creator_analysis"]["open_questions"],
+            ]
+        )
     expression = payload["persona"]["behavior"]
     temporary_style = payload["turn"]["temporary_style"]
     while True:

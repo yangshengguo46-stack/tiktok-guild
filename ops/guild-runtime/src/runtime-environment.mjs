@@ -1,8 +1,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import { GUILD_EXTENSIONS_CONFIG } from './constants.mjs';
+import { buildCustomerToolchainEnvironment } from './toolchain.mjs';
 
-export function buildRuntimeEnvironment({ packageRoot, environment = process.env }) {
+export function buildRuntimeEnvironment({ packageRoot, environment = process.env, exists } = {}) {
   const root = path.resolve(packageRoot);
   const opsRoot = path.join(root, 'ops', 'guild-runtime');
   const pnpmBinRoot = path.join(opsRoot, '.runtime', 'tools', 'pnpm', 'node_modules', '.bin');
@@ -11,13 +12,17 @@ export function buildRuntimeEnvironment({ packageRoot, environment = process.env
     ?? path.join(home, '.codex', 'tiktok-live-public-outreach');
   const production = [environment.DEER_FLOW_ENV, environment.ENVIRONMENT]
     .some((marker) => ['prod', 'production'].includes(marker?.trim().toLowerCase()));
+  const customerToolchain = buildCustomerToolchainEnvironment({ packageRoot: root, environment, ...(exists ? { exists } : {}) });
   return {
     ...environment,
     CI: 'true',
     // Local product verification keeps its synthetic admin by default. Production
     // always authenticates; an explicit local opt-out must survive this launcher.
     DEER_FLOW_AUTH_DISABLED: production ? '0' : environment.DEER_FLOW_AUTH_DISABLED ?? '1',
-    PATH: `${pnpmBinRoot}${path.delimiter}${environment.PATH ?? ''}`,
+    ANDROID_SDK_ROOT: customerToolchain.ANDROID_SDK_ROOT,
+    ANDROID_HOME: customerToolchain.ANDROID_HOME,
+    JAVA_HOME: customerToolchain.JAVA_HOME,
+    PATH: `${pnpmBinRoot}${path.delimiter}${customerToolchain.PATH}`,
     DEER_FLOW_CONFIG_PATH: path.join(opsRoot, 'config', 'config.yaml'),
     DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG),
     DEER_FLOW_SKILLS_PATH: path.join(root, 'skills'),

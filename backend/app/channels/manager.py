@@ -1617,6 +1617,7 @@ class ChannelManager:
                 thread_ts=msg.thread_ts,
                 connection_id=msg.connection_id,
                 owner_user_id=msg.owner_user_id,
+                in_reply_to=msg.message_id,
                 metadata=_response_metadata(msg.metadata),
             )
         )
@@ -2000,8 +2001,14 @@ class ChannelManager:
     @staticmethod
     def _inbound_dedupe_key(msg: InboundMessage) -> tuple[str, str, str, str] | None:
         metadata = msg.metadata or {}
-        message_id = None
+        # Adapter-owned identity is kept outside mutable metadata so a
+        # provider retry cannot replace the dedupe handle with arbitrary
+        # caller data. Metadata remains a backwards-compatible fallback for
+        # existing channel adapters.
+        message_id = msg.message_id
         for key in INBOUND_DEDUPE_METADATA_KEYS:
+            if message_id:
+                break
             value = metadata.get(key)
             if value:
                 message_id = str(value)
@@ -2226,7 +2233,16 @@ class ChannelManager:
         )
         if not claim.claimed:
             return
-        outbound = OutboundMessage(channel_name=resolved.provider, chat_id=resolved.chat_id, thread_id=resolved.thread_id, text=claim.outbound.reply_text, connection_id=connection["id"], owner_user_id=envelope.scope.owner_user_id)
+        outbound = OutboundMessage(
+            channel_name=resolved.provider,
+            chat_id=resolved.chat_id,
+            thread_id=resolved.thread_id,
+            text=claim.outbound.reply_text,
+            connection_id=connection["id"],
+            owner_user_id=envelope.scope.owner_user_id,
+            action_id=claim.outbound.action_id,
+            in_reply_to=envelope.source_event_id,
+        )
         # Deliberately bypass the fire-and-forget pub/sub API: its callback
         # exceptions are swallowed and cannot prove provider acceptance.
         result = await channel.send_social(outbound, action_id=claim.outbound.action_id)
@@ -2384,6 +2400,7 @@ class ChannelManager:
             thread_ts=msg.thread_ts,
             connection_id=bound_identity_rejection.outbound_connection_id,
             owner_user_id=bound_identity_rejection.outbound_owner_user_id,
+            in_reply_to=msg.message_id,
             metadata=_slim_metadata(msg.metadata),
         )
         await self.bus.publish_outbound(outbound)
@@ -2781,6 +2798,7 @@ class ChannelManager:
             thread_ts=msg.thread_ts,
             connection_id=msg.connection_id,
             owner_user_id=msg.owner_user_id,
+            in_reply_to=msg.message_id,
             metadata=_response_metadata(msg.metadata, pending_clarification=pending_clarification),
         )
         logger.info("[Manager] publishing outbound message to bus: channel=%s, chat_id=%s", msg.channel_name, msg.chat_id)
@@ -2860,6 +2878,7 @@ class ChannelManager:
                         thread_ts=msg.thread_ts,
                         connection_id=msg.connection_id,
                         owner_user_id=msg.owner_user_id,
+                        in_reply_to=msg.message_id,
                         metadata=_response_metadata(msg.metadata),
                     )
                 )
@@ -2912,6 +2931,7 @@ class ChannelManager:
                     thread_ts=msg.thread_ts,
                     connection_id=msg.connection_id,
                     owner_user_id=msg.owner_user_id,
+                    in_reply_to=msg.message_id,
                     metadata=_response_metadata(msg.metadata, pending_clarification=pending_clarification),
                 )
             )
@@ -3020,6 +3040,7 @@ class ChannelManager:
             thread_ts=msg.thread_ts,
             connection_id=msg.connection_id,
             owner_user_id=msg.owner_user_id,
+            in_reply_to=msg.message_id,
             metadata=_slim_metadata(msg.metadata),
         )
         await self.bus.publish_outbound(outbound)
@@ -3166,6 +3187,7 @@ class ChannelManager:
             thread_ts=msg.thread_ts,
             connection_id=msg.connection_id,
             owner_user_id=msg.owner_user_id,
+            in_reply_to=msg.message_id,
             metadata=_slim_metadata(msg.metadata),
         )
         await self.bus.publish_outbound(outbound)

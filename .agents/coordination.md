@@ -103,3 +103,7 @@ Final review found no Critical or Important issue. Creator evidence IDs/source r
 Final code commits: `764f67d10`, `ca2f35249`, `be3e6d69`, `106ba882`, `1ed00c788`, `97c331208`. Focused social/intelligence/scheduler/repository/preflight suite: **321 passed**; blocking-I/O: **144 passed**; guild runtime ops: **111 passed**; Ruff and `git diff --check` pass. The full backend non-live run recorded **17665 passed, 189 skipped, 21 failed** in existing browser/MCP/pnpm/extension environment coverage; the isolated social persona concurrency case passed on rerun.
 
 These results do not prove a real TikTok provider, Android/Appium session, platform receipt, application/signing, customer installation, or live conversion. Offline fixtures and P50/P80 estimates remain boundary evidence only.
+
+## 2026-10-01 手机前非现场收口批次
+
+用户授权后完成 P3/P5/P6/P7/P8 的本地工程补齐：统一收发 envelope/receipt/管理读口、来源约束的主播主页与作品预分析、离线多轮质量评测、客户安装编排入口和部署合同验收已加入原生路径。聚焦 backend **334 passed**、ops **121 passed**，Ruff 和 `git diff --check` 通过。部署静态合同可通过；当前主机缺 Java，doctor/完整 acceptance 按设计 fail-closed。客户真正免手工安装仍需固定 Node/Java/Android SDK artifacts 或受信镜像，手机/provider/平台回执/生产部署保持未验收。

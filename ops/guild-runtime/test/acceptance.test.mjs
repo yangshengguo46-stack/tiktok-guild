@@ -31,6 +31,13 @@ async function runOfflineAcceptance(packageRoot) {
     packageRoot,
     doctor: async () => ({ ok: true, checks: [{ name: 'fixture', ok: true, detail: 'ok' }] }),
     runTests: async () => ({ code: 0, stdout: '', stderr: '' }),
+    deployment: async () => ({ ok: true, checks: [
+      { name: 'production_auth', ok: true, detail: 'fixture' },
+      { name: 'published_bind', ok: true, detail: 'fixture' },
+      { name: 'migration', ok: true, detail: 'fixture' },
+      { name: 'health_routes', ok: true, detail: 'fixture' },
+      { name: 'bounded_logs', ok: true, detail: 'fixture' },
+    ] }),
   });
 }
 
@@ -138,6 +145,8 @@ test('offline acceptance composes config, doctor, and catalog evidence with a cu
     publicOutreachFakeAdapter: 'verified-no-provider-writes',
     catalogEvidence: 'static-approved-snapshots',
     nativeGuildLead: true,
+    deploymentContract: ['production_auth', 'published_bind', 'migration', 'health_routes', 'bounded_logs'],
+    health: 'static-routes-verified',
   });
   assert.equal(await readFile(path.join(root, 'backend', '.deer-flow', 'SOUL.md'), 'utf8'), customMission);
 });
@@ -146,6 +155,8 @@ test('live acceptance requests runtime checks and preserves an unavailable catal
   const root = await offlinePackage(t, 'fixture mission');
   await assert.rejects(runAcceptance({ packageRoot: root, live: true,
     runTests: async () => ({ code: 0, stdout: '', stderr: '' }),
+    deployment: async () => ({ ok: true, checks: [] }),
+    probeHealth: async () => ({ ok: true, status: 'ready' }),
     doctor: async ({ live }) => ({ ok: live !== true,
       checks: [{ name: 'gateway_mcp_config', ok: false, evidence: 'gateway-config', detail: 'unavailable: HTTP 503' }] }),
   }), /gateway_mcp_config.*unavailable.*503/u);

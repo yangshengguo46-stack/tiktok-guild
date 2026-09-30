@@ -125,11 +125,14 @@ async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evid
     assert context.creator_sources[0]["source_ref"] == "video:1"
     assert {"source_ref", "source_kind", "captured_at", "expires_at", "confidence", "freshness"} <= set(context.creator_sources[0])
     assert "A current work" not in repr(context.creator_sources)
+    assert context.creator_analysis is not None
+    assert context.creator_analysis.evidence_ids == ("work-current",)
+    assert "A current work" in context.creator_analysis.hooks
     from deerflow.social.context import build_social_context_data
 
     rendered = build_social_context_data(context)
     encoded = json.loads(unescape(re.search(r"<social-runtime-data>\n(.*)\n</social-runtime-data>", rendered, re.S).group(1)))
-    assert "conversation_plan" in encoded and len(rendered) <= 10000
+    assert "conversation_plan" in encoded and "creator_analysis" in encoded and len(rendered) <= 10000
     current = await repo.restore(SCOPE)
     saved = await repo.commit_turn(
         SCOPE,

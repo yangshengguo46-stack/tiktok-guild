@@ -35,6 +35,91 @@ class InboundMessageType(StrEnum):
     COMMAND = "command"
 
 
+class ChannelDeliveryState(StrEnum):
+    """Transport state; only provider evidence can advance beyond unknown."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+    MANUAL_REQUIRED = "manual_required"
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelIdentity:
+    """The identity tuple carried by a channel envelope.
+
+    ``external_user_id`` is provider scoped. ``owner_user_id`` and
+    ``connection_id`` are host ownership fields and are only considered bound
+    after the Gateway re-reads the connection row.
+    """
+
+    provider: str
+    external_user_id: str
+    owner_user_id: str | None = None
+    workspace_id: str | None = None
+    connection_id: str | None = None
+    status: str = "unverified"
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelRoute:
+    """Stable reply route shared by inbound and outbound envelopes."""
+
+    provider: str
+    chat_id: str
+    thread_id: str | None = None
+    thread_ts: str | None = None
+    connection_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelEnvelope:
+    """Common, provider-neutral message envelope.
+
+    The envelope intentionally carries source and route handles, not raw
+    provider payloads. ``identity.status`` is ``unverified`` until host code
+    has resolved the connection; no envelope field itself grants authority.
+    """
+
+    direction: str
+    message_id: str | None
+    source_ref: str | None
+    provider: str
+    text: str
+    identity: ChannelIdentity
+    route: ChannelRoute
+    delivery_state: ChannelDeliveryState | None = None
+    provider_ref: str | None = None
+    receipt_ref: str | None = None
+    in_reply_to: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelDeliveryReceipt:
+    """Typed provider acknowledgement for one outbound dispatch."""
+
+    state: ChannelDeliveryState
+    provider_ref: str | None = None
+    receipt_ref: str | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.state not in {
+            ChannelDeliveryState.ACCEPTED,
+            ChannelDeliveryState.DELIVERED,
+            ChannelDeliveryState.FAILED,
+            ChannelDeliveryState.UNKNOWN,
+            ChannelDeliveryState.MANUAL_REQUIRED,
+        }:
+            raise ValueError("delivery receipt cannot remain pending")
+        if self.state in {ChannelDeliveryState.ACCEPTED, ChannelDeliveryState.DELIVERED} and not self.provider_ref:
+            raise ValueError("accepted or delivered receipt requires provider_ref")
+        if self.state is ChannelDeliveryState.DELIVERED and not self.receipt_ref:
+            raise ValueError("delivered receipt requires receipt_ref")
+
+
 @dataclass
 class InboundMessage:
     """A message arriving from an IM channel toward the agent dispatcher.
@@ -74,6 +159,49 @@ class InboundMessage:
     files: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
+    # Provider event identity must be supplied by the adapter when available.
+    # It is deliberately separate from mutable metadata so manager dedupe can
+    # prefer the authenticated/adapter-owned value.
+    message_id: str | None = None
+    source_ref: str | None = None
+
+    def to_envelope(self) -> ChannelEnvelope:
+        """Return the neutral carrier used by unified channel management.
+
+        This conversion is a transport projection only. It does not attest
+        provider authorship or ownership; ChannelManager still performs its
+        connection lookup before creating a native run.
+        """
+
+        message_id = self.message_id
+        if message_id is None:
+            raw_id = self.metadata.get("message_id") or self.metadata.get("event_id")
+            if raw_id is not None:
+                message_id = str(raw_id)
+        identity_status = "bound" if self.connection_id and self.owner_user_id else "unverified"
+        identity = ChannelIdentity(
+            provider=self.channel_name,
+            external_user_id=self.user_id,
+            owner_user_id=self.owner_user_id,
+            workspace_id=self.workspace_id,
+            connection_id=self.connection_id,
+            status=identity_status,
+        )
+        route = ChannelRoute(
+            provider=self.channel_name,
+            chat_id=self.chat_id,
+            thread_ts=self.thread_ts,
+            connection_id=self.connection_id,
+        )
+        return ChannelEnvelope(
+            direction="inbound",
+            message_id=message_id,
+            source_ref=self.source_ref,
+            provider=self.channel_name,
+            text=self.text,
+            identity=identity,
+            route=route,
+        )
 
 
 @dataclass
@@ -128,13 +256,57 @@ class OutboundMessage:
     owner_user_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
+    # Stable action/reply handles are optional for ordinary IM replies and are
+    # populated by the social/outbox path when an action is durable.
+    action_id: str | None = None
+    in_reply_to: str | None = None
+    delivery_state: ChannelDeliveryState = ChannelDeliveryState.PENDING
+    provider_ref: str | None = None
+    receipt_ref: str | None = None
+    delivery_reason: str | None = None
+
+    def apply_delivery_receipt(self, receipt: ChannelDeliveryReceipt) -> None:
+        self.delivery_state = receipt.state
+        self.provider_ref = receipt.provider_ref
+        self.receipt_ref = receipt.receipt_ref
+        self.delivery_reason = receipt.reason
+
+    def to_envelope(self) -> ChannelEnvelope:
+        identity_status = "bound" if self.connection_id and self.owner_user_id else "unverified"
+        identity = ChannelIdentity(
+            provider=self.channel_name,
+            external_user_id="",
+            owner_user_id=self.owner_user_id,
+            connection_id=self.connection_id,
+            status=identity_status,
+        )
+        route = ChannelRoute(
+            provider=self.channel_name,
+            chat_id=self.chat_id,
+            thread_id=self.thread_id,
+            thread_ts=self.thread_ts,
+            connection_id=self.connection_id,
+        )
+        return ChannelEnvelope(
+            direction="outbound",
+            message_id=self.action_id,
+            source_ref=None,
+            provider=self.channel_name,
+            text=self.text,
+            identity=identity,
+            route=route,
+            delivery_state=self.delivery_state,
+            provider_ref=self.provider_ref,
+            receipt_ref=self.receipt_ref,
+            in_reply_to=self.in_reply_to,
+        )
 
 
 # ---------------------------------------------------------------------------
 # MessageBus
 # ---------------------------------------------------------------------------
 
-OutboundCallback = Callable[[OutboundMessage], Coroutine[Any, Any, None]]
+OutboundCallback = Callable[[OutboundMessage], Coroutine[Any, Any, Any]]
 
 
 class InboundQueueFullError(RuntimeError):
@@ -344,11 +516,13 @@ class MessageBus:
         self._outbound_listeners = [cb for cb in self._outbound_listeners if cb != callback]
 
     async def publish_outbound(self, msg: OutboundMessage) -> None:
-        """Dispatch to listeners, without provider acceptance/delivery evidence.
+        """Dispatch one reply and retain an explicit delivery state.
 
-        Exceptions are contained for ordinary IM compatibility. Social outbox
-        sends use the exact authenticated channel's receipt-aware send method;
-        successful completion here must never be interpreted as delivery.
+        A callback may return :class:`ChannelDeliveryReceipt` when it has
+        provider evidence. A callback returning ``None`` means the channel
+        completed locally without a provider receipt and therefore leaves the
+        message ``unknown``. TikTok is intentionally surfaced as
+        ``manual_required`` because its production provider is unverified.
         """
         logger.info(
             "[Bus] outbound dispatching: channel=%s, chat_id=%s, listeners=%d, text_len=%d",
@@ -357,8 +531,31 @@ class MessageBus:
             len(self._outbound_listeners),
             len(msg.text),
         )
+        receipt_seen = False
+        callback_seen = False
+        callback_failed = False
         for callback in self._outbound_listeners:
             try:
-                await callback(msg)
+                callback_seen = True
+                result = await callback(msg)
+                if isinstance(result, ChannelDeliveryReceipt):
+                    msg.apply_delivery_receipt(result)
+                    receipt_seen = True
             except Exception:
+                callback_failed = True
                 logger.exception("Error in outbound callback for channel=%s", msg.channel_name)
+
+        if not receipt_seen:
+            # A missing listener or a callback that only queued work does not
+            # prove provider acceptance. Keep it visible to management callers.
+            if msg.channel_name == "tiktok":
+                msg.delivery_state = ChannelDeliveryState.MANUAL_REQUIRED
+                msg.delivery_reason = "TikTok provider capability is unverified"
+            else:
+                msg.delivery_state = ChannelDeliveryState.UNKNOWN
+                if callback_failed:
+                    msg.delivery_reason = "channel callback failed"
+                elif not callback_seen:
+                    msg.delivery_reason = "no outbound channel listener"
+                else:
+                    msg.delivery_reason = "provider receipt not supplied"
