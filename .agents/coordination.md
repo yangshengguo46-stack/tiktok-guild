@@ -5,24 +5,15 @@
 
 ## 当前主线
 
-DeerFlow 原生 Social Runtime 已在历史基线 `master@a08ff2f0` 完成合并。当前主线是
-**双通道公开建联的本地软件收口**；生产接线和终局恢复修复已提交到 `d4fd1444a`，限定独立复审
-**CLEAN**。原有现场试运行和真实模型证据保留在既有台账；不重复执行 Task 1–10，也不把
-旧 runtime 重新接回活动路径。
+整个项目以[DeerFlow 公会项目总台账](ledger/2026-09-24-deerflow-social-runtime.md)为唯一当前台账，先读其中“当前总览与未完成事项”。原生 Social Runtime 已完成；公开建联活动执行已在隔离分支 `codex/android-outreach-control@1b7a81f79` 转向安卓，原始 `master` checkout 尚未合并。当前只有代码与离线验证，真机、真实 TikTok 回执、客户安装和多设备并发仍未验收。
 
-当前详细台账：[2026-09-24-deerflow-social-runtime.md](ledger/2026-09-24-deerflow-social-runtime.md)
+用户计划对外销售 Agent。客户安装 DeerFlow 后不应再自行安装或配置 Java、Android SDK、ADB、Appium 等工具；本机设备服务/安装向导及 Windows/macOS 验收已列入总台账 P3。手机端调试和电脑授权仍需用户确认。
 
-2026-09-29 双通道公开建联已完成原生合同和离线通道实现，最终审查发现生产接线仍缺失，
-生产 Gateway、native adapter 和执行器 transport 已接线到 `75318ad4f`；四项独立发现已在
-`e05f83ae9` 同批提交修复，根 Agent 的 backend 104、operator 71、runtime focused 41 检查通过。
-限定复审又复现两处原生提交边界缺陷，已在 `d4fd1444a` 修复并经独立正向复现验收。
-真实账号身份和新回执的 provider 映射、部署 DB 迁移及 iPhone 登记仍未完成；不得称为已可现场执行。
-设计仍沿用同一条原生 DeerFlow 控制链：`like -> comment -> follow ->
-message` 的 sender、sequence、action task、verified receipt 和关系状态仍归 DeerFlow；新增的
-`public-outreach-operator` 只负责 Web Playwright 普通账号和 iPhone Appium/XCUITest 执行。
-Broker Operator 继续只代表公会后台经纪人消息线路，TKDesk 继续只代表候选发现和 handoff。
+恢复会话先核对当前分支 `git status`/`git log`、主机与设备状态，再按总台账 P1–P8 继续。旧双通道记录仅为历史本地实施证据，不再启动 Web/iPhone 公开建联 pilot；已完成的 Social Runtime Task 1–10 不重复施工。普通单代理任务不自动启动 Claude 协作。
 
-## 事实基线
+## 以下为双通道时期的归档记录，不作为当前施工指令
+
+### 历史事实基线
 
 - 外层产品仓库：历史 Social Runtime 合并基线 `master@a08ff2f0`；当前公开建联实现 `d4fd1444a`。
 - DeerFlow 固定上游基线：`769589e8daee14c2587a634b6b43bd96471a41a1`。
@@ -36,14 +27,14 @@ Broker Operator 继续只代表公会后台经纪人消息线路，TKDesk 继续
 - `ops/guild-runtime/npm start` 当前只在本地入口注入 `DEER_FLOW_AUTH_DISABLED=1`；账号密码实现保留，
   出厂部署前移除该注入即可恢复认证，且显式 production 环境由后端拒绝 auth bypass。
 
-## 恢复规则
+### 历史恢复规则
 
 1. 先读本文和当前台账，再核对 `git status` / `git log` / DeerFlow worktree 状态。
 2. 用户已指定附件的详细方案直接施工，不再重新选型。Task 1–10 已完成；恢复时从台账的现场试运行阶段继续，禁止重复派工或重做主体研究。启动前必须先执行公会入口的 `npm run bootstrap`，由它安装固定 pnpm 运行时。
 3. 每个派工使用唯一 task/dispatch ID；不覆盖历史、不重复派工。
 4. 旧 runtime 仅作为可恢复备份保留，不是活动代码路径；不得删除或重新接入。
 
-## 双通道运行门禁
+### 历史双通道运行门禁
 
 1. 启动前使用 `npm run doctor` 做只读检查：operator 包元数据、Playwright/Appium/XCUITest
    依赖、Appium XCUITest driver catalog 注册、profile 父目录权限、iPhone 登记状态和四个
@@ -65,7 +56,7 @@ registration gate、doctor/acceptance 证据语义和现有 ops 测试均已对�
 日志文件断言阻塞，该文件不属于本批修复范围。live provider、真实设备和真实 TikTok 写入
 仍需要单独授权，不由这些静态门禁推断。
 
-## 当前施工恢复点
+### 历史施工恢复点
 
 - 原有未提交工作已保存在 `stash@{0}`，基线为 `895233fbe`；当前施工不应用该 stash。
 - 2026-09-29 最终硬化修复到 `02521d405`：已完成私信幂等重放、Web owner 心跳和 fencing、
