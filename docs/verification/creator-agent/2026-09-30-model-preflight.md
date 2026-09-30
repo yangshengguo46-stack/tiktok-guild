@@ -74,5 +74,6 @@ cd backend
 
 本批又把主页/作品预分析输出为 `CreatorProfileAnalysis`，并在离线报告中增加
 `stage_progression`、`persona_consistent`、`evidence_coverage`、`contract_failures`、
-`latency_p50_ms` 和 `latency_p95_ms`。这些字段用于定位多轮质量问题，仍不具备平台写入或
+`latency_p50_ms` 和 `latency_p95_ms`。`persona_consistent` 比较稳定的人格表达键，
+不把随证据版本变化的 CAS 指纹误报为换人格。这些字段用于定位多轮质量问题，仍不具备平台写入或
 漏斗推进权限。

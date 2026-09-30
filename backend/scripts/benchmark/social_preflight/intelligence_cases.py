@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,17 @@ from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemor
 from deerflow.social.contracts import IdentityProfile, MemoryCandidate, RoleProfile, SocialScope, TurnResult
 from deerflow.social.intelligence import CreatorEvidence, analyze_creator_snapshot, build_snapshot, evaluate_conversation
 from deerflow.social.runtime import SocialRuntime, SocialRuntimeBinding
+
+
+def _persona_consistency_key(persona) -> str:
+    """Fingerprint the selected expression persona without CAS evidence revision."""
+    behavior = {key: list(value) if isinstance(value, tuple) else value for key, value in persona.behavior.items()}
+    payload = {
+        "profile_ref": persona.profile_ref,
+        "base_template_ref": persona.base_template_ref,
+        "behavior": behavior,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> dict:
@@ -70,8 +82,20 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     conversation_evaluation = evaluate_conversation(
         raw["creator_ref"],
         (
-            {"plan": first_context.conversation_plan, "persona_fingerprint": first_context.effective_persona.fingerprint, "latency_ms": 0.0, "contract_error": None},
-            {"plan": second_context.conversation_plan, "persona_fingerprint": second_context.effective_persona.fingerprint, "latency_ms": 0.0, "contract_error": None},
+            {
+                "plan": first_context.conversation_plan,
+                "persona_fingerprint": first_context.effective_persona.fingerprint,
+                "persona_consistency_key": _persona_consistency_key(first_context.effective_persona),
+                "latency_ms": 0.0,
+                "contract_error": None,
+            },
+            {
+                "plan": second_context.conversation_plan,
+                "persona_fingerprint": second_context.effective_persona.fingerprint,
+                "persona_consistency_key": _persona_consistency_key(second_context.effective_persona),
+                "latency_ms": 0.0,
+                "contract_error": None,
+            },
         ),
         required_evidence_ids=_intelligence.evidence_refs,
     )

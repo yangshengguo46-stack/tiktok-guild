@@ -401,6 +401,14 @@ Current HEAD is `cc7275369` (implementation hardening through `97c331208`). The 
 
 ## 2026-10-01 手机前非现场收口批次
 
+### 2026-10-01 预检评估器一致性修复
+
+真实模型预检后的审计发现已收口：CAS `persona_fingerprint` 会随 `evidence_version` 更新，
+因此不能直接用它判定人格是否换了。离线评估现要求 host-derived
+`persona_consistency_key`，用于比较 profile/template/表达行为；exact fingerprint 仍作为
+每轮提交证据保留。合成运行夹具现明确断言人格一致且评估通过；真实模型第二轮 plain-text
+输出合同失败仍是独立阻塞。该修复只改离线评估边界，没有放宽生产解析或平台写入门禁。
+
 用户授权继续完成 P3/P5/P6/P7/P8 的本地工程补齐。本批仍复用原生 Lead、Channel、SocialRepository 和 ops 入口，没有新增 Agent、CRM、worker 或业务账本。
 
 - **P5 统一收发基础**：原生 `message_bus` 提供统一 inbound/outbound envelope、身份与回复路由、adapter-owned message ID 去重、typed delivery receipt 和 `GET /api/channels/unified` 管理读口。没有 provider receipt 的发送保持 `unknown`；TikTok 在 provider 未核验时保持 `manual_required`。这批不是 TikTok 实际发信验收。

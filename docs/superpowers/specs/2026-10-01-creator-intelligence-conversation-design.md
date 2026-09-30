@@ -142,7 +142,9 @@ and evaluates synthetic multi-turn runs with `ConversationEvaluationReport`. The
 analysis carries hooks, risks, open questions, evidence IDs, source refs, freshness,
 and confidence into the existing SocialContext. The evaluator reports stage
 progression, persona consistency, evidence coverage, contract failures, and P50/P95
-latency; it never advances a funnel stage or writes a provider receipt.
+latency; persona consistency uses a stable host-derived expression key because the
+exact CAS fingerprint legitimately changes when the evidence revision changes. It
+never advances a funnel stage or writes a provider receipt.
 
 ## Acceptance criteria
 

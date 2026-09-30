@@ -107,3 +107,11 @@ These results do not prove a real TikTok provider, Android/Appium session, platf
 ## 2026-10-01 手机前非现场收口批次
 
 用户授权后完成 P3/P5/P6/P7/P8 的本地工程补齐：统一收发 envelope/receipt/管理读口、来源约束的主播主页与作品预分析、离线多轮质量评测、客户安装编排入口和部署合同验收已加入原生路径。聚焦 backend **334 passed**、ops **121 passed**，Ruff 和 `git diff --check` 通过。部署静态合同可通过；当前主机缺 Java，doctor/完整 acceptance 按设计 fail-closed。客户真正免手工安装仍需固定 Node/Java/Android SDK artifacts 或受信镜像，手机/provider/平台回执/生产部署保持未验收。
+
+### 2026-10-01 评估器一致性修复
+
+复核真实模型预检后确认：`persona_consistent=false` 原因为离线评估器比较了包含
+`evidence_version` 的 CAS 指纹；每轮刷新证据时该指纹合法变化，并不代表人格切换。
+评估器现同时接收 exact `persona_fingerprint` 与稳定的
+`persona_consistency_key`，只用后者判断跨轮人格表达是否一致；增加了真实运行夹具断言，
+避免把正常证据刷新误报为质量失败。真实模型第二轮纯文本合同失败仍保留为未通过证据。

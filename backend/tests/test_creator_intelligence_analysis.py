@@ -67,8 +67,8 @@ def test_conversation_evaluation_reports_stage_persona_evidence_latency_and_cont
     report = evaluate_conversation(
         "fixture-creator",
         (
-            {"plan": first, "persona_fingerprint": "a" * 64, "latency_ms": 120.0, "contract_error": None},
-            {"plan": second, "persona_fingerprint": "a" * 64, "latency_ms": 180.0, "contract_error": "plain_text"},
+            {"plan": first, "persona_fingerprint": "a" * 64, "persona_consistency_key": "persona-a", "latency_ms": 120.0, "contract_error": None},
+            {"plan": second, "persona_fingerprint": "b" * 64, "persona_consistency_key": "persona-a", "latency_ms": 180.0, "contract_error": "plain_text"},
         ),
         required_evidence_ids=snapshot.evidence_refs,
     )
@@ -87,7 +87,7 @@ def test_conversation_evaluation_rejects_foreign_opening_evidence():
     with pytest.raises(ValueError, match="evidence"):
         evaluate_conversation(
             "fixture-creator",
-            ({"plan": plan, "persona_fingerprint": "b" * 64, "latency_ms": 10.0, "contract_error": None},),
+            ({"plan": plan, "persona_fingerprint": "b" * 64, "persona_consistency_key": "persona-b", "latency_ms": 10.0, "contract_error": None},),
             required_evidence_ids=("missing",),
         )
 
@@ -98,8 +98,8 @@ def test_conversation_evaluation_allows_multiple_turns_in_one_stage():
     report = evaluate_conversation(
         "fixture-creator",
         (
-            {"plan": plan, "persona_fingerprint": "c" * 64, "latency_ms": 50.0, "contract_error": None},
-            {"plan": plan, "persona_fingerprint": "c" * 64, "latency_ms": 60.0, "contract_error": None},
+            {"plan": plan, "persona_fingerprint": "c" * 64, "persona_consistency_key": "persona-c", "latency_ms": 50.0, "contract_error": None},
+            {"plan": plan, "persona_fingerprint": "d" * 64, "persona_consistency_key": "persona-c", "latency_ms": 60.0, "contract_error": None},
         ),
         required_evidence_ids=snapshot.evidence_refs,
     )

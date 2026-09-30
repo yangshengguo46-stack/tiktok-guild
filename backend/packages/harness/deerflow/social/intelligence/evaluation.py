@@ -70,18 +70,20 @@ def evaluate_conversation(
     if not isinstance(turns, tuple) or not turns:
         raise ValueError("turns must contain at least one evaluation turn")
     stages: list[str] = []
-    fingerprints: list[str] = []
+    persona_keys: list[str] = []
     latencies: list[float] = []
     failures: list[str] = []
     allowed: set[str] = set()
     for turn in turns:
-        if not isinstance(turn, Mapping) or set(turn) != {"plan", "persona_fingerprint", "latency_ms", "contract_error"}:
+        if not isinstance(turn, Mapping) or set(turn) != {"plan", "persona_fingerprint", "persona_consistency_key", "latency_ms", "contract_error"}:
             raise ValueError("evaluation turn has invalid fields")
         plan = turn["plan"]
         if not isinstance(plan, ConversationPlan):
             raise ValueError("evaluation turn requires a ConversationPlan")
         fingerprint = turn["persona_fingerprint"]
         bounded_text(fingerprint, "persona_fingerprint", 128)
+        persona_key = turn["persona_consistency_key"]
+        bounded_text(persona_key, "persona_consistency_key", 128)
         latency = turn["latency_ms"]
         if type(latency) not in {int, float} or latency < 0:
             raise ValueError("latency_ms must be nonnegative")
@@ -91,7 +93,7 @@ def evaluate_conversation(
             if error not in failures:
                 failures.append(error)
         stages.append(plan.stage.value)
-        fingerprints.append(fingerprint)
+        persona_keys.append(persona_key)
         latencies.append(float(latency))
         allowed.update(plan.turns[0]["allowed_evidence_ids"])
         allowed.update(evidence_id for opening in plan.opening_candidates for evidence_id in opening["evidence_ids"])
@@ -100,7 +102,11 @@ def evaluate_conversation(
         raise ValueError(f"evaluation evidence is missing: {sorted(missing)}")
     progression = tuple(ConversationStage(stage) for stage in stages)
     monotonic = all(_STAGE_ORDER[current] >= _STAGE_ORDER[previous] for previous, current in zip(progression, progression[1:]))
-    persona_consistent = len(set(fingerprints)) == 1
+    # The exact CAS fingerprint includes evidence_version and can therefore
+    # change as a creator profile is refreshed without changing the selected
+    # expression persona.  Compare the host-derived stable key for persona
+    # consistency while retaining the exact fingerprint as turn evidence.
+    persona_consistent = len(set(persona_keys)) == 1
     coverage = 1.0 if not required_evidence_ids else len(set(required_evidence_ids) & allowed) / len(required_evidence_ids)
     ordered_latencies = tuple(sorted(latencies))
     passed = monotonic and persona_consistent and coverage == 1.0 and not failures
