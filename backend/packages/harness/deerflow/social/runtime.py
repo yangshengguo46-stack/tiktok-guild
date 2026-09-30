@@ -198,7 +198,7 @@ class SocialRuntime:
         if self.binding.schedule_followup is None:
             return False
         snapshot = await self.repository.restore(self.binding.scope)
-        if snapshot.followup is None or contact_blocked(snapshot):
+        if snapshot.followup is None or snapshot.followup_schedule_error is None or contact_blocked(snapshot):
             return False
         followup = FollowUp(**snapshot.followup)
         await self.binding.schedule_followup(

@@ -242,6 +242,24 @@ async def test_host_reconciliation_retries_exact_followup_and_clears_marker(monk
 
 
 @pytest.mark.asyncio
+async def test_host_reconciliation_does_not_reschedule_without_failure_marker(monkeypatch, repo):
+    attempts = []
+
+    async def schedule(*args, **kwargs):
+        attempts.append(kwargs)
+        return "unexpected"
+
+    model = ScriptedModel(responses=[AIMessage(content=json.dumps({"reply": None, "state_delta": [], "followup": {"check": "tomorrow", "cancel_when": "new message"}}))])
+    graph, config = await assembly(monkeypatch, repo, model, binding_changes={"schedule_followup": schedule})
+    await graph.ainvoke({"messages": [HumanMessage(content="wait")]}, config)
+    attempts.clear()
+    binding = config["context"]["__social_binding"]
+    runtime = api().SocialRuntime(binding)
+    assert await runtime.reconcile_followup() is False
+    assert attempts == []
+
+
+@pytest.mark.asyncio
 async def test_external_social_request_keeps_frozen_kernel_without_operator_soul(monkeypatch, repo):
     """The social output contract must not erase the actual conversation policy."""
     model = ScriptedModel(responses=[AIMessage(content='{"reply":"hello"}')])
