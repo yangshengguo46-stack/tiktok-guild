@@ -68,6 +68,7 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     restored = await repository.restore(scope)
     staged = await repository.advance_conversation_stage(scope, expected_revision=restored.revision, target_stage="rapport", evidence_ids=(f"fixture:{raw['creator_ref']}:turn:1",), reason="synthetic response")
     second = await repository.record_event(scope, ExternalEvent("turn-2", f"fixture:{raw['creator_ref']}:turn:2", "operator_note", "Synthetic second turn"), expected_revision=staged.revision)
+    second = await repository.advance_conversation_stage(scope, expected_revision=second.revision, target_stage="discovery", evidence_ids=(f"fixture:{raw['creator_ref']}:turn:2",), reason="synthetic discovery")
     second_runtime = SocialRuntime(SocialRuntimeBinding(repository, scope, identity, role, "turn-2", creator_evidence=evidence))
     second_context = await second_runtime.restore_context()
     try:
@@ -107,7 +108,7 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
         "plan_stage": second_context.conversation_plan.stage.value,
         "estimate": dict(second_context.conversation_plan.estimate),
         "memory_promotions": [item["memory_id"] for item in restored.relationship if item["status"] == "active"],
-        "verified_funnel_stage": "discovery" if not formal_allowed else "formal_invite",
+        "verified_funnel_stage": second_context.conversation_plan.stage.value,
         "formal_invite_allowed": formal_allowed,
         "second_turn_loaded_memory": any(item.memory_id == "memory-1" for item in second_context.relationship.notes),
         "followup_task_id": followup_id,
