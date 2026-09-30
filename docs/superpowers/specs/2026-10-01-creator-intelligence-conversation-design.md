@@ -105,6 +105,28 @@ The first contact must use one or more specific, source-backed observations and 
 
 The agent must stop or hand off on rejection, uncertainty, do-not-contact, human takeover, stale evidence, or unknown provider outcome. “Taking control of the conversation” means maintaining an explicit stage and next question, not pressuring the creator or hiding the commercial purpose.
 
+### Broker playbook
+
+The plan must be usable like a mature broker's private deal sheet. It records the current hypothesis about the creator's motivation, the evidence supporting that hypothesis, the next commitment to seek, and the condition that would invalidate it. A plan may choose among these tactics when the evidence supports them:
+
+- **specific opening:** reference one work, format, or stated goal rather than generic praise;
+- **calibrated curiosity:** ask one question that lets the creator correct or deepen the picture;
+- **controlled disclosure:** reveal only the relevant guild information after the creator signals the matching need;
+- **commitment ladder:** move from a small reply, to permission to explain, to permission to send formal terms, to an application;
+- **objection loop:** acknowledge the stated concern, clarify the real constraint, answer with verifiable terms, then ask whether the constraint is resolved;
+- **pace and space:** use a followup or wait state when immediate pressure would reduce trust;
+- **distance and re-entry:** pause or change the angle when the creator's response shows low interest, while retaining the explicit stop boundary.
+
+The planner must never use a hidden pretext, false scarcity, fabricated social proof, emotional dependency, impersonation, or deliberate confusion. “拉扯” is represented as pacing and option management, not withholding material terms or overriding a no. Every planned turn has one primary objective and one observable exit signal; a turn that tries to close without the required permission checkpoint is invalid.
+
+### Sales-stage state machine
+
+The funnel is explicit and reversible:
+
+`first_contact → rapport → discovery → value_fit → objection_handling → permission_to_invite → formal_invite → application → signed`
+
+Any stage may transition to `paused` or `human_takeover`. `signed` requires a verified receipt. `formal_invite` requires the creator's permission to receive terms. `application` requires an explicit application action. A negative or ambiguous response never advances the stage by model confidence alone.
+
 ## Learning and calibration
 
 The learning loop has three separately auditable outputs:
