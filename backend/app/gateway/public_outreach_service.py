@@ -114,15 +114,28 @@ class PublicOutreachService:
         bound = [row for row in accounts if row["device_ref"] == device_ref]
         if not bound:
             raise ValueError("Android device is not registered to this owner")
+        sender = self.config.get("sender") or {}
+        devices = self.config.get("devices")
+        if not isinstance(devices, list):
+            devices = [{**sender["device"], "device_ref": sender.get("device_ref")}] if sender.get("device") else []
+        device = next((row for row in devices if row.get("device_ref") == device_ref), None)
+        deployment_owner = (device or {}).get("owner_user_id")
+        if deployment_owner is None and sender.get("device_ref") == device_ref:
+            deployment_owner = sender.get("owner_user_id")
+        if device is None or not deployment_owner or deployment_owner != owner_user_id:
+            raise ValueError("Android device deployment owner does not match the authenticated owner")
         if operation == "control" and not any(row["status"] in {"enabled", "healthy", "ready", "active"} for row in bound):
             raise ValueError("Android device sender is paused")
         if operation == "takeover":
             for row in bound:
                 await self.repository.set_sender_account_status(owner_user_id, row["sender_account_id"], status="paused", reason="manual_takeover")
                 await self.cancel_account(owner_user_id, row["sender_account_id"])
-        result = await self.transport.execute(operation=operation, device_ref=device_ref, **({"commands": commands} if commands is not None else {}))
+        result = await self.transport.execute(operation=operation, device_ref=device_ref, owner_user_id=owner_user_id, **({"commands": commands} if commands is not None else {}))
+        if operation == "control" and result.get("error_code") in {"write_unknown", "cleanup_unknown", "manual_takeover"}:
+            for row in bound:
+                await self.repository.set_sender_account_status(owner_user_id, row["sender_account_id"], status="paused", reason=result["error_code"])
         if operation == "resume" and result.get("ok") is True:
-            health = await self.transport.execute(operation="doctor", device_ref=device_ref)
+            health = await self.transport.execute(operation="doctor", device_ref=device_ref, owner_user_id=owner_user_id)
             if health.get("ok") is True:
                 for row in bound:
                     await self.repository.set_sender_account_status(owner_user_id, row["sender_account_id"], status="enabled", reason="manual_takeover_resolved")

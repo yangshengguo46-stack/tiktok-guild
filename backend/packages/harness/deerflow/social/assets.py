@@ -15,6 +15,22 @@ _PERSONA_IDS = frozenset({"relaxed_wit", "clear_direct", "curious_explorer", "ob
 _BEHAVIOR_FIELDS = frozenset({"attention", "voice", "humor", "disagreement", "care", "initiative"})
 _DEFAULT_ROOT = Path(__file__).resolve().parents[5] / "docs" / "product" / "creator-agent-final-persona-rev1"
 _APPROVED_MANIFEST_SHA256 = "cb1246bdc1a8c2c68dcf3d1df89d0d67e727a60ef1e2db8fe823998d55d69b24"
+_APPROVED_KERNEL_SHA256 = "11b45460eaced0a1f3e468624bdfd17d81af793bf59ac7e09a86bec46c8c200c"
+
+
+def load_social_kernel(root: Path | None = None) -> str:
+    """Load frozen social authority, never an operator's editable SOUL.md."""
+    source = Path(root) if root is not None else Path(os.environ.get("DEER_FLOW_SOCIAL_ASSETS_PATH", _DEFAULT_ROOT))
+    if not source.is_absolute():
+        raise ValueError("DEER_FLOW_SOCIAL_ASSETS_PATH must be absolute")
+    target = source / "prompts" / "SOCIAL_KERNEL.md"
+    if any(path.is_symlink() for path in (source, target.parent, target)):
+        raise ValueError("social kernel symlink is not allowed")
+    with target.open("rb") as file:
+        raw = file.read(16_385)
+    if len(raw) > 16_384 or sha256(raw).hexdigest() != _APPROVED_KERNEL_SHA256:
+        raise ValueError("asset does not match the approved social kernel")
+    return raw.decode("utf-8")
 
 
 def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:

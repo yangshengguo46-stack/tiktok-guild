@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-09-29",
+  "model": "gpt-6-sol",
+  "synthetic": true,
+  "production_database_touched": false,
+  "selector_timeout_seconds": 10,
+  "platform_writes": 0,
+  "cases": [
+    {
+      "id": "switch-direct",
+      "source_ref": "synthetic:switch-direct",
+      "current": "relaxed_wit@1.0.1",
+      "elapsed_seconds": 10.008,
+      "decision": null,
+      "accepted_switch": false,
+      "failure": "selector_timeout"
+    },
+    {
+      "id": "stay-relaxed",
+      "source_ref": "synthetic:stay-relaxed",
+      "current": "relaxed_wit@1.0.1",
+      "elapsed_seconds": 4.804,
+      "decision": {
+        "action": "stay",
+        "persona_id": "relaxed_wit@1.0.1",
+        "confidence": 0.99,
+        "evidence_refs": ["synthetic:stay-relaxed"]
+      },
+      "accepted_switch": false,
+      "failure": null
+    }
+  ],
+  "extended_switch_probe": {
+    "source_ref": "synthetic:switch-direct-30s",
+    "timeout_seconds": 30,
+    "elapsed_seconds": 5.552,
+    "decision": {
+      "action": "switch",
+      "persona_id": "clear_direct@1.0.1",
+      "confidence": 0.99,
+      "evidence_refs": ["synthetic:switch-direct-30s"]
+    },
+    "accepted_switch": true
+  },
+  "conclusion": "The configured model transport and real stay and switch decisions were observed. The same switch case once exceeded the default 10-second boundary, so default-timeout reliability remains open even though semantic switching is verified under a bounded 30-second probe."
+}

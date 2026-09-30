@@ -4,8 +4,45 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { startRuntime } from '../scripts/start.mjs';
+import { buildRuntimeEnvironment } from '../src/runtime-environment.mjs';
 
 const FORK_ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
+
+for (const environment of [
+  { DEER_FLOW_ENV: 'production' },
+  { ENVIRONMENT: ' prod ' },
+  { DEER_FLOW_ENV: 'development', ENVIRONMENT: 'production' },
+  { DEER_FLOW_ENV: 'production', DEER_FLOW_AUTH_DISABLED: '1' },
+  { DEER_FLOW_AUTH_DISABLED: '0' },
+]) {
+  test(`authenticated start preserves its auth gate: ${JSON.stringify(environment)}`, async (t) => {
+    const warnings = t.mock.method(console, 'warn', () => {});
+    assert.equal(buildRuntimeEnvironment({ packageRoot: FORK_ROOT, environment }).DEER_FLOW_AUTH_DISABLED, '0');
+    let childEnvironment;
+    await startRuntime({
+      packageRoot: FORK_ROOT,
+      environment,
+      installSoul: async () => {},
+      doctor: async () => ({ ok: true, checks: [] }),
+      start: async (_command, _args, options) => { childEnvironment = options.env; return 0; },
+    });
+    assert.equal(childEnvironment.DEER_FLOW_AUTH_DISABLED, '0');
+    assert.equal(warnings.mock.callCount(), 0);
+  });
+}
+
+test('only an effective local auth bypass emits the synthetic-admin warning', async (t) => {
+  const warnings = t.mock.method(console, 'warn', () => {});
+  await startRuntime({
+    packageRoot: FORK_ROOT,
+    environment: {},
+    installSoul: async () => {},
+    doctor: async () => ({ ok: true, checks: [] }),
+    start: async () => 0,
+  });
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.match(warnings.mock.calls[0].arguments[0], /synthetic admin/u);
+});
 
 test('local guild start bypasses the setup account gate with a synthetic admin', async () => {
   let receivedOptions;

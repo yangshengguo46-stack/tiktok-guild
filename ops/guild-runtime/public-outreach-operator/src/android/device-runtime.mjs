@@ -124,8 +124,10 @@ export function createAndroidDeviceRuntime({ root, runAdb = defaultRunAdb, drive
         }
         result = { ok: true, device_ref: device.device_ref, results };
       } catch (error) {
-        if (wrote) await takeoverMarker(device);
-        result = unavailable(device, wrote ? 'write_unknown' : (error.error_code ?? 'device_command_failed'));
+        const cleanupUnknown = error.error_code === 'cleanup_unknown';
+        if (wrote || cleanupUnknown) await takeoverMarker(device);
+        result = cleanupUnknown ? { ...unavailable(device, 'cleanup_unknown'), hold_lock: true }
+          : unavailable(device, wrote ? 'write_unknown' : (error.error_code ?? 'device_command_failed'));
       } finally {
         try { await driver?.deleteSession(); }
         catch {
@@ -151,7 +153,9 @@ export function createAndroidDeviceRuntime({ root, runAdb = defaultRunAdb, drive
         if (result.manual_required) await takeoverMarker(device);
       } catch (error) {
         await takeoverMarker(device);
-        result = { verified: false, error_code: 'provider_unknown', manual_required: true, message: error.message };
+        const cleanupUnknown = error.error_code === 'cleanup_unknown';
+        result = { verified: false, error_code: cleanupUnknown ? 'cleanup_unknown' : 'provider_unknown', manual_required: true, message: error.message,
+          ...(cleanupUnknown ? { hold_lock: true } : {}) };
       } finally {
         try { await driver?.deleteSession(); }
         catch {

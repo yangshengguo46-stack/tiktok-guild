@@ -5,11 +5,20 @@
 
 ## 当前主线
 
-整个项目以[DeerFlow 公会项目总台账](ledger/2026-09-24-deerflow-social-runtime.md)为唯一当前台账，先读其中“当前总览与未完成事项”。原生 Social Runtime 已完成；公开建联活动执行已在隔离分支 `codex/android-outreach-control@1b7a81f79` 转向安卓，原始 `master` checkout 尚未合并。当前只有代码与离线验证，真机、真实 TikTok 回执、客户安装和多设备并发仍未验收。
+整个项目以[DeerFlow 公会项目总台账](ledger/2026-09-24-deerflow-social-runtime.md)为唯一当前台账，先读其中“当前总览与未完成事项”。本轮审计工作分支为 `codex/pre-device-audit`，基于安卓交付 `codex/android-outreach-control@238a445ff`；原始 `master@c4e10369f` 保留，尚未合并。Social Runtime、安卓离线执行、安全边界和静态运维门禁已有本地证据；真机、真实 TikTok 回执、客户安装、关系记忆写入/followup 唤醒和多设备并发仍未验收。
 
 用户计划对外销售 Agent。客户安装 DeerFlow 后不应再自行安装或配置 Java、Android SDK、ADB、Appium 等工具；本机设备服务/安装向导及 Windows/macOS 验收已列入总台账 P3。手机端调试和电脑授权仍需用户确认。
 
-恢复会话先核对当前分支 `git status`/`git log`、主机与设备状态，再按总台账 P1–P8 继续。旧双通道记录仅为历史本地实施证据，不再启动 Web/iPhone 公开建联 pilot；已完成的 Social Runtime Task 1–10 不重复施工。普通单代理任务不自动启动 Claude 协作。
+恢复会话先核对当前分支 `git status`/`git log`、主机与设备状态，再按总台账 P1–P8 继续。旧双通道记录仅为历史本地实施证据，不再启动 Web/iPhone 公开建联 pilot；已完成的 Social Runtime Task 1–10 不重复施工。全量业务审计与本轮证据见 `docs/audits/2026-09-30-business-completion-audit.md`。普通单代理任务不自动启动 Claude 协作。
+
+### 2026-09-30 审计收口
+
+- 运维修复：`ops/guild-runtime` tests **111 passed**，静态 doctor **25/25**，静态 acceptance `ok:true`；backend 运维聚焦 **47 passed**。本机三服务默认 loopback，生产环境不注入 auth bypass，日志接统一轮转器。
+- Android hardening：operator 当前全套 **36 passed**，独立 hardening **23 passed**；会话元数据/cleanup fence、明确 inactive 前态、取消竞态、回执 ID/base、部署 owner 绑定和未知结果暂停均已修复。没有启动服务、手机、浏览器或 TikTok 写入。
+- PostgreSQL：临时 Postgres 16 容器上社交 CAS、outbox replay、sender sequence 与既有 MCP/scheduler 集成共 **25 passed**。这是 disposable schema 的本地证据，不是目标部署验收。
+- SQLite：先备份 `backend/.deer-flow/audit-20260930/pre-migration.db`，演练与现场均到 `0032_android_outreach_sender`，原有表行数保留，`integrity_check=ok`、外键错误 0。
+- 真实模型：受控 preflight 实际 4 次 `gpt-6-sol` 调用后因输出合同失败即停；发现 selector 的 persona ID 规范歧义并已通过离线回归修复，后续回合一次纯文本仍未解决，未宣称多轮通过。原始 payload 不进 Git，当前 checkout 只保留脱敏摘要。
+- 当前仍禁止把离线合同、真实模型单次结果、MCP catalog、设备配置或静态 acceptance 称为 TikTok 收发完成。
 
 ## 以下为双通道时期的归档记录，不作为当前施工指令
 

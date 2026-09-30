@@ -9,12 +9,14 @@ export function buildRuntimeEnvironment({ packageRoot, environment = process.env
   const home = environment.HOME ?? os.homedir();
   const outreachStateRoot = environment.PUBLIC_OUTREACH_RUNTIME_ROOT
     ?? path.join(home, '.codex', 'tiktok-live-public-outreach');
+  const production = [environment.DEER_FLOW_ENV, environment.ENVIRONMENT]
+    .some((marker) => ['prod', 'production'].includes(marker?.trim().toLowerCase()));
   return {
     ...environment,
     CI: 'true',
-    // The workbench is local-only during this phase, so /setup does not block
-    // product verification. The backend ignores this flag in explicit production mode.
-    DEER_FLOW_AUTH_DISABLED: '1',
+    // Local product verification keeps its synthetic admin by default. Production
+    // always authenticates; an explicit local opt-out must survive this launcher.
+    DEER_FLOW_AUTH_DISABLED: production ? '0' : environment.DEER_FLOW_AUTH_DISABLED ?? '1',
     PATH: `${pnpmBinRoot}${path.delimiter}${environment.PATH ?? ''}`,
     DEER_FLOW_CONFIG_PATH: path.join(opsRoot, 'config', 'config.yaml'),
     DEER_FLOW_EXTENSIONS_CONFIG_PATH: path.join(opsRoot, 'config', GUILD_EXTENSIONS_CONFIG),

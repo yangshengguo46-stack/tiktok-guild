@@ -54,11 +54,12 @@ export async function runAcceptance({
       return [];
     },
     enqueueAction: async (params) => {
+      assert.equal(params.channel, 'android', 'acceptance must exercise the active Android channel');
       fakeAdapterCalls.push('enqueueAction');
       return {
         task_id: params.task_id ?? 'acceptance-task',
         sender_account_id: params.sender_account_id ?? 'acceptance-account',
-        channel: params.channel ?? 'web',
+        channel: params.channel,
         creator_uid: params.creator_uid ?? 'acceptance-creator',
         action: params.action ?? 'like',
         idempotency_key: params.idempotency_key ?? 'acceptance-idempotency',
@@ -84,7 +85,7 @@ export async function runAcceptance({
         params: {
           task_id: 'acceptance-task',
           sender_account_id: 'acceptance-account',
-          channel: 'web',
+          channel: 'android',
           creator_uid: 'acceptance-creator',
           action: 'like',
           idempotency_key: 'acceptance-idempotency',

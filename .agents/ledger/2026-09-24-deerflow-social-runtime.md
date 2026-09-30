@@ -15,7 +15,7 @@
 
 用户已决定将公开建联的活动执行从 Web Playwright/iPhone XCUITest 转向安卓手机，同时保留点赞、评论、关注、私信业务并增加通用逐台控制。安卓第一阶段代码在隔离分支 `codex/android-outreach-control@1b7a81f79`；原始 `master` checkout 尚未合并。旧 Web/iPhone 公开建联账号与回执在该分支只读保留，不再新派单；以下 2026-09-29 双通道记录仅作为历史实施证据。
 
-安卓代码已包含 ADB 识别、UiAutomator2 通用观察/点击/输入/滑动、设备独占、人工接管/恢复、四种公开建联动作的确定性执行和读回合同。离线测试与前端检查已通过，外部写入默认关闭。最多可**登记** 50 台，但当前业务 worker 一次只执行 1 台，尚无真机或 20–50 台并发证据。
+安卓代码已包含 ADB 识别、UiAutomator2 通用观察/点击/输入/滑动、设备独占、人工接管/恢复、四种公开建联动作的确定性执行和读回合同。离线测试与前端检查已通过，外部写入默认关闭；本轮修复了未知 Appium session、取消竞态、旧回执 baseline、非字符串 provider ID 和部署 owner 越权。最多可**登记** 50 台，但当前业务 worker 一次只执行 1 台，尚无真机或 20–50 台并发证据。
 
 | ID | 范围 | 状态 | 下一验收点 |
 | --- | --- | --- | --- |
@@ -24,7 +24,7 @@
 | P3 | 客户安装交付 | 新增待办 | 客户安装 DeerFlow 后，由产品的本机设备服务/向导内置或受控安装固定版本 ADB、Java、所需 Android SDK、Node/Appium/UiAutomator2，自动配置、启动、诊断与升级/回退；scrcpy 为可选人工投屏组件。Windows/macOS 均验收，客户无需执行 `brew`、`npm`、`sdkmanager` 或设置环境变量。手机端仍需用户开启调试并授权电脑。 |
 | P4 | 多设备运行 | 待真机 | 三台真机先验证逐台任务、独占/人工接管和离线隔离；改造单 worker 为按设备调度，再依次做 20 台、50 台多主机与长时间运行、资源/延迟/token 计量。 |
 | P5 | 统一收发业务 | 尚未闭环 | 用户提出的设备消息统一收发中台须另定来信采集、身份归属、去重、回复与平台回执；当前四种公开动作的离线实现不等于真实来信或正式邀约已可用。 |
-| P6 | 人格与模型质量 | 待现场验证 | 真实语义不匹配时的人格 `switch`、完整多轮工作流与表达质量仍未证明；历史探针只证实生成和 `stay`。 |
+| P6 | 人格与模型质量 | 待现场验证 | 9/29 的 `gpt-6-sol` 合成证据出现过一次 `switch`，但默认 10 秒边界曾超时；本轮真实 preflight 4 次调用因 selector ID 合同歧义/后续纯文本合同失败即停，完整多轮、职业替换、生成启用回滚仍未通过。 |
 | P7 | 上线基础设施 | 待复核 | PostgreSQL 真实服务集成、部署数据库迁移、生产身份认证/权限配置及完整验收需在目标部署环境复核；旧 nginx 日志断言失败属于历史双通道基线，当前安卓分支的整套验收尚未重跑。 |
 | P8 | 后续能力 | 待规划 | 人格库、沟通知识库、主播主页预分析和 World Memory 深度实现仍是 roadmap，未纳入安卓第一阶段。 |
 
@@ -42,7 +42,13 @@
 
 因此总台账中 Task 1–10 的“完成”指**原生代码与本地验收完成**，不等于上述 WP1–WP4 的模型效果、真实材料、平台业务和发布验收都已完成。
 
-本次材料到代码的本地审计（2026-09-30）：来源 ZIP SHA-256 为 `788924f9d7e3d63327d85351f76088ecd6427141396d42a9752bdd448a930ba1`，与执行性修订记录一致；`python3 scripts/verify_creator_agent_assets.py` 验证 76 个附件文件通过。当前安卓隔离分支上运行 `backend/.venv/bin/pytest -q` 指定的 `test_social_assets.py`、`test_social_contracts.py`、`test_social_persona_profiles.py`、`test_social_management_tools.py`、`test_social_lead_runtime.py`、`test_social_repository.py`、`test_social_channels.py`，结果 **404 passed**。抽查实际 `lead_agent/agent.py` 的 `SocialRuntime` 装配、`social/middleware.py` 的模型请求注入、`social/persona/selector.py` 的证据选择和 `social/turns.py` 的提交边界；这些路径不是单纯附件参考代码。真实模型运行记录只有未激活的生成候选及一次 `stay`，没有自然多轮或语义 `switch` 成功证据。本次完成的是五份入口材料与原生路径的**本地能力审计**，未进行全仓逐行安全审计、真实 TikTok/安卓设备或产品发布终验。
+本次材料到代码的本地审计（2026-09-30）：来源 ZIP SHA-256 为 `788924f9d7e3d63327d85351f76088ecd6427141396d42a9752bdd448a930ba1`，与执行性修订记录一致；`python3 scripts/verify_creator_agent_assets.py` 验证 76 个附件文件通过。当前安卓审计分支上指定 Social 测试 **404 passed**；补回冻结 `SOCIAL_KERNEL` 后 Lead ModelRequest 仍只装一份人格。9/29 合成证据确有 `switch`，本轮新 preflight 未完成，见 P6 与业务审计。本次完成的是五份入口材料与原生路径的**本地能力审计**，未进行真实 TikTok/安卓设备或产品发布终验。
+
+## 2026-09-30 全量审计收口
+
+详细报告见 [`docs/audits/2026-09-30-business-completion-audit.md`](../../docs/audits/2026-09-30-business-completion-audit.md)。确认的非手机业务缺口包括：生产 turn 没有 caller 写入 `SelfMemoryChange`，followup 只保存不唤醒，关系级纠错/禁联/承诺管理没有管理入口，客户安装/可移植依赖和按设备调度未交付。它们不是平台现场问题，不能继续写成“等手机即可”。
+
+本轮本地收口证据：ops `111 passed`、static doctor `25/25`、static acceptance `ok:true`、backend 运维 `47 passed`、Social/Android/production/preflight 聚焦 `229 passed, 3 skipped`、blocking-I/O `144 passed`、Android operator `36 passed`；临时 PostgreSQL 16 上社交与既有 PG 集成 `25 passed`；SQLite 0026→0032 正式迁移保留原有行数、完整性和外键检查通过。一次在最后 Android 修复前启动的 backend full run 为 `17631 passed / 21 failed / 186 skipped / 3 deselected`，聚焦回归已消除其中的 Android 测试失败，剩余环境/上游失败仍使完整 backend 不绿。完整 frontend/客户部署终验仍按各自报告的限制处理，不得用这些计数替代真实 provider/设备证据。
 
 主机现状：Mac 上 ADB、Java、Appium/UiAutomator2 已做启动级验证；匹配真机版本的 SDK Platform/Build Tools 尚待补齐，scrcpy 尚不可用，Windows 未验证。现有 `bootstrap`/`doctor` 面向开发与试点，不是客户一键安装。手工准备已实际遇到 JDK 安装权限、scrcpy 动态库不兼容和下载失败，因此 P3 是正式交付前的产品事项，不要求每位客户自行排障。
 

@@ -21,6 +21,12 @@ Rust bridge、Worker、独立业务账本或后台投影来替代原生改造。
 可核验的通道、身份、授权、去重与回执证据；不得把草稿、MCP 连通或离线测试
 称为已发送或已完成公会运营。
 
+2026-09-30 当前执行方向是 Android Appium/UiAutomator2；Web/iPhone 公开建联已退为历史。
+恢复先读 `.agents/coordination.md` 与唯一总台账的当前总览。全业务审计见
+`docs/audits/2026-09-30-business-completion-audit.md`。Task 1–10 完成只表示本地工程交付，
+连续记忆/承诺的生产写入、followup 唤醒、关系管理入口、真实 provider 和客户安装仍需单独闭环。
+外部 social Lead 使用固定 SHA-256 校验的附件社交内核，不读取可变本地 SOUL 作为该内核。
+
 It is the **monorepo orientation layer**: it maps the whole repo and points to the
 module guides that own the depth. For anything inside a module, read that module's
 guide rather than expecting full detail here:
@@ -55,6 +61,14 @@ Nginx is the single public entry: it proxies `/api/*` to the Gateway, rewriting
 [backend/AGENTS.md](backend/AGENTS.md) for the runtime and router detail. It compresses
 HTML and configured textual assets, deliberately leaving SSE, fonts, images, audio, and
 video uncompressed at the proxy layer.
+
+The local `scripts/serve.sh` stack binds Gateway and Next.js to `127.0.0.1`;
+`nginx.local.conf` listens on `127.0.0.1` and `::1`. This also applies when the
+guild development entry bypasses authentication. Production environment markers
+disable that bypass; explicit `DEER_FLOW_AUTH_DISABLED=0` is respected locally.
+Local service stdout/stderr flows through the existing rotating log service
+(10 MiB per file, three backups by default). Docker's internal bind addresses
+remain governed by the published-port contract below.
 
 Both compose files publish that entry as `"${BIND_HOST:-127.0.0.1}:${PORT:-2026}:2026"`
 — **loopback by default**, matching the README's documented deployment model; a bare

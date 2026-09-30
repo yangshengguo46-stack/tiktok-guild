@@ -25,17 +25,28 @@ Identity、Self、Role、Relationship、EffectivePersona 与 TurnContext，然�
 证据自动选择表达人格，运营者无需在工作台手动切换；人格也不与子 Agent
 强制绑定。
 
-`/workspace/guild` 的旧工作台 UI 已原样保留，仍是诚实的未接入占位，不代表
-已连接 TikTok。当前确定性证据只覆盖本地合同、持久化、竞争冲突、重启、禁联、
+`/workspace/guild` 现在展示原生公开建联账号、任务、回执和 Android 逐台控制，
+不代表已连接 TikTok。当前确定性证据覆盖本地合同、持久化、竞争冲突、重启、禁联、
 人工接管、未知回执与零部分流泄漏。真实 TikTok 收信、发信、正式邀约、
 送达/已读回执仍是 `unverified-external`；没有获得通道、身份、授权、去重和回执证据前，
 不得进行或宣称任何真实平台写入。完整验收见
 [`docs/verification/creator-agent/final-verification.md`](docs/verification/creator-agent/final-verification.md)。
 
-普通账号公开建联现在由原生 Gateway 接入管理的 Playwright/Appium Node 执行器，MCP 与工作台
+普通账号公开建联现在由原生 Gateway 接入管理的 Android Appium/UiAutomator2 执行器，MCP 与工作台
 共用同一任务和回执仓库。外部写入默认关闭，只有部署明确配置的单号试点 `execute` 会写平台；
 真实 TikTok 读回映射仍需现场验证。配置、权限、资源上限及未知结果恢复见
 [公开建联生产运行说明](docs/verification/creator-agent/public-outreach-production-runbook.md)。
+
+外部社交回合显式装入冻结并校验 SHA-256 的 `SOCIAL_KERNEL.md`，再注入当前关系的一份人格；
+不会因切换到结构化输出而丢失自然交流内核。自身观点/承诺的生产写入、followup 唤醒、
+关系管理纠错与真实来信 provider 仍未闭环；见
+[2026-09-30 全业务审计与剩余事项](docs/audits/2026-09-30-business-completion-audit.md)。
+
+本机 Gateway、Frontend、Nginx 默认只监听 loopback。公会开发入口保留本地免注册模式；
+`DEER_FLOW_ENV=production npm start`（在 `ops/guild-runtime` 中运行）强制启用正常认证，
+本地也可显式设置 `DEER_FLOW_AUTH_DISABLED=0`。三服务日志经现有轮转器写入 `logs/`，
+默认每文件 10 MiB、保留 3 个备份，可用 `DEER_FLOW_LOG_MAX_BYTES` / `DEER_FLOW_LOG_BACKUPS` 调整。
+这些是本地软件能力；客户安装、完整 Android SDK 和 Windows 交付仍待验收。
 
 ## Official Website
 
@@ -49,8 +60,12 @@ are rejected rather than silently resolving to different profile content.
 Generation needs a configured model and a current operator message or explicitly
 selected scoped creator evidence. External channels, custom agents, subagents,
 bootstrap, PAT and auth-disabled runs do not receive management capabilities.
-The configured-model probe [verified transport after the local start config moved to `gpt-6-sol`, but strict profile generation remains blocked by a parser rejection followed by the bounded final-call timeout](docs/verification/creator-agent/2026-09-24-task8-configured-model-probe.json);
-offline tests do not demonstrate real model quality or TikTok delivery.
+The [September 24 probe](docs/verification/creator-agent/2026-09-24-task8-configured-model-probe.json)
+records an earlier parser rejection and timeout. The later
+[synthetic selector evidence](docs/verification/creator-agent/2026-09-29-project-closeout-selector-evidence.json)
+includes a real stay and switch, with one default-timeout failure. See the current
+[business audit](docs/audits/2026-09-30-business-completion-audit.md) for the latest verification boundary;
+neither offline tests nor a single synthetic switch demonstrate real conversation quality or TikTok delivery.
 
 Learn more and see **real demos** on our [**official website**](https://deerflow.tech).
 The landing-page case studies open as allowlisted, read-only showcases without requiring a sign-in.

@@ -39,13 +39,15 @@ async function items(driver, locator, proof) {
     throw Object.assign(new Error('Versioned provider receipt attributes are required.'), { error_code: 'locator_evidence_required' });
   }
   const elements = await driver.findElements(...semanticLocator(locator));
+  if (elements.length > 100) throw Object.assign(new Error('Provider receipt baseline exceeds the readable bound.'), { error_code: 'receipt_baseline_unknown' });
   const rows = [];
-  for (const element of elements.slice(0, 100)) {
+  for (const element of elements) {
     const [id, sender, target, text] = await Promise.all([
       element.getAttribute(proof.id_attribute), element.getAttribute(proof.sender_attribute),
       element.getAttribute(proof.target_attribute), element.getText(),
     ]);
-    rows.push({ id, sender: normalizeIdentity(sender), target: normalizeIdentity(target), text });
+    const stableId = typeof id === 'string' && id.trim() ? id.trim() : null;
+    rows.push({ id: stableId, sender: normalizeIdentity(sender), target: normalizeIdentity(target), text });
   }
   return rows;
 }
@@ -84,11 +86,15 @@ export async function executeAndroidAction({ driver, account, creator, action, p
     if (action === 'like' || action === 'follow') {
       const control = action === 'like' ? locators.likeButton : locators.followButton;
       const state = action === 'like' ? locators.likeState : locators.followState;
-      if (!state || typeof state.attribute !== 'string' || typeof state.active !== 'string') return failure('locator_evidence_required');
+      if (!state || typeof state.attribute !== 'string' || !state.attribute || typeof state.active !== 'string' || !state.active
+        || typeof state.inactive !== 'string' || !state.inactive || state.inactive === state.active) return failure('locator_evidence_required');
       const before = await (await find(driver, control)).getAttribute(state.attribute);
       if (before === state.active) return failure('already_state', 'The action was already active before this task.', true);
+      if (before !== state.inactive) return failure('state_baseline_unknown', 'No recognized inactive state was observed.', true);
+      const button = await find(driver, control);
+      if (signal?.aborted) return failure('cancelled');
       onWrite(); wrote = true;
-      await (await find(driver, control)).click();
+      await button.click();
       const after = await (await find(driver, control)).getAttribute(state.attribute);
       if (after !== state.active) return failure('write_unknown', 'No verified state transition was observed.', true);
       const providerRef = action === 'like' ? videoId : creator.creator_uid;
@@ -103,9 +109,12 @@ export async function executeAndroidAction({ driver, account, creator, action, p
     const before = await items(driver, receiptLocator, proof);
     if (before.some((item) => !item.id)) return failure('receipt_baseline_unknown', 'Existing items lack stable platform IDs.', true);
     const input = await find(driver, locators[`${prefix}Input`]);
+    if (signal?.aborted) return failure('cancelled');
     onWrite(); wrote = true;
     await input.clear(); await input.setValue(value);
-    await (await find(driver, locators[`${prefix}Submit`])).click();
+    const submit = await find(driver, locators[`${prefix}Submit`]);
+    if (signal?.aborted) return failure('cancelled', 'Cancelled with an unsubmitted draft.', true);
+    await submit.click();
     const after = await items(driver, receiptLocator, proof);
     const priorIds = new Set(before.map((item) => item.id));
     const target = normalizeIdentity(creator.handle);

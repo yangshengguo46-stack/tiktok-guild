@@ -24,6 +24,7 @@ from deerflow.utils.file_io import run_file_io
 
 TURN_OUTPUT_PROMPT = (
     "You are the server-bound social agent described in the social context. Use only the supplied channel-safe tools. "
+    "On every model call, including after earlier visible turns, return exactly one JSON object; do not continue in plain text. "
     "Return exactly one JSON object with required reply (string or null), optional state_delta (at most 16 claim patches), "
     "decision_note (at most 240 characters), and followup (check, cancel_when, optional ISO-8601 not_before). "
     "Each claim patch has op assert/retract, claim_id and evidence_ids. Assertions also require text, kind "

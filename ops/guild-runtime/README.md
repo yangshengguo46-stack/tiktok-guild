@@ -54,7 +54,11 @@ npm start
 
 `public-outreach-operator` 使用提交的 `package-lock.json` 固定 Appium 3 和 UiAutomator2 driver。`npm ci --ignore-scripts` 安装本地依赖，`npm run android:doctor` 检查 SDK/Java。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
-当前开发与验收阶段，`npm start` 会临时注入 `DEER_FLOW_AUTH_DISABLED=1`，使用 DeerFlow 内置的本地 synthetic admin，因而不会被 `/setup` 的账号密码注册页拦住。账号、密码、会话和数据库实现均保留；出厂部署前移除该启动注入即可恢复正常认证。后端在 `DEER_FLOW_ENV=production` 或 `ENVIRONMENT=production` 时会忽略此开关，并在本地生效时输出明确警告，因此不要把这个本地模式暴露到共享或生产环境。
+当前开发与验收阶段，`npm start` 默认临时注入 `DEER_FLOW_AUTH_DISABLED=1`，使用 DeerFlow 内置的本地 synthetic admin，因而不会被 `/setup` 的账号密码注册页拦住。设 `DEER_FLOW_AUTH_DISABLED=0` 可在本地保留正常认证；`DEER_FLOW_ENV` 或 `ENVIRONMENT` 为 `prod`/`production` 时，启动器强制设置 `DEER_FLOW_AUTH_DISABLED=0`，进入原生账号、密码和会话认证流程。只有本地绕过实际生效时才输出 synthetic admin 警告。
+
+本机启动的 Nginx、Gateway 和 Frontend 均只监听 loopback（统一入口为 `http://localhost:2026`），本地 synthetic admin 模式不可用作共享或对外服务。正式部署仍需单独验收身份、权限、入口与目标数据库；生产模式标记本身不是发布验收。
+
+三项服务的标准输出和错误输出统一写入仓库 `logs/{gateway,frontend,nginx}.log`，每个文件默认最多 10 MiB、保留 3 个备份，重启继续保留最近记录。可用 `DEER_FLOW_LOG_MAX_BYTES` 和 `DEER_FLOW_LOG_BACKUPS` 设置上限。Nginx 不再另写无界增长的 access/error 文件；已有历史日志保留供审计。
 
 原生运行时只读受 Git 跟踪的 `config/extensions_config.guild.json`；它固定
 `guild_operator`、`broker_operator`、`tkdesk`、`public_outreach_operator` 四个 MCP server 及它们的
@@ -62,9 +66,9 @@ npm start
 
 TKDesk 的 `reopen_login` 是采集子后台恢复工具：经明确授权后，只在已核验的专用 Chrome 中打开固定官方后台页；保留进程、登录资料与人工标签。DeerFlow 的工具白名单已包含它，但调用前仍须验证线路和身份；它只负责名单和 `userId`，公会长消息发送归 `guild_operator`，经纪人消息发送归 `broker_operator`。
 
-`doctor` 只读检查 Appium/UiAutomator2、Android SDK、ADB、Java、运行目录、配置中的设备序列号和 `adb devices -l` 在线状态。没有配置试点设备时，报告外部写入关闭。它不登录 TikTok，不产生业务动作；真实 UI 定位器和平台回执仍需单台真机验证。
+`doctor` 只读检查 Appium/UiAutomator2、Android SDK 环境变量、ADB/Java 主机命令、运行目录、配置中的设备序列号和 `adb devices -l` 在线状态。已配置设备只要有一台缺失、离线或未授权，就检查失败并阻止启动；没有配置试点设备时，报告外部写入关闭。主机命令可用不等于完整 SDK、Appium session 或 TikTok UI 已验证；完整 Android 依赖检查仍用 `npm run android:doctor`，真实 UI 定位器和平台回执仍需单台真机验证。两项 doctor 都不登录 TikTok或产生业务动作。
 
-`acceptance --static` 使用 fake adapter 验证 MCP 目录和原生合同；`doctor --live` 额外探测实际 MCP 目录。两者都不能替代真机验收。
+`acceptance --static` 使用 fake adapter 验证 Android 通道的 MCP 目录和原生合同；`doctor --live` 额外探测实际 MCP 目录。两者都不能替代真机验收。本文安装步骤仍属于开发和受控试点；客户无需命令行的依赖安装、升级/回退和 Windows/macOS 交付向导尚未实现。
 
 ## 恢复手册
 

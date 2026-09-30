@@ -147,6 +147,22 @@ async def test_real_lead_commits_before_streaming_only_reply(monkeypatch, repo, 
 
 
 @pytest.mark.asyncio
+async def test_external_social_request_keeps_frozen_kernel_without_operator_soul(monkeypatch, repo):
+    """The social output contract must not erase the actual conversation policy."""
+    model = ScriptedModel(responses=[AIMessage(content='{"reply":"hello"}')])
+    graph, config = await assembly(monkeypatch, repo, model)
+    await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+    system = "\n".join(message.content for message in model.seen[0] if message.type == "system")
+    assert "话题不必为业务服务" in system
+    assert "不为迎合而假装同意" in system
+    assert "不能用虚构亲密关系、排他依赖或隐瞒条件获得商业同意" in system
+    assert system.count("# 默认社交内核") == 1
+    assert "Return exactly one JSON object" in system
+    assert "Operator base prompt." not in system
+    assert system.count("<social-runtime-context>") == 1
+
+
+@pytest.mark.asyncio
 async def test_real_lead_native_tool_loop_filters_channel_unsafe_tools(monkeypatch, repo):
     executions = []
 

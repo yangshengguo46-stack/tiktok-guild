@@ -90,6 +90,19 @@ user-facing behavior and the relevant `AGENTS.md` for development changes.
 
 ### Backend Benchmarks
 
+The native external-social Lead loads the approved `SOCIAL_KERNEL.md` through
+`deerflow.social.assets.load_social_kernel`, checking its fixed SHA-256 before
+combining it with the private TurnResult contract. Keep management Chat's
+ordinary prompt separate; do not substitute mutable local SOUL content or six
+persona instructions into an external turn. `tests/test_social_assets.py` and
+`tests/test_social_lead_runtime.py` pin the artifact and actual ModelRequest.
+
+`tests/test_social_postgres.py` is opt-in with `TEST_POSTGRES_URI`, matching the
+existing MCP/scheduler integration tests. It creates disposable schemas via
+the normal bootstrap and verifies persona CAS, durable outbox replay and one
+creator sequence under competing senders against real PostgreSQL. No platform
+provider is involved; default offline runs skip it without a URI.
+
 `scripts/benchmark/context_snapshot/`: explicit `run-live` needs provider env
 vars; `summarize` and pytest are offline. See its README for the protocol.
 

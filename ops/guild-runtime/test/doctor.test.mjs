@@ -16,6 +16,7 @@ import {
   inspectNativeSocialRuntime,
   inspectPersonaCatalog,
   inspectPinnedPnpm,
+  inspectRegisteredDevices,
   inspectUiAutomator2DriverRegistration,
   runDoctor,
 } from '../scripts/doctor.mjs';
@@ -48,6 +49,36 @@ const REQUIRED_CHECKS = [
   'broker_mcp',
   'tkdesk_mcp',
 ];
+
+async function deviceDoctorFixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'guild-device-doctor-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'execution.json');
+  await writeFile(file, JSON.stringify({ devices: [
+    { device_ref: 'host:test-serial', udid: 'test-serial', system_port: 8201, appium_url: 'http://127.0.0.1:4723' },
+  ] }));
+  return { PUBLIC_OUTREACH_EXECUTION_CONFIG: file, PATH: '/fixture/android-tools' };
+}
+
+for (const state of ['offline', 'unauthorized', 'missing']) {
+  test(`device doctor fails when a configured Android device is ${state}`, async (t) => {
+    const environment = await deviceDoctorFixture(t);
+    await assert.rejects(inspectRegisteredDevices({ environment, run: async () => ({
+      code: 0, stderr: '', stdout: `List of devices attached\n${state === 'missing' ? '' : `test-serial ${state}\n`}`,
+    }) }), /0\/1.*(?:offline|unauthorized|unavailable)/iu);
+  });
+}
+
+test('device doctor uses the supplied Android tool environment and verifies every configured serial', async (t) => {
+  const environment = await deviceDoctorFixture(t);
+  const report = await inspectRegisteredDevices({ environment, run: async (command, args, options) => {
+    assert.equal(command, 'adb');
+    assert.deepEqual(args, ['devices', '-l']);
+    assert.equal(options.env, environment);
+    return { code: 0, stderr: '', stdout: 'List of devices attached\ntest-serial device product:fixture\n' };
+  } });
+  assert.match(report.detail, /1\/1 configured Android devices online/u);
+});
 
 test('doctor reports every required check by name and never stops at the first failure', async () => {
   const adapters = Object.fromEntries(REQUIRED_CHECKS.map((name) => [name, async () => {

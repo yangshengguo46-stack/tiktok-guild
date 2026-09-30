@@ -79,7 +79,7 @@ test('uncertain write pauses the device and failed Appium cleanup retains its lo
 test('Android TikTok action requires versioned locators and verifies exact sender, target and state change', async () => {
   const account = { sender_account_id: 'a1', external_ref: '@sender' };
   const creator = { creator_uid: 'creator-1', handle: '@target', profile_url: 'https://www.tiktok.com/@target' };
-  const locators = { version: 'pilot-1', senderIdentity: { accessibility_id: 'sender' }, creatorIdentity: { accessibility_id: 'target' }, followButton: { accessibility_id: 'follow' }, followState: { attribute: 'selected', active: 'true' } };
+  const locators = { version: 'pilot-1', senderIdentity: { accessibility_id: 'sender' }, creatorIdentity: { accessibility_id: 'target' }, followButton: { accessibility_id: 'follow' }, followState: { attribute: 'selected', inactive: 'false', active: 'true' } };
   let active = false;
   const events = [];
   const driver = {
@@ -119,7 +119,7 @@ test('Android like refuses a video ID mismatch before any platform write', async
     payload: { video_url: 'https://www.tiktok.com/@target/video/123' }, appPackage: 'com.zhiliaoapp.musically',
     locators: { version: 'pilot-1', senderIdentity: { accessibility_id: 'sender' }, creatorIdentity: { accessibility_id: 'creator' },
       videoIdentity: { accessibility_id: 'video' }, videoIdentityProof: { attribute: 'data-video-id' },
-      likeButton: { accessibility_id: 'like' }, likeState: { attribute: 'selected', active: 'true' } },
+      likeButton: { accessibility_id: 'like' }, likeState: { attribute: 'selected', inactive: 'false', active: 'true' } },
   });
   assert.equal(result.error_code, 'video_identity_mismatch');
   assert.equal(clicked, false);
@@ -132,7 +132,7 @@ test('production executor rejects old channel and exposes per-device control', a
   try {
     const base = { account: { owner_user_id: 'owner', sender_account_id: 'sender', channel: 'web', device_ref: device.device_ref }, creator: { creator_uid: 'creator' }, action: 'follow' };
     assert.equal((await executor.execute(base)).error_code, 'sender_unconfigured');
-    assert.equal((await executor.execute({ operation: 'control', device_ref: device.device_ref, commands: [{ type: 'observe' }] })).results[0].nodes[0].text, 'Ready');
+    assert.equal((await executor.execute({ operation: 'control', device_ref: device.device_ref, owner_user_id: 'owner', commands: [{ type: 'observe' }] })).results[0].nodes[0].text, 'Ready');
     assert.equal((await executor.execute({ operation: 'doctor', device_ref: 'unknown' })).error_code, 'device_unconfigured');
   } finally { await executor.close(); await rm(root, { recursive: true, force: true }); }
 });

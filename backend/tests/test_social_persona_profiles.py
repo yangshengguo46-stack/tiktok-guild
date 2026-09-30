@@ -124,6 +124,16 @@ async def test_automatic_choice_requires_new_owned_creator_evidence_and_cas_inpu
 
 
 @pytest.mark.asyncio
+async def test_automatic_choice_accepts_canonical_versioned_ref_without_double_suffix():
+    model = FakeModel('{"action":"switch","persona_id":"clear_direct@1.0.1","confidence":0.8,"evidence_refs":["creator:m1"],"reason":"asked for directness"}')
+    selector = AutomaticPersonaSelector(model=model)
+    evidence = [{"source_ref": "creator:m1", "source_kind": "creator_message", "owner_user_id": "owner", "account_id": "account", "relation_ref": "creator", "evidence_version": 2, "text": "Be direct"}]
+    result = await selector.choose(scope=SCOPE, current_profile_ref="relaxed_wit@1.0.1", candidates=load_persona_catalog(), evidence=evidence, evidence_version=2, evaluated_evidence_version=1, binding_revision=3)
+    assert result is not None
+    assert result.profile_ref == "clear_direct@1.0.1"
+
+
+@pytest.mark.asyncio
 async def test_automatic_choice_rejects_cross_scope_and_low_confidence():
     model = FakeModel('{"action":"switch","persona_id":"clear_direct","confidence":0.74,"evidence_refs":["creator:m1"],"reason":"direct"}')
     selector = AutomaticPersonaSelector(model=model)

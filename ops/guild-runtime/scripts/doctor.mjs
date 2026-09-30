@@ -232,7 +232,7 @@ async function inspectWritableStateRoot(target, label) {
   };
 }
 
-async function inspectRegisteredDevices({ environment, run = runCommand }) {
+export async function inspectRegisteredDevices({ environment, run = runCommand }) {
   const file = environment.PUBLIC_OUTREACH_EXECUTION_CONFIG;
   if (!file) return { detail: 'no Android pilot device configuration; external writes remain disabled' };
   const config = await readJsonFile(file, 'Android execution configuration');
@@ -249,11 +249,14 @@ async function inspectRegisteredDevices({ environment, run = runCommand }) {
     }
     refs.add(device.device_ref); serials.add(device.udid); ports.add(device.system_port);
   }
-  const result = await run('adb', ['devices', '-l'], { timeoutMs: 5000 });
+  const result = await run('adb', ['devices', '-l'], { timeoutMs: 5000, env: environment });
   if (result.code !== 0) throw new Error('adb devices -l failed');
   const online = new Set(String(result.stdout).split(/\r?\n/).slice(1)
     .map((line) => line.trim().split(/\s+/)).filter(([, state]) => state === 'device').map(([serial]) => serial));
   const count = values.filter((device) => online.has(device.udid)).length;
+  if (count !== values.length) {
+    throw new Error(`${count}/${values.length} configured Android devices online; offline, unauthorized or unavailable devices require manual recovery`);
+  }
   return { detail: `${count}/${values.length} configured Android devices online via adb; TikTok UI proof still requires a live pilot` };
 }
 
@@ -617,9 +620,9 @@ function defaultAdapters(packageRoot, { gatewayUrl, environment, timeoutMs }) {
     public_outreach_uiautomator2_registration: async () => inspectUiAutomator2DriverRegistration({ operatorRoot }),
     public_outreach_android_tools: async () => {
       if (!runtimeEnvironment.ANDROID_HOME && !runtimeEnvironment.ANDROID_SDK_ROOT) throw new Error('ANDROID_HOME or ANDROID_SDK_ROOT is required');
-      await requireSuccess('adb', ['version'], { timeoutMs: 5000 });
-      await requireSuccess('java', ['-version'], { timeoutMs: 5000 });
-      return { detail: 'Android SDK path, adb and Java are available' };
+      await requireSuccess('adb', ['version'], { timeoutMs: 5000, env: runtimeEnvironment });
+      await requireSuccess('java', ['-version'], { timeoutMs: 5000, env: runtimeEnvironment });
+      return { detail: 'Android SDK path is declared; adb and Java host binaries are available; SDK components and Appium device sessions remain unverified' };
     },
     public_outreach_runtime_root: async () => inspectWritableStateRoot(
       runtimeEnvironment.PUBLIC_OUTREACH_RUNTIME_ROOT,

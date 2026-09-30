@@ -9,23 +9,23 @@ import { formatDoctorReport, runDoctor } from './doctor.mjs';
 
 export async function startRuntime({
   packageRoot,
+  environment = process.env,
   installSoul = ensureGuildSoul,
   doctor = (options) => runDoctor(options),
   start = spawnForeground,
 } = {}) {
   const root = path.resolve(packageRoot);
   await installSoul({ packageRoot: root });
-  const report = await doctor({ packageRoot: root });
+  const report = await doctor({ packageRoot: root, environment });
   if (!report.ok) {
     const failed = report.checks.filter(({ ok }) => !ok).map(({ name }) => name).join(', ');
     throw new Error(`Doctor failed: ${failed}.\n${formatDoctorReport(report)}`);
   }
-  const childEnv = buildRuntimeEnvironment({ packageRoot: root });
-  const environmentMarker = (childEnv.DEER_FLOW_ENV ?? childEnv.ENVIRONMENT ?? '').trim().toLowerCase();
-  if (childEnv.DEER_FLOW_AUTH_DISABLED === '1' && !['prod', 'production'].includes(environmentMarker)) {
+  const childEnv = buildRuntimeEnvironment({ packageRoot: root, environment });
+  if (childEnv.DEER_FLOW_AUTH_DISABLED === '1') {
     console.warn(
       'Guild runtime local mode: authentication setup is bypassed with a synthetic admin. '
-        + 'Remove DEER_FLOW_AUTH_DISABLED before production deployment.',
+        + 'Set DEER_FLOW_ENV=production or DEER_FLOW_AUTH_DISABLED=0 to require authentication.',
     );
   }
   const code = await start('make', ['start'], {

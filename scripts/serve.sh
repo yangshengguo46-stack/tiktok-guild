@@ -259,6 +259,7 @@ _kill_repo_nginx() {
 stop_all() {
     echo "Stopping all services..."
     _report_reclaimed_ports
+    _kill_repo_processes "ops/guild-runtime/scripts/log-service.mjs"
     _kill_repo_processes "uvicorn app.gateway.app:app"
     _kill_repo_processes "next dev"
     _kill_repo_processes "next start"
@@ -323,15 +324,15 @@ export DEERFLOW_PNPM_PYTHON DEERFLOW_PNPM_RUNNER
 
 # Frontend command
 if $DEV_MODE; then
-    FRONTEND_CMD='env PORT=3000 "$DEERFLOW_PNPM_PYTHON" "$DEERFLOW_PNPM_RUNNER" run dev'
+    FRONTEND_CMD='env PORT=3000 "$DEERFLOW_PNPM_PYTHON" "$DEERFLOW_PNPM_RUNNER" run dev --hostname 127.0.0.1'
     if $SKIP_FRONTEND_BUILD; then
         echo "  Note: --skip-frontend-build is ignored in dev mode (next dev does not build)."
     fi
 elif $SKIP_FRONTEND_BUILD; then
     # The BUILD_ID preflight above already guarantees a reusable build exists.
-    FRONTEND_CMD="env PORT=3000 BETTER_AUTH_SECRET=$($DEERFLOW_PNPM_PYTHON -c 'import secrets; print(secrets.token_hex(16))') \"\$DEERFLOW_PNPM_PYTHON\" \"\$DEERFLOW_PNPM_RUNNER\" run start"
+    FRONTEND_CMD="env PORT=3000 BETTER_AUTH_SECRET=$($DEERFLOW_PNPM_PYTHON -c 'import secrets; print(secrets.token_hex(16))') \"\$DEERFLOW_PNPM_PYTHON\" \"\$DEERFLOW_PNPM_RUNNER\" run start --hostname 127.0.0.1"
 else
-    FRONTEND_CMD="env PORT=3000 BETTER_AUTH_SECRET=$($DEERFLOW_PNPM_PYTHON -c 'import secrets; print(secrets.token_hex(16))') \"\$DEERFLOW_PNPM_PYTHON\" \"\$DEERFLOW_PNPM_RUNNER\" run preview"
+    FRONTEND_CMD="env PORT=3000 BETTER_AUTH_SECRET=$($DEERFLOW_PNPM_PYTHON -c 'import secrets; print(secrets.token_hex(16))') \"\$DEERFLOW_PNPM_PYTHON\" \"\$DEERFLOW_PNPM_RUNNER\" run preview --hostname 127.0.0.1"
 fi
 
 # Runtime path defaults. Local `make dev` launches Gateway from `backend/`,
@@ -459,6 +460,7 @@ trap 'cleanup 143' TERM
 # In daemon mode, wraps with nohup. Waits for port to be ready.
 run_service() {
     local name="$1" cmd="$2" port="$3" timeout="$4"
+    local logfile="logs/$(echo "$name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-').log"
 
     if _is_port_listening "$port"; then
         echo "✗ $name cannot start because port $port is already in use."
@@ -471,13 +473,16 @@ run_service() {
         # Tag the daemon so every descendant (pnpm → next → next-server)
         # carries DEERFLOW_DAEMON_ROOT in its environment, letting
         # _is_deerflow_pid recognize it at stop time.
-        nohup env DEERFLOW_DAEMON_ROOT="$REPO_ROOT" sh -c "$cmd" > /dev/null 2>&1 &
+        nohup env DEERFLOW_DAEMON_ROOT="$REPO_ROOT" node "$REPO_ROOT/ops/guild-runtime/scripts/log-service.mjs" \
+            --log "$logfile" --max-bytes "${DEER_FLOW_LOG_MAX_BYTES:-10485760}" \
+            --backups "${DEER_FLOW_LOG_BACKUPS:-3}" -- sh -c "$cmd" > /dev/null 2>&1 &
     else
-        sh -c "$cmd" &
+        node "$REPO_ROOT/ops/guild-runtime/scripts/log-service.mjs" \
+            --log "$logfile" --max-bytes "${DEER_FLOW_LOG_MAX_BYTES:-10485760}" \
+            --backups "${DEER_FLOW_LOG_BACKUPS:-3}" -- sh -c "$cmd" &
     fi
 
     bash ./scripts/wait-for-port.sh "$port" "$timeout" "$name" || {
-        local logfile="logs/$(echo "$name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-').log"
         echo "✗ $name failed to start."
         [ -f "$logfile" ] && tail -20 "$logfile"
         cleanup 1
@@ -492,17 +497,17 @@ mkdir -p temp/client_body_temp temp/proxy_temp temp/fastcgi_temp temp/uwsgi_temp
 
 # 1. Gateway API
 run_service "Gateway" \
-    "cd backend && PYTHONPATH=. uv run --no-sync uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 $GATEWAY_EXTRA_FLAGS > ../logs/gateway.log 2>&1" \
+    "cd backend && PYTHONPATH=. uv run --no-sync uvicorn app.gateway.app:app --host 127.0.0.1 --port 8001 $GATEWAY_EXTRA_FLAGS" \
     8001 30
 
 # 2. Frontend
 run_service "Frontend" \
-    "cd frontend && $FRONTEND_CMD > ../logs/frontend.log 2>&1" \
+    "cd frontend && $FRONTEND_CMD" \
     3000 300
 
 # 3. Nginx
 run_service "Nginx" \
-    "nginx -g 'daemon off;' -c '$REPO_ROOT/docker/nginx/nginx.local.conf' -p '$REPO_ROOT' > logs/nginx.log 2>&1" \
+    "nginx -g 'daemon off;' -c '$REPO_ROOT/docker/nginx/nginx.local.conf' -p '$REPO_ROOT'" \
     2026 10
 
 # ── Ready ────────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ export function createProductionExecutor({ runtimeRoot, config = {}, driverFacto
     return device && {
       device_ref: device.device_ref, udid: device.udid, system_port: device.system_port,
       appium_url: device.appium_url, app_package: device.app_package, app_activity: device.app_activity,
+      owner_user_id: device.owner_user_id ?? (config.sender?.device_ref === ref ? config.sender.owner_user_id : null),
     };
   }
   function admitted({ account, creator, action }) {
@@ -36,6 +37,7 @@ export function createProductionExecutor({ runtimeRoot, config = {}, driverFacto
       || sender.device_ref !== account.device_ref) return { verified: false, error_code: 'sender_unconfigured' };
     const device = deviceFor(account.device_ref);
     if (!device) return { verified: false, error_code: 'device_unconfigured' };
+    if (!device.owner_user_id || device.owner_user_id !== account.owner_user_id) return { verified: false, error_code: 'device_owner_mismatch' };
     const slot = await acquireResourceSlot({ root: runtimeRoot, kind: 'android', maximum: 1 });
     if (!slot.ok) return { verified: false, error_code: slot.error_code };
     let hold = false;
@@ -54,6 +56,7 @@ export function createProductionExecutor({ runtimeRoot, config = {}, driverFacto
     if (operation === 'business') return executeBusiness(request);
     const device = deviceFor(request.device_ref);
     if (!device) return { ok: false, error_code: 'device_unconfigured' };
+    if (!device.owner_user_id || device.owner_user_id !== request.owner_user_id) return { ok: false, error_code: 'device_owner_mismatch' };
     if (operation === 'doctor') return runtime.doctor(device);
     if (operation === 'control') return runtime.control(device, request.commands);
     if (operation === 'takeover') return runtime.takeover(device);

@@ -25,11 +25,20 @@ export async function createAndroidDriver({ appiumUrl, udid, systemPort, appPack
   };
   if (appPackage) alwaysMatch['appium:appPackage'] = appPackage;
   if (appActivity) alwaysMatch['appium:appActivity'] = appActivity;
-  const created = await request('POST', '/session', { capabilities: { alwaysMatch, firstMatch: [{}] } });
+  let created;
+  try {
+    created = await request('POST', '/session', { capabilities: { alwaysMatch, firstMatch: [{}] } });
+  } catch (cause) {
+    // A lost creation response does not establish that Appium created no session.
+    throw Object.assign(new Error('Appium session creation result is unknown.', { cause }), { error_code: 'cleanup_unknown' });
+  }
   const sessionId = created?.sessionId;
-  if (!sessionId || created.capabilities?.platformName?.toLowerCase() !== 'android'
+  if (typeof sessionId !== 'string' || !sessionId.trim()) throw Object.assign(new Error('Appium did not return a session identity.'), { error_code: 'cleanup_unknown' });
+  const platformName = created.capabilities?.platformName;
+  if (typeof platformName !== 'string' || platformName.toLowerCase() !== 'android'
     || (created.capabilities?.['appium:udid'] ?? created.capabilities?.udid) !== udid) {
-    if (sessionId) await request('DELETE', `/session/${encodeURIComponent(sessionId)}`);
+    try { await request('DELETE', `/session/${encodeURIComponent(sessionId)}`); }
+    catch (cause) { throw Object.assign(new Error('Unexpected Appium session cleanup is unconfirmed.', { cause }), { error_code: 'cleanup_unknown' }); }
     throw Object.assign(new Error('Appium session did not confirm the requested Android device.'), { error_code: 'device_mismatch' });
   }
   const prefix = `/session/${encodeURIComponent(sessionId)}`;

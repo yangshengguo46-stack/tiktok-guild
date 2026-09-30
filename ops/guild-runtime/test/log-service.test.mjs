@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,33 @@ import { fileURLToPath } from 'node:url';
 import { runCommand } from '../src/process.mjs';
 
 const LOGGER = fileURLToPath(new URL('../scripts/log-service.mjs', import.meta.url));
+const FORK_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+
+for (const daemon of [false, true]) {
+  test(`service launcher captures bounded logs in ${daemon ? 'daemon' : 'foreground'} mode`, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'guild-launcher-log-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await mkdir(path.join(root, 'scripts'));
+    await mkdir(path.join(root, 'logs'));
+    // Exercise the real launcher function without starting any application service.
+    await writeFile(path.join(root, 'scripts', 'wait-for-port.sh'), 'exit 0\n');
+    const source = await readFile(path.join(FORK_ROOT, 'scripts', 'serve.sh'), 'utf8');
+    const launcher = source.slice(source.indexOf('run_service() {'), source.indexOf('# ── Start services'));
+    const fixture = path.join(root, 'launcher.sh');
+    await writeFile(fixture, `${launcher}\n_is_port_listening() { return 1; }\nrun_service Test \"printf abcdefghijklmnopqrstuvwxyz012345\" 1 1\nwait\n`);
+    const result = await runCommand('bash', [fixture], {
+      cwd: root,
+      env: { ...process.env, REPO_ROOT: FORK_ROOT, DAEMON_MODE: String(daemon),
+        DEER_FLOW_LOG_MAX_BYTES: '8', DEER_FLOW_LOG_BACKUPS: '2' },
+      timeoutMs: 5000,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    const logRoot = path.join(root, 'logs');
+    assert.deepEqual((await readdir(logRoot)).sort(), ['test.log', 'test.log.1', 'test.log.2']);
+    const retained = await Promise.all(['.2', '.1', ''].map((suffix) => readFile(path.join(logRoot, `test.log${suffix}`), 'utf8')));
+    assert.equal(retained.join(''), 'ijklmnopqrstuvwxyz012345');
+  });
+}
 
 async function temporaryLog(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'guild-log-rotation-'));
