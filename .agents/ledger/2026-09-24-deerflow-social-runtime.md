@@ -392,3 +392,9 @@ The owner clarified the target: a mature broker-style Lead should inspect a crea
 ## 2026-10-01 Creator Intelligence evaluation boundary
 
 Two synthetic/public-like fixtures exercise planner continuity, accepted-memory promotion, stage progression and the formal-invite consent gate. Preflight fields `intelligence_snapshot_revision`, `plan_stage`, `estimate`, `memory_promotions`, and `verified_funnel_stage` are offline evidence only; they do not establish live conversion, provider receipt, phone readiness, customer installation, or TikTok delivery.
+
+### 2026-10-01 Creator Intelligence final acceptance
+
+Final review of the creator-intelligence range found no Critical/Important findings. The final focused suite passed 321 tests; blocking-I/O passed 144 tests with only upstream deprecation warnings; `ops/guild-runtime` passed 111 tests; Ruff and `git diff --check` passed. The full backend non-live run was 17,665 passed, 189 skipped, and 21 failures in existing browser/MCP/pnpm/extension environment coverage; the isolated social concurrency failure passed when rerun.
+
+Current HEAD is `97c331208`. The implementation remains native and offline-bounded: no live TikTok delivery, provider receipt, Android readiness, signing, customer installation, or conversion is claimed.

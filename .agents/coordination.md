@@ -95,3 +95,11 @@ Ruling: Creator Intelligence is implemented as a sub-layer of the existing `deer
 ### 2026-10-01 Creator Intelligence evaluation ruling
 
 离线 preflight 仅使用合成/public-like fixture，报告的 snapshot、plan、memory promotion 和 funnel stage 都是边界证据。P50/P80 只表示阶段目标的估计回合数；没有 consent、verified receipt 或 provider read-back 时，不得升级为 formal invite、application、signed 或 live conversion。手机、真实 provider、客户安装和持续记忆唤醒继续单独验收。
+
+## 2026-10-01 Creator Intelligence final hardening
+
+Final review found no Critical or Important issue. Creator evidence IDs/source refs are host-derived and admitted to the same atomic memory/claim commit; followup scheduling uses pre/post social revision fences; application/signing transitions require a receipt from an outbound action after the current formal-invite/application anchor. Persisted plans validate shape, stage, and revision, with backward-compatible recovery for older plans without `consent_evidence_ids`. Typed creator consent gates `formal_invite`; DNC, takeover, identity revocation, and provider unknown cancel queued followups while preserving running fences.
+
+Final code commits: `764f67d10`, `ca2f35249`, `be3e6d69`, `106ba882`, `1ed00c788`, `97c331208`. Focused social/intelligence/scheduler/repository/preflight suite: **321 passed**; blocking-I/O: **144 passed**; guild runtime ops: **111 passed**; Ruff and `git diff --check` pass. The full backend non-live run recorded **17665 passed, 189 skipped, 21 failed** in existing browser/MCP/pnpm/extension environment coverage; the isolated social persona concurrency case passed on rerun.
+
+These results do not prove a real TikTok provider, Android/Appium session, platform receipt, application/signing, customer installation, or live conversion. Offline fixtures and P50/P80 estimates remain boundary evidence only.
