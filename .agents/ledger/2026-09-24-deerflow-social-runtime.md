@@ -42,6 +42,8 @@
 
 因此总台账中 Task 1–10 的“完成”指**原生代码与本地验收完成**，不等于上述 WP1–WP4 的模型效果、真实材料、平台业务和发布验收都已完成。
 
+本次材料到代码的本地审计（2026-09-30）：来源 ZIP SHA-256 为 `788924f9d7e3d63327d85351f76088ecd6427141396d42a9752bdd448a930ba1`，与执行性修订记录一致；`python3 scripts/verify_creator_agent_assets.py` 验证 76 个附件文件通过。当前安卓隔离分支上运行 `backend/.venv/bin/pytest -q` 指定的 `test_social_assets.py`、`test_social_contracts.py`、`test_social_persona_profiles.py`、`test_social_management_tools.py`、`test_social_lead_runtime.py`、`test_social_repository.py`、`test_social_channels.py`，结果 **404 passed**。抽查实际 `lead_agent/agent.py` 的 `SocialRuntime` 装配、`social/middleware.py` 的模型请求注入、`social/persona/selector.py` 的证据选择和 `social/turns.py` 的提交边界；这些路径不是单纯附件参考代码。真实模型运行记录只有未激活的生成候选及一次 `stay`，没有自然多轮或语义 `switch` 成功证据。本次完成的是五份入口材料与原生路径的**本地能力审计**，未进行全仓逐行安全审计、真实 TikTok/安卓设备或产品发布终验。
+
 主机现状：Mac 上 ADB、Java、Appium/UiAutomator2 已做启动级验证；匹配真机版本的 SDK Platform/Build Tools 尚待补齐，scrcpy 尚不可用，Windows 未验证。现有 `bootstrap`/`doctor` 面向开发与试点，不是客户一键安装。手工准备已实际遇到 JDK 安装权限、scrcpy 动态库不兼容和下载失败，因此 P3 是正式交付前的产品事项，不要求每位客户自行排障。
 
 恢复时先读本节并核对当前分支、主机与设备状态。旧双通道 Task 的“完成”只表示历史本地合同验收，不应重新启动 Web/iPhone pilot，亦不应推断安卓真机、TikTok 写入或 50 台并发已完成。
