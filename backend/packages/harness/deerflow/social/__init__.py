@@ -17,4 +17,13 @@ __all__ = [
     "SocialScope",
     "TurnResult",
     "load_social_assets",
+    "ConversationPlan",
+    "ConversationStage",
+    "CreatorEvidence",
+    "CreatorEvidenceProvider",
+    "CreatorIntelligenceSnapshot",
+    "build_snapshot",
+    "plan_conversation",
 ]
+
+from deerflow.social.intelligence import ConversationPlan, ConversationStage, CreatorEvidence, CreatorEvidenceProvider, CreatorIntelligenceSnapshot, build_snapshot, plan_conversation
