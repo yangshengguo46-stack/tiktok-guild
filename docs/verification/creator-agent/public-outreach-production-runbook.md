@@ -20,16 +20,28 @@ External writes are disabled when no execution configuration is supplied. Creati
     "owner_user_id": "REPLACE_WITH_AUTHENTICATED_USER_ID",
     "sender_account_id": "REPLACE_WITH_NATIVE_SENDER_ID",
     "channel": "web",
-    "headless": false
+    "headless": false,
+    "web_route": {
+      "proxy_server": "http://127.0.0.1:PORT",
+      "expected_country": "US"
+    }
   }
 }
 ```
+
+For a Web sender, `sender.web_route` is required even when the host already has a system proxy. The operator accepts an explicit loopback HTTP or SOCKS5 proxy endpoint and a two-letter uppercase `expected_country`; optional `expected_ip` must be an IP literal. This pilot worker config binds one sender; multi-sender configuration and scheduling are a later increment. The operator does not start the proxy or select a new endpoint: bring up the intended local proxy service first, then point this private file at it. Never put proxy credentials in this route or commit the private file. A Web task with no valid route remains pending.
 
 Set `PUBLIC_OUTREACH_RUNTIME_ROOT` to the same external directory for every Gateway worker on the host. Its default is `$HOME/.codex/tiktok-live-public-outreach`. Web profiles live below `web-profiles/profiles/<sha256(owner,sender)>`; resource leases live below `slots/`. The ops runtime's doctor profile root defaults to the same `web-profiles` directory. Keep the private deployment file, cookies, screenshots, device records and UDIDs out of Git. Dependencies are installed in the ignored operator `node_modules` directory using the committed lockfile.
 
 Gateway requires native persistence and initializes its executor in lifespan. The Node process is lazy: a closed pilot gate creates no browser/device process. Gateway injects the existing internal token and the resolved runtime user into each owner/thread stdio MCP session; never configure a globally fixed owner or internal token in extensions JSON. Gateway rehydrates that owner through the existing local auth provider and retains the original role and `threads:read/write` checks. A bare owner header is ignored. The existing synthetic `default` admin works only under the existing local nonproduction auth-disabled gate; production never uses that fallback. `PUBLIC_OUTREACH_GATEWAY_URL` is optional; the default is loopback plus the actual configured Gateway port.
 
 ## Provider entry and current pilot blockers
+
+### Web network initialization
+
+An admin can call `POST /api/public-outreach/accounts/{sender_account_id}/network-preflight` for their own Web sender. This opens the sender's persistent Playwright context with the explicit proxy, checks the local proxy socket, requests `https://www.cloudflare.com/cdn-cgi/trace` **inside that context**, compares the observed exit country and optional IP, and closes the context. The response reports readiness and country only; it does not return the observed IP or route. It neither visits TikTok nor claims an action task. A disabled local Web profile remains disabled and fails with `profile_unavailable`.
+
+When an admitted Web action is executed, Gateway runs the same preparation immediately before the native workflow claims the task or records an external attempt. The checked context is held under a short-lived, sender-bound, one-use preparation ID; the action consumes that context. Gateway releases unused preparations, and the worker retains the existing profile and host-slot cleanup fences if browser close cannot be confirmed. `web_route_unconfigured`, `web_route_invalid`, `proxy_unreachable`, `egress_check_failed`, `egress_country_mismatch`, `egress_ip_mismatch`, and `browser_cleanup_failed` block the action before provider dispatch and leave its native task pending with `attempt_count: 0`. Check the configured local proxy and its country/IP exit, then run the explicit network preflight again. Static `npm run doctor -- --static` checks startup dependencies and cannot prove this account's browser exit. A passing network preflight proves routing at that moment; it does not prove a TikTok login, account health, or action receipt.
 
 **Observed login stop (2026-09-30):** A user manually tried the dedicated
 headed Playwright TikTok login window and reported “访问频繁”. We closed the
