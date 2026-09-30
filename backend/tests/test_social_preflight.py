@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -41,6 +42,26 @@ def test_synthetic_intelligence_cases_bound_plan_and_funnel_stage():
     assert len(cases) == 2
     assert all(case["intelligence_snapshot_revision"] == 1 for case in cases)
     assert all(case["plan_stage"] == "discovery" and case["formal_invite_allowed"] is False for case in cases)
+
+
+@pytest.mark.asyncio
+async def test_runtime_intelligence_case_derives_memory_and_consent_gate(tmp_path):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from deerflow.persistence.base import Base
+    from deerflow.persistence.social import SocialRepository
+    from scripts.benchmark.social_preflight.intelligence_cases import evaluate_runtime_fixture
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'intelligence.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    try:
+        result = await evaluate_runtime_fixture(Path(__file__).parent / "fixtures" / "social_intelligence" / "creator_001.json", SocialRepository(async_sessionmaker(engine, expire_on_commit=False)))
+        assert result["second_turn_loaded_memory"] is True
+        assert result["memory_promotions"] == ["memory-1"]
+        assert result["formal_invite_allowed"] is False
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

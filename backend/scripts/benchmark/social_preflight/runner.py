@@ -26,7 +26,7 @@ from deerflow.social.persona.selector import AutomaticPersonaSelector
 from deerflow.social.runtime import TURN_OUTPUT_PROMPT, SocialRuntime, SocialRuntimeBinding, SocialTurnMiddleware
 from deerflow.social.tools import OperatorManagementCapability, ProfileManagement
 
-from .intelligence_cases import evaluate_fixtures
+from .intelligence_cases import evaluate_runtime_fixture
 
 
 class Budget:
@@ -191,19 +191,16 @@ async def run_live(args):
         "calls": budget.calls,
         "results": [],
         "cost_usd": "unknown",
-        "intelligence": evaluate_fixtures(Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "social_intelligence"),
-        "intelligence_snapshot_revision": 1,
-        "plan_stage": "discovery",
-        "estimate": {"p50_turns": 4, "p80_turns": 8},
-        "memory_promotions": ["synthetic accepted memory"],
-        "verified_funnel_stage": "discovery",
     }
     with tempfile.TemporaryDirectory(prefix="deerflow-social-preflight-") as directory:
         engine = create_async_engine(f"sqlite+aiosqlite:///{Path(directory) / 'social.db'}")
         try:
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
-            await run_cases(SocialRepository(async_sessionmaker(engine, expire_on_commit=False)), budget, report["results"])
+            repository = SocialRepository(async_sessionmaker(engine, expire_on_commit=False))
+            fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "social_intelligence"
+            report["intelligence"] = [await evaluate_runtime_fixture(path, repository) for path in sorted(fixtures.glob("creator_*.json"))]
+            await run_cases(repository, budget, report["results"])
             report["complete"] = True
         except Exception as error:
             report["error"] = type(error).__name__
