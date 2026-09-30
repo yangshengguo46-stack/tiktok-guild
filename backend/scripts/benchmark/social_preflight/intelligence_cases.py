@@ -8,8 +8,9 @@ from pathlib import Path
 
 from app.scheduler.social_followups import SocialFollowupScheduler
 from deerflow.persistence.social import BoundaryUpdate, ExternalEvent, SelfMemoryChange, SocialRepository
-from deerflow.social.contracts import MemoryCandidate, SocialScope, TurnResult
+from deerflow.social.contracts import IdentityProfile, MemoryCandidate, RoleProfile, SocialScope, TurnResult
 from deerflow.social.intelligence import ConversationStage, CreatorEvidence, build_snapshot, plan_conversation
+from deerflow.social.runtime import SocialRuntime, SocialRuntimeBinding
 
 
 def evaluate_fixture(path: Path) -> dict:
@@ -41,9 +42,13 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     scope = SocialScope("fixture-owner", "fixture-account", raw["creator_ref"], "fixture-thread")
     evidence = tuple(CreatorEvidence(scope, item["id"], "operator_note", item["source_id"], datetime.now(UTC), None, item["confidence"], item["kind"], item["text"]) for item in raw["evidence"])
     intelligence = build_snapshot(scope, evidence, revision=1)
-    first_plan = plan_conversation(intelligence, stage=ConversationStage.first_contact)
-    first = await repository.record_event(scope, ExternalEvent("turn-1", f"fixture:{raw['creator_ref']}:turn:1", "creator_message", "Synthetic first turn"))
+    first = await repository.record_event(scope, ExternalEvent("turn-1", f"fixture:{raw['creator_ref']}:turn:1", "operator_note", "Synthetic first turn"))
     first = await repository.set_boundaries(scope, expected_revision=first.revision, update=BoundaryUpdate(True, False, False, (f"fixture:{raw['creator_ref']}:turn:1",)))
+    identity = IdentityProfile("fixture-ai", "1", "Synthetic AI", "ai_agent", "Synthetic Guild", "Synthetic only", ())
+    role = RoleProfile("fixture-role", "1", "Synthetic evaluation", ("conversation",), "fixture")
+    first_runtime = SocialRuntime(SocialRuntimeBinding(repository, scope, identity, role, "turn-1", creator_evidence=evidence))
+    await first_runtime.restore_context()
+    assert first_runtime.context.conversation_plan.snapshot_revision == intelligence.revision
     result = TurnResult(None, memory_delta=(MemoryCandidate("assert", "memory-1", "relationship", (f"fixture:{raw['creator_ref']}:turn:1",), "Accepted synthetic preference"),))
     memory_change = SelfMemoryChange(
         "assert",
@@ -61,7 +66,10 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
         memory_changes=(memory_change,),
     )
     restored = await repository.restore(scope)
-    second = await repository.record_event(scope, ExternalEvent("turn-2", f"fixture:{raw['creator_ref']}:turn:2", "creator_message", "Synthetic second turn"), expected_revision=restored.revision)
+    staged = await repository.advance_conversation_stage(scope, expected_revision=restored.revision, target_stage="rapport", evidence_ids=(f"fixture:{raw['creator_ref']}:turn:1",), reason="synthetic response")
+    second = await repository.record_event(scope, ExternalEvent("turn-2", f"fixture:{raw['creator_ref']}:turn:2", "operator_note", "Synthetic second turn"), expected_revision=staged.revision)
+    second_runtime = SocialRuntime(SocialRuntimeBinding(repository, scope, identity, role, "turn-2", creator_evidence=evidence))
+    second_context = await second_runtime.restore_context()
     try:
         await repository.advance_conversation_stage(scope, expected_revision=second.revision, target_stage="formal_invite", evidence_ids=(f"fixture:{raw['creator_ref']}:turn:2",), reason="synthetic pre-consent attempt")
         formal_allowed = True
@@ -96,12 +104,12 @@ async def evaluate_runtime_fixture(path: Path, repository: SocialRepository) -> 
     return {
         "creator_ref": raw["creator_ref"],
         "intelligence_snapshot_revision": committed.snapshot.revision,
-        "plan_stage": plan_conversation(intelligence, stage=ConversationStage.discovery).stage.value,
-        "estimate": dict(first_plan.estimate),
+        "plan_stage": second_context.conversation_plan.stage.value,
+        "estimate": dict(second_context.conversation_plan.estimate),
         "memory_promotions": [item["memory_id"] for item in restored.relationship if item["status"] == "active"],
         "verified_funnel_stage": "discovery" if not formal_allowed else "formal_invite",
         "formal_invite_allowed": formal_allowed,
-        "second_turn_loaded_memory": bool(restored.relationship),
+        "second_turn_loaded_memory": any(item.memory_id == "memory-1" for item in second_context.relationship.notes),
         "followup_task_id": followup_id,
         "followup_cancelled": followup_id in cancelled,
     }
