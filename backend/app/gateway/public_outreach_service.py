@@ -85,7 +85,7 @@ class NodeExecutorTransport:
         except TimeoutError:
             pass
         finally:
-            # Detached Chromium groups may outlive Node; their resource fences remain until confirmed cleanup.
+            # A stalled Appium session may outlive Node; its resource fence remains until cleanup.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -100,17 +100,40 @@ class PublicOutreachService:
         self.repository = repository
         self.transport = transport
         self.config = config
-        self.workflow = PublicOutreachWorkflow(repository, web_operator=transport.execute, ios_operator=transport.execute, lease_seconds=300)
+        self.workflow = PublicOutreachWorkflow(repository, android_operator=transport.execute, lease_seconds=300)
         self._active: dict[str, asyncio.Task] = {}
         self._dispatch_lock = asyncio.Lock()
 
     async def list_accounts(self, *, owner_user_id: str) -> list[dict[str, Any]]:
         return await self.repository.list_sender_accounts(owner_user_id)
 
+    async def device_operation(self, owner_user_id: str, device_ref: str, operation: str, *, commands: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        if operation not in {"doctor", "control", "takeover", "resume"}:
+            raise ValueError("Unsupported Android device operation")
+        accounts = await self.repository.list_sender_accounts(owner_user_id, channel="android")
+        bound = [row for row in accounts if row["device_ref"] == device_ref]
+        if not bound:
+            raise ValueError("Android device is not registered to this owner")
+        if operation == "control" and not any(row["status"] in {"enabled", "healthy", "ready", "active"} for row in bound):
+            raise ValueError("Android device sender is paused")
+        if operation == "takeover":
+            for row in bound:
+                await self.repository.set_sender_account_status(owner_user_id, row["sender_account_id"], status="paused", reason="manual_takeover")
+                await self.cancel_account(owner_user_id, row["sender_account_id"])
+        result = await self.transport.execute(operation=operation, device_ref=device_ref, **({"commands": commands} if commands is not None else {}))
+        if operation == "resume" and result.get("ok") is True:
+            health = await self.transport.execute(operation="doctor", device_ref=device_ref)
+            if health.get("ok") is True:
+                for row in bound:
+                    await self.repository.set_sender_account_status(owner_user_id, row["sender_account_id"], status="enabled", reason="manual_takeover_resolved")
+            else:
+                return health
+        return result
+
     async def capacity(self) -> dict[str, int]:
         def read() -> dict[str, int]:
             count = 0
-            for path in (self.transport.runtime_root / "slots" / "web").glob("*.lock"):
+            for path in (self.transport.runtime_root / "slots" / "android").glob("0.lock"):
                 try:
                     lease = json.loads(path.read_text())
                     if not lease.get("cleanup_required"):
@@ -119,8 +142,8 @@ class PublicOutreachService:
                 except (FileNotFoundError, ProcessLookupError):
                     pass
                 except (OSError, ValueError, KeyError):
-                    count += 1  # An unreadable lock cannot establish that a browser resource is idle.
-            return {"active": min(count, 10), "active_limit": 10}
+                    count += 1  # An unreadable lock cannot establish that the Android worker is idle.
+            return {"active": count, "active_limit": 1}
 
         return await asyncio.to_thread(read)
 
@@ -179,13 +202,15 @@ class PublicOutreachService:
         sender = await self.repository.read_sender_account(owner_user_id, task["sender_account_id"])
         if sender is None:
             raise ValueError("Registered sender not found")
+        if sender["channel"] != "android":
+            raise ValueError("historical web and ios tasks cannot execute")
 
         async def callback(**kwargs):
             kwargs["account"] = {key: sender.get(key) for key in ("owner_user_id", "sender_account_id", "external_ref", "channel", "device_ref")}
-            kwargs["payload"] = {key: (task.get("payload_json") or {}).get(key) for key in ("comment", "message")}
+            kwargs["payload"] = {key: (task.get("payload_json") or {}).get(key) for key in ("comment", "message", "video_url")}
             return await self.transport.execute(**kwargs)
 
-        workflow = PublicOutreachWorkflow(self.repository, web_operator=callback, ios_operator=callback, lease_seconds=300)
+        workflow = PublicOutreachWorkflow(self.repository, android_operator=callback, lease_seconds=300)
 
         async def run_native():
             # Waiting for a serialized transport never consumes a native lease.

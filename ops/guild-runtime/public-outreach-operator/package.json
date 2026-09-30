@@ -6,14 +6,14 @@
   "description": "Versioned execution shell for native DeerFlow public outreach tasks.",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "ios:install-driver": "node scripts/register-xcuitest-driver.mjs"
+    "android:doctor": "appium driver doctor uiautomator2",
+    "android:server": "appium --address 127.0.0.1 --port 4723"
   },
   "engines": {
     "node": ">=22.16"
   },
   "dependencies": {
     "appium": "3.1.0",
-    "appium-xcuitest-driver": "12.13.3",
-    "playwright": "1.59.1"
+    "appium-uiautomator2-driver": "8.7.0"
   }
 }

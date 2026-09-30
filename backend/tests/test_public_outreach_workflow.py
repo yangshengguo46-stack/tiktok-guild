@@ -19,13 +19,12 @@ async def repo(tmp_path):
 
 
 async def _creator(repo, *, creator_uid: str = "creator-1", sender_account_id: str = "web:account-001"):
-    channel = "ios" if sender_account_id.startswith("ios:") else "web"
+    channel = "android"
     await repo.register_sender_account(
         "guild",
         sender_account_id,
         channel,
-        profile_ref="profile-001" if channel == "web" else None,
-        device_ref="device-001" if channel == "ios" else None,
+        device_ref="device-001",
     )
     await repo.claim_creator(owner_user_id="guild", creator_uid=creator_uid)
     return await repo.bind_sequence(
@@ -59,7 +58,7 @@ async def test_web_operator_runs_ordered_public_actions_and_message(repo):
         calls.append((kwargs["action"], kwargs["account"]["sender_account_id"]))
         return _receipt("web:account-001", "creator-1", kwargs["action"], f"receipt-{kwargs['action']}")
 
-    workflow = PublicOutreachWorkflow(repo, web_operator=web_operator, worker_id="test-web")
+    workflow = PublicOutreachWorkflow(repo, android_operator=web_operator, worker_id="test-web")
     tasks = await workflow.create_public_outreach_tasks(
         "guild",
         "creator-1",
@@ -98,7 +97,7 @@ async def test_ios_operator_receives_device_and_keeps_sender_identity(repo):
             f"ios-{kwargs['action']}",
         )
 
-    workflow = PublicOutreachWorkflow(repo, ios_operator=ios_operator, worker_id="test-ios")
+    workflow = PublicOutreachWorkflow(repo, android_operator=ios_operator, worker_id="test-ios")
     tasks = await workflow.create_public_outreach_tasks(
         "guild",
         "creator-1",
@@ -125,7 +124,7 @@ async def test_ios_operator_receives_device_and_keeps_sender_identity(repo):
 @pytest.mark.asyncio
 async def test_mixed_channel_sender_is_rejected_for_one_sequence(repo):
     await _creator(repo)
-    await repo.register_sender_account("guild", "ios:device-001:account-001", "ios", device_ref="device-001")
+    await repo.register_sender_account("guild", "ios:device-001:account-001", "android", device_ref="device-001")
     workflow = PublicOutreachWorkflow(repo)
     with pytest.raises(ValueError, match="differs from"):
         await workflow.create_public_outreach_tasks(
@@ -311,8 +310,7 @@ async def test_web_and_ios_unknown_operator_results_require_explicit_recovery(re
 
     workflow = PublicOutreachWorkflow(
         repo,
-        web_operator=unknown_operator,
-        ios_operator=unknown_operator,
+        android_operator=unknown_operator,
         worker_id="unknown-results",
     )
     for creator_uid, sender_account_id in (
@@ -348,7 +346,7 @@ async def test_unknown_provider_ref_does_not_block_later_verified_receipt(repo):
             "provider_ref": "provider-reused-after-unknown",
         }
 
-    workflow = PublicOutreachWorkflow(repo, web_operator=unknown_operator, worker_id="provider-ref")
+    workflow = PublicOutreachWorkflow(repo, android_operator=unknown_operator, worker_id="provider-ref")
     tasks = await workflow.create_public_outreach_tasks(
         "guild",
         "creator-1",

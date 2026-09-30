@@ -93,7 +93,7 @@ class SenderAccountRow(Base):
 
     __table_args__ = (
         UniqueConstraint("owner_user_id", "sender_account_id", name="uq_sender_account_owner_id"),
-        CheckConstraint("channel IN ('web','ios')", name="ck_sender_account_channel"),
+        CheckConstraint("channel IN ('web','ios','android')", name="ck_sender_account_channel"),
     )
 
 

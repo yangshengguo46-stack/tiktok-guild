@@ -33,6 +33,9 @@ class _Operator:
     async def list_accounts(self, *, owner_user_id: str) -> list[dict]:
         return self._accounts
 
+    async def device_operation(self, owner_user_id, device_ref, operation, *, commands=None):
+        return {"ok": True, "device_ref": device_ref}
+
 
 _DEFAULT_OPERATOR = object()
 
@@ -71,12 +74,12 @@ async def repo(tmp_path):
     await engine.dispose()
 
 
-async def _bound(repo: CreatorOutreachRepository, *, owner: str = "owner-a", creator: str = "creator-1", sender: str = "web-1"):
+async def _bound(repo: CreatorOutreachRepository, *, owner: str = "owner-a", creator: str = "creator-1", sender: str = "android-1"):
     await repo.register_sender_account(
         owner,
         sender,
-        "web",
-        profile_ref="/private/profile",
+        "android",
+        device_ref="host-a:serial-1",
         capabilities={
             "auth_metadata": "secret",
             "profile_path": "/private/profile",
@@ -95,7 +98,7 @@ async def _tasks(repo: CreatorOutreachRepository, *, owner: str = "owner-a", cre
         owner,
         creator,
         1,
-        "web-1",
+        "android-1",
         ["like", "comment", "follow", "message"],
     )
 
@@ -139,10 +142,9 @@ async def test_accounts_are_owner_isolated_and_redact_provider_metadata(repo):
     response = await call_unwrapped(list_outreach_accounts, request)
 
     accounts = {row["sender_account_id"]: row for row in response["accounts"]}
-    assert set(accounts) == {"web-1", "operator-a"}
-    assert accounts["web-1"]["health"] == "enabled"
-    assert accounts["web-1"]["capabilities"] == {"safe": "visible"}
-    assert accounts["operator-a"]["capabilities"] == {"safe": "visible"}
+    assert set(accounts) == {"android-1"}
+    assert accounts["android-1"]["health"] == "enabled"
+    assert accounts["android-1"]["capabilities"] == {"safe": "visible"}
 
 
 @pytest.mark.asyncio
@@ -165,7 +167,7 @@ async def test_task_get_is_owner_isolated_and_unknown_retry_uses_current_receipt
         CreateOutreachTaskRequest(
             creator_uid="creator-1",
             sequence_no=1,
-            sender_account_id="web-1",
+            sender_account_id="android-1",
             comment="Hello from the creator team.",
         ),
     )
@@ -184,7 +186,7 @@ async def test_task_get_is_owner_isolated_and_unknown_retry_uses_current_receipt
 
     # A verified receipt on a different action in the same sequence must not
     # block retrying this comment task.
-    await repo.set_sender_account_status("owner-a", "web-1", status="enabled", reason="manually reconciled")
+    await repo.set_sender_account_status("owner-a", "android-1", status="enabled", reason="manually reconciled")
     like_claim = await repo.claim_action(like_task["task_id"], lease_owner="test-worker")
     assert like_claim is not None
     live_like_claim = await repo.read_action_task(like_task["task_id"])
@@ -202,7 +204,7 @@ async def test_task_get_is_owner_isolated_and_unknown_retry_uses_current_receipt
     )
     await repo.complete_action(
         like_task["task_id"],
-        sender_account_id="web-1",
+        sender_account_id="android-1",
         idempotency_key=like_claim["idempotency_key"],
         receipt_id="verified-like",
         lease_owner="test-worker",
@@ -294,7 +296,7 @@ async def test_create_task_rejects_sender_mismatch_and_close_blocks_claims(repo)
             "verified": True,
         }
 
-    result = await PublicOutreachWorkflow(repo, web_operator=provider).execute_task(
+    result = await PublicOutreachWorkflow(repo, android_operator=provider).execute_task(
         tasks[0]["task_id"],
         creator={"creator_uid": "creator-1"},
     )
@@ -324,10 +326,10 @@ async def test_paused_sender_cannot_claim_pending_action(repo):
     tasks = await _tasks(repo)
     task_id = tasks[0]["task_id"]
 
-    await repo.set_sender_account_status("owner-a", "web-1", status="paused", reason="health check")
+    await repo.set_sender_account_status("owner-a", "android-1", status="paused", reason="health check")
     assert await repo.claim_action(task_id, lease_owner="worker-a") is None
 
-    await repo.set_sender_account_status("owner-a", "web-1", status="enabled", reason="recovered")
+    await repo.set_sender_account_status("owner-a", "android-1", status="enabled", reason="recovered")
     claimed = await repo.claim_action(task_id, lease_owner="worker-a")
     assert claimed is not None
     assert claimed["lease_owner"] == "worker-a"
@@ -382,7 +384,7 @@ async def test_leased_controls_require_cas_lease_and_takeover_preserves_worker(r
 
     assert await repo.claim_action(task_id, lease_owner="worker-b") is None
     await repo.retry_action("owner-a", task_id, recoverable_error_codes={"provider_unknown"})
-    await repo.set_sender_account_status("owner-a", "web-1", status="enabled", reason="manually reconciled")
+    await repo.set_sender_account_status("owner-a", "android-1", status="enabled", reason="manually reconciled")
 
     reclaimed = await repo.claim_action(task_id, lease_owner="worker-b")
     assert reclaimed is not None
@@ -438,7 +440,7 @@ async def test_task_responses_never_expose_lease_credentials(repo):
         CreateOutreachTaskRequest(
             creator_uid="creator-1",
             sequence_no=1,
-            sender_account_id="web-1",
+            sender_account_id="android-1",
         ),
     )
     task_id = created["tasks"][0]["task_id"]

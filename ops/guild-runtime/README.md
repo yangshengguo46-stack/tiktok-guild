@@ -8,7 +8,7 @@
 - 同一 DeerFlow SQLite 中按 `(运营者, 公会账号, TikTok 主播 UID)` 隔离的关系证据与人格决策；
 - 默认 Lead 根据当前主播本人的有来源交流证据自动保持或切换人格，常规流程没有运营者手动换装器；
 - 附件 `SOCIAL_KERNEL.md` 作为默认 Lead 内核；TKDesk 仍拥有候选主播事实，Guild Operator 仍拥有公会后台事实。
-- `public-outreach-operator` 作为第四个直接 MCP，只负责普通账号的 Web/iPhone 执行；主播 claims、action tasks、关系状态和 verified receipts 仍只写入 DeerFlow 原生库。
+- `public-outreach-operator` 作为第四个直接 MCP，只负责普通账号的安卓设备执行；主播 claims、action tasks、关系状态和 verified receipts 仍只写入 DeerFlow 原生库。
 
 人格只改变观察与表达，不改写身份、关系事实、承诺、禁联或权限。不允许用职业、性别、收入、主播规模或推测脆弱性进行配型。
 
@@ -26,36 +26,16 @@ export TIKTOK_BROKER_IDENTITY_TEXT="Mira"
 
 首次使用先在这个 profile 的可见 Backstage 窗口登录经纪人账号。之后 Lead 先调用 `broker_workspace` 获取 `guild_ref`，再把候选的 `userId` 作为 `creator_id` 传给 `broker_messaging.prepare_message`，最后用同一 `workflow_id` 调 `broker_messaging.send_message`。没有经纪人 profile 或身份标记不一致时，工具会失败并停止，不会回退到公会长账号。
 
-普通账号的公开建联动作由独立的 `public-outreach-operator` 执行。它支持 Playwright 持久 profile
-和 Appium/XCUITest iPhone 会话，但两条线路共用 DeerFlow 的 sender、sequence、task 和 receipt
-合同。默认最多登记 50 个 Web profile，每批最多 10 个活动 profile；不会在运行时创建代理池、
-指纹伪装、验证码绕过或其他规避检测能力。
+普通账号的公开建联动作由 `public-outreach-operator` 的安卓 Appium UiAutomator2 通道执行。DeerFlow 原生库仍拥有 sender、sequence、task、租约、禁联和回执。旧 Web/iPhone 账号与历史回执只读保留，不能再建序列或执行。第一阶段仅做单台真机 pilot，业务执行并发上限为 1；可登记最多 50 台设备，20–50 台并发和长期稳定性仍需后续实现与实测。
 
-生产接线由 Gateway 管理 Node worker；MCP 只调用同一原生 API。外部写入默认关闭，必须在 Git 外
-配置单 owner/sender/creator 的试点 allowlist；私信另需许可。任务创建、claim、health 和 reconcile
-不会写平台，只有明确的 `execute` 子命令/工作台执行按钮会执行动作。真实 TikTok 的账号/目标与新
-条目读回映射仍待单号现场验证，离线 fixture 或 static doctor 不能证明平台已可用。
-部署和故障恢复见[生产运行说明](../../docs/verification/creator-agent/public-outreach-production-runbook.md)。
-
-这些配置只包含路径、并发和 WDA 连接参数，登录资料、cookies、设备登记和截图证据留在
-`$HOME/.codex/tiktok-live-public-outreach/` 或显式指定的本机目录，不进 Git：
+Gateway 管理 Node worker，MCP 调用同一原生 API。外部业务写入默认关闭；必须在 Git 外配置单 owner/sender/creator 的试点 allowlist，私信另需 `message_enabled`。TikTok 控件定位和回执字段必须先在真机上采样并版本化，离线 fixture 不能证明现场可用。没有实际发送者、目标、状态变化或新条目的读回证据，动作保持 `unknown` 并交人工接管。
 
 ```sh
-export PUBLIC_OUTREACH_OPERATOR_ROOT="$PWD/ops/guild-runtime/public-outreach-operator"
 export PUBLIC_OUTREACH_RUNTIME_ROOT="$HOME/.codex/tiktok-live-public-outreach"
-export PUBLIC_OUTREACH_PROFILE_ROOT="$PUBLIC_OUTREACH_RUNTIME_ROOT/web-profiles"
-export PUBLIC_OUTREACH_MAX_ACTIVE="10"
-export PUBLIC_OUTREACH_IOS_DEVICE_ROOT="$HOME/.codex/tiktok-live-public-outreach/ios-devices"
-export PUBLIC_OUTREACH_IOS_WDA_BUNDLE_ID="com.example.WebDriverAgentRunner"
-export PUBLIC_OUTREACH_IOS_WDA_PORT="8100"
-export PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS="10000"
-export PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE="true"
+export PUBLIC_OUTREACH_EXECUTION_CONFIG="/private/path/android-outreach.json"
 ```
 
-`PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE` 必须保持为 `true`。只有 macOS、Xcode、已签名
-WebDriverAgent、已配对且在线的 iPhone，以及返回 `ready=true`、`device_verified=true`、
-`wda_verified=true` 的实时 probe，才能把设备记为 `ready`。doctor 只读设备登记文件，不会
-连接手机、启动 Appium、启动浏览器或写入 TikTok。
+配置示例及设备控制 API 见[生产运行说明](../../docs/verification/creator-agent/public-outreach-production-runbook.md)。安卓真机需打开 USB 调试并授权电脑，主机需安装 Android SDK Platform Tools、Java 和 Appium UiAutomator2。人工接管可使用 scrcpy/QtScrcpy 连接指定序列号；实时视频仅给人看，模型只按需读取压缩后的结构化元素树，不持续消耗截图 token。
 
 ## 安装与启动
 
@@ -65,19 +45,14 @@ cd ops/guild-runtime
 npm ci
 cd public-outreach-operator
 npm ci --ignore-scripts
-npm run ios:install-driver
+npm run android:doctor
 cd ..
 npm run bootstrap
 npm run doctor
 npm start
 ```
 
-`public-outreach-operator` 使用提交的 `package-lock.json` 固定 Playwright、Appium 和
-XCUITest driver 版本；`npm ci --ignore-scripts` 只安装 Node 依赖，不登录 TikTok、不启动
-浏览器或手机。随后必须执行一次 `npm run ios:install-driver`，把 XCUITest 注册到 Appium
-driver catalog；命令是幂等的，已注册正确版本时会直接通过。static doctor 会检查
-`appium driver list --json`，driver 未注册时明确报告 `registration_required`，不会把 npm
-包存在误报成可用的 iPhone 通道。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
+`public-outreach-operator` 使用提交的 `package-lock.json` 固定 Appium 3 和 UiAutomator2 driver。`npm ci --ignore-scripts` 安装本地依赖，`npm run android:doctor` 检查 SDK/Java。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
 当前开发与验收阶段，`npm start` 会临时注入 `DEER_FLOW_AUTH_DISABLED=1`，使用 DeerFlow 内置的本地 synthetic admin，因而不会被 `/setup` 的账号密码注册页拦住。账号、密码、会话和数据库实现均保留；出厂部署前移除该启动注入即可恢复正常认证。后端在 `DEER_FLOW_ENV=production` 或 `ENVIRONMENT=production` 时会忽略此开关，并在本地生效时输出明确警告，因此不要把这个本地模式暴露到共享或生产环境。
 
@@ -87,62 +62,17 @@ driver catalog；命令是幂等的，已注册正确版本时会直接通过。
 
 TKDesk 的 `reopen_login` 是采集子后台恢复工具：经明确授权后，只在已核验的专用 Chrome 中打开固定官方后台页；保留进程、登录资料与人工标签。DeerFlow 的工具白名单已包含它，但调用前仍须验证线路和身份；它只负责名单和 `userId`，公会长消息发送归 `guild_operator`，经纪人消息发送归 `broker_operator`。
 
-`doctor` 是只读的：它验证 fork 祖先、原生 social 模块和 0026 migration、附件 manifest/六份 `1.0.1` 人格、数据库 revision、四个 MCP 配置，以及
-public outreach operator 的包元数据、Playwright/Appium/XCUITest 依赖、Appium driver catalog 注册状态、profile 根目录权限和已登记设备的严格 WDA 健康状态。它不启动 MCP server，
-不创建或迁移数据库，不创建 profile 或设备目录，也不调用 TikTok 业务写工具。没有登记 iPhone
-时会明确报告 live pilot 尚未就绪；这不等同于设备已通过现场验收。
+`doctor` 只读检查 Appium/UiAutomator2、Android SDK、ADB、Java、运行目录、配置中的设备序列号和 `adb devices -l` 在线状态。没有配置试点设备时，报告外部写入关闭。它不登录 TikTok，不产生业务动作；真实 UI 定位器和平台回执仍需单台真机验证。
 
-`acceptance --static` 会运行离线 Node 测试、用 fake DeerFlow adapter 调用 accounts/tasks
-协议、探测 public outreach operator 的 `initialize`/`tools/list`，并回报四个 MCP 和工具数量。
-fake adapter 只在内存中返回合同数据，acceptance 不启动真实浏览器、不连接 iPhone、不启动
-WebDriverAgent，也不向 TikTok 写入。
-
-`doctor --live` 会额外探测已注册的 public outreach MCP catalog，并把这项证据标为
-`direct-discovery`。Appium CLI 不可用时报告 `unavailable`，XCUITest 未注册时报告
-`registration_required`；这两种状态都不会把 iPhone 通道标成 ready。
+`acceptance --static` 使用 fake adapter 验证 MCP 目录和原生合同；`doctor --live` 额外探测实际 MCP 目录。两者都不能替代真机验收。
 
 ## 恢复手册
 
-### Profile 锁或活动槽位卡住
+设备离线、ADB 未授权或 Appium 连接失败时，先恢复同一设备的连接，再调用 `/api/public-outreach/devices/{device_ref}/doctor`。不自动改派另一台设备。
 
-先停止持有该 profile 的 operator 进程，再确认没有仍在执行的 action task。Web profile 的锁在
-过期后可由 operator 的 `recoverExpired` 回收；不要手工删除包含仍在运行任务的锁。iPhone
-设备锁必须使用对应的 session lease token 释放，不能用 device ref 强行覆盖。释放后重新运行
-`npm run doctor`，再从 DeerFlow workbench 重试显式可恢复的 unknown task。
+人工接管先暂停绑定的 sender，取消活动任务，再创建该设备的人工接管标记；返回的 `scrcpy -s <serial>` 可在 Mac/Windows 上投屏操作。`/api/public-outreach/devices/{device_ref}/resume` 只有在设备 doctor 通过后才恢复 sender。Appium 清理结果不明时保留设备锁，必须核对远端会话后人工处理，不能直接删锁重试。
 
-### Session 过期或登录要求
-
-收到 `login_required`、challenge 或 provider session 过期时，执行器会暂停账号并生成
-`manual_required` takeover 状态。使用同一个 profile 在可见浏览器或同一台 iPhone 上人工登录，
-完成平台要求后重新做健康检查；不要把页面存在聊天气泡、草稿或已点击按钮当成成功回执。
-恢复后只能重试当前未验证的 action，已经有 verified receipt 的 action 不能重复发送。
-
-### WDA 失败
-
-检查 macOS/Xcode command line tools、签名的 WebDriverAgent bundle id、设备配对状态和 WDA
-实时 probe。`wda_probe_required`、`wda_unavailable` 或 `device_unpaired` 都保持
-`manual_required`，直到 probe 返回完整的严格健康合同。不要通过坐标盲点或截图推断点赞、
-评论、关注已经完成。
-
-### 设备离线
-
-`device_offline` 会保留 offline 状态并释放执行 lease。重新连接并解锁信任设备后做一次只读
-health refresh；确认设备回到 `ready` 后再 claim。离线期间不自动换成另一台设备，也不改变
-sequence 的 sender identity。
-
-### Provider 返回未知结果
-
-未知、超时、选择器变化或平台拒绝都不能推进 `public_touched` 或 `contacted`。保留 evidence、
-provider diagnostic 和 manual takeover 原因，由人工确认平台状态后再按 workbench 的 retry
-控制继续。未验证的 provider reference 只作为诊断信息保存，后续 verified receipt 仍可使用
-同一 reference 完成幂等收口。
-
-### 人工接管
-
-人工接管只解决当前账号或设备的登录、挑战、WDA 和页面状态，不直接改写关系状态。接管完成后
-必须回写健康结果或 verified provider receipt；如果无法确认平台实际状态，就保持
-`manual_required`/`unknown`，由运营者关闭 sequence 或补充 closure receipt。所有公开动作仍
-按 `like -> comment -> follow -> message` 顺序执行，并且同一 sequence 固定 sender。
+未知、超时、界面变化和新内容读回不足，都不能推进业务状态。已确认的原生 verified receipt 不重复发送；未确认任务需人工核对平台实际状态后显式恢复。所有公开动作按 `like -> comment -> follow -> message` 顺序，同一 sequence 固定 sender。
 
 ## 第一个安全提示
 

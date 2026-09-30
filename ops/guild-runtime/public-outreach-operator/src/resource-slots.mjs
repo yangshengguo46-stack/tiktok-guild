@@ -20,7 +20,7 @@ export async function acquireResourceSlot({ root, kind, maximum }) {
       if (current.cleanup_required) continue;
       if (current.host !== os.hostname()) continue;
       try { process.kill(current.pid, 0); continue; } catch (probe) { if (probe.code !== 'ESRCH') continue; }
-      if (kind === 'ios') continue; // A remote Appium session may outlive Node.
+      if (kind.startsWith('android-device-')) continue; // A remote Appium session may outlive Node.
       // Rename-free stale cleanup is serialized by a separate exclusive guard.
       let guard;
       try { guard = await open(`${file}.reap`, 'wx', 0o600); } catch { continue; }

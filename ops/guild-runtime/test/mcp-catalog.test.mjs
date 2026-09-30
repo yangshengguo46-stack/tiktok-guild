@@ -12,10 +12,8 @@ import { buildRuntimeEnvironment } from '../src/runtime-environment.mjs';
 test('outreach runtime and doctor profile root share the external deployment root', () => {
   const defaults = buildRuntimeEnvironment({ packageRoot: '/project', environment: { HOME: '/home/operator' } });
   assert.equal(defaults.PUBLIC_OUTREACH_RUNTIME_ROOT, '/home/operator/.codex/tiktok-live-public-outreach');
-  assert.equal(defaults.PUBLIC_OUTREACH_PROFILE_ROOT, '/home/operator/.codex/tiktok-live-public-outreach/web-profiles');
   const custom = buildRuntimeEnvironment({ packageRoot: '/project', environment: { HOME: '/home/operator', PUBLIC_OUTREACH_RUNTIME_ROOT: '/private/outreach' } });
   assert.equal(custom.PUBLIC_OUTREACH_RUNTIME_ROOT, '/private/outreach');
-  assert.equal(custom.PUBLIC_OUTREACH_PROFILE_ROOT, '/private/outreach/web-profiles');
 });
 
 async function catalogFixture(t, names, checkEnvironment = false) {

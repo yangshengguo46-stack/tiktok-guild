@@ -117,6 +117,7 @@ class CreateOutreachTaskRequest(BaseModel):
     )
     comment: str | None = Field(default=None, max_length=4000)
     message: str | None = Field(default=None, max_length=4000)
+    video_url: str | None = Field(default=None, max_length=1000)
 
     @field_validator("actions")
     @classmethod
@@ -277,20 +278,6 @@ async def _owned_task(
     return repository, owner_user_id, task, receipts, model
 
 
-async def _operator_accounts(operator: Any, owner_user_id: str) -> list[dict[str, Any]]:
-    for method_name in ("list_accounts", "list_sender_accounts", "accounts"):
-        method = getattr(operator, method_name, None)
-        if callable(method):
-            try:
-                result = await method(owner_user_id=owner_user_id)
-            except TypeError:
-                result = await method(owner_user_id)
-            if isinstance(result, dict):
-                result = result.get("accounts", [])
-            return list(result or [])
-    return []
-
-
 @router.get("/accounts")
 @require_permission("threads", "read")
 async def list_outreach_accounts(request: Request) -> dict[str, Any]:
@@ -298,27 +285,17 @@ async def list_outreach_accounts(request: Request) -> dict[str, Any]:
     owner_user_id = await _user_id(request)
     repository = _repository(request)
     persisted = await repository.list_sender_accounts(owner_user_id)
-    operator_accounts = await _operator_accounts(operator, owner_user_id)
-    by_id = {row["sender_account_id"]: row for row in persisted}
-    for row in operator_accounts:
-        if isinstance(row, dict) and row.get("sender_account_id") and row.get("owner_user_id") == owner_user_id:
-            by_id[row["sender_account_id"]] = {**by_id.get(row["sender_account_id"], {}), **row}
-    accounts = [_account_response(row) for row in by_id.values()]
+    accounts = [_account_response(row) for row in persisted]
     capacity = await operator.capacity() if callable(getattr(operator, "capacity", None)) else {"active": 0}
-    web_accounts = [row for row in accounts if row.get("channel") == "web"]
-    ios_accounts = [row for row in accounts if row.get("channel") == "ios"]
+    android_accounts = [row for row in accounts if row.get("channel") == "android"]
     return {
         "accounts": accounts,
-        "web_batch_capacity": {
-            "registered": len(web_accounts),
+        "android_capacity": {
+            "registered": len(android_accounts),
             "maximum": 50,
-            "active_limit": 10,
+            "active_limit": capacity.get("active_limit", 1),
             "active": capacity["active"],
-            "ready": sum(row.get("status") in _ACTIVE_ACCOUNT_STATUSES for row in web_accounts),
-        },
-        "ios_readiness": {
-            "registered": len(ios_accounts),
-            "ready": sum(row.get("health") in {"healthy", "ready", "active"} for row in ios_accounts),
+            "ready": sum(row.get("status") in _ACTIVE_ACCOUNT_STATUSES for row in android_accounts),
         },
         "operator": {"configured": True, "external_writes_enabled": getattr(operator, "config", {}).get("pilot", {}).get("enabled") is True},
     }
@@ -349,7 +326,7 @@ async def create_outreach_tasks(request: Request, body: CreateOutreachTaskReques
         raise HTTPException(status_code=404, detail="Sender account not found")
     if sender.get("status") not in _ACTIVE_ACCOUNT_STATUSES:
         raise HTTPException(status_code=409, detail="Sender account is not healthy")
-    payload = {"comment": body.comment, "message": body.message}
+    payload = {"comment": body.comment, "message": body.message, "video_url": body.video_url}
     workflow = PublicOutreachWorkflow(repository)
     try:
         tasks = await workflow.create_public_outreach_tasks(
@@ -364,7 +341,7 @@ async def create_outreach_tasks(request: Request, body: CreateOutreachTaskReques
     # The repository owns task identity and idempotency.  Text belongs in the
     # task payload, so persist it after the workflow creates the fixed action
     # set without ever mixing it into an idempotency key.
-    if payload["comment"] is not None or payload["message"] is not None:
+    if any(value is not None for value in payload.values()):
         try:
             tasks = [await repository.update_action_payload(owner_user_id, task["task_id"], payload) for task in tasks]
         except ValueError as exc:
@@ -429,8 +406,11 @@ async def pause_outreach_account(sender_account_id: str, request: Request, body:
     _operator(request)
     owner_user_id = await _user_id(request)
     repository = _repository(request)
-    if await repository.read_sender_account(owner_user_id, sender_account_id) is None:
+    sender = await repository.read_sender_account(owner_user_id, sender_account_id)
+    if sender is None:
         raise HTTPException(status_code=404, detail="Sender account not found")
+    if sender["channel"] != "android":
+        raise HTTPException(status_code=409, detail="Historical sender accounts are read only")
     operator = _operator(request)
     if callable(getattr(operator, "cancel_account", None)):
         await operator.cancel_account(owner_user_id, sender_account_id)
@@ -444,7 +424,15 @@ async def resume_outreach_account(sender_account_id: str, request: Request, body
     _operator(request)
     owner_user_id = await _user_id(request)
     repository = _repository(request)
-    return await _set_account_status(repository, owner_user_id, sender_account_id, "enabled", (body.reason if body else "operator_resume"))
+    sender = await repository.read_sender_account(owner_user_id, sender_account_id)
+    if sender is None:
+        raise HTTPException(status_code=404, detail="Sender account not found")
+    if sender["channel"] == "android":
+        result = await _android_device_operation(request, sender["device_ref"], "resume")
+        if result.get("ok") is not True:
+            raise HTTPException(status_code=409, detail=result.get("error_code") or "Android device is not ready")
+        return await _set_account_status(repository, owner_user_id, sender_account_id, "enabled", (body.reason if body else "operator_resume"))
+    raise HTTPException(status_code=409, detail="Historical sender accounts are read only")
 
 
 async def _set_account_status(
@@ -577,9 +565,59 @@ async def execute_outreach_task(task_id: str, request: Request) -> dict[str, Any
 class RegisterSenderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sender_account_id: str = Field(min_length=1, max_length=128)
-    channel: Literal["web", "ios"]
+    channel: Literal["android"]
     external_ref: str = Field(min_length=1, max_length=255)
     device_ref: str | None = Field(default=None, max_length=128)
+
+
+class AndroidDeviceCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["observe", "tap", "type", "swipe", "back", "launch"]
+    locator: dict[str, str] | None = None
+    text: str | None = Field(default=None, max_length=2000)
+    from_point: dict[str, int] | None = Field(default=None, alias="from")
+    to_point: dict[str, int] | None = Field(default=None, alias="to")
+
+
+class AndroidDeviceControlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    commands: list[AndroidDeviceCommand] = Field(min_length=1, max_length=20)
+
+
+async def _android_device_operation(request: Request, device_ref: str, operation: str, commands: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    await _require_outreach_admin(request)
+    operator = _operator(request)
+    owner = await _user_id(request)
+    if not callable(getattr(operator, "device_operation", None)):
+        raise HTTPException(status_code=503, detail="Android device control is unavailable")
+    try:
+        return await operator.device_operation(owner, device_ref, operation, commands=commands)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/devices/{device_ref}/doctor")
+@require_permission("threads", "read")
+async def doctor_android_device(device_ref: str, request: Request) -> dict[str, Any]:
+    return await _android_device_operation(request, device_ref, "doctor")
+
+
+@router.post("/devices/{device_ref}/control")
+@require_permission("threads", "write")
+async def control_android_device(device_ref: str, request: Request, body: AndroidDeviceControlRequest) -> dict[str, Any]:
+    return await _android_device_operation(request, device_ref, "control", [command.model_dump(by_alias=True, exclude_none=True) for command in body.commands])
+
+
+@router.post("/devices/{device_ref}/takeover")
+@require_permission("threads", "write")
+async def takeover_android_device(device_ref: str, request: Request) -> dict[str, Any]:
+    return await _android_device_operation(request, device_ref, "takeover")
+
+
+@router.post("/devices/{device_ref}/resume")
+@require_permission("threads", "write")
+async def resume_android_device(device_ref: str, request: Request) -> dict[str, Any]:
+    return await _android_device_operation(request, device_ref, "resume")
 
 
 @router.post("/native/{method}")

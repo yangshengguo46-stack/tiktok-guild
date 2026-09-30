@@ -35,13 +35,14 @@ async def repo(tmp_path):
     await engine.dispose()
 
 
-async def bound(repo, channel="ios"):
-    await repo.register_sender_account("owner", "sender", channel, external_ref="@alice", device_ref="test-phone" if channel == "ios" else None)
-    await repo.claim_creator(owner_user_id="owner", creator_uid="creator")
+async def bound(repo, channel="android"):
+    await repo.register_sender_account("owner", "sender", channel, external_ref="@alice", device_ref="test-phone")
+    await repo.import_handoff(owner_user_id="owner", batch_id="pilot", dataset_hash="0" * 64, provenance={}, candidates=[{"creator_uid": "creator", "payload": {"handle": "@target", "profile_url": "https://www.tiktok.com/@target"}}])
+    await repo.claim_creator(owner_user_id="owner", creator_uid="creator", batch_id="pilot")
     await repo.bind_sequence(owner_user_id="owner", creator_uid="creator", sender_account_id="sender")
     tasks = await PublicOutreachWorkflow(repo).create_public_outreach_tasks("owner", "creator", 1, "sender", ["like", "comment", "follow", "message"])
     for task in tasks:
-        await repo.update_action_payload("owner", task["task_id"], {"comment": "hello", "message": "hello"})
+        await repo.update_action_payload("owner", task["task_id"], {"comment": "hello", "message": "hello", "video_url": "https://www.tiktok.com/@target/video/123"})
     return tasks
 
 
@@ -57,20 +58,19 @@ class Provider(BaseHTTPRequestHandler):
 
     def do_GET(self):
         value = {}
-        if self.path == "/status":
-            value = {"ready": True, "build": {"productBundleIdentifier": "test.wda", "time": "today"}, "os": {"name": "iOS"}}
-        elif self.path.endswith("/displayed"):
+        if self.path.endswith("/displayed"):
             value = True
         elif "/attribute/" in self.path:
             key = self.path.split("/attribute/")[1]
             control = self.path.split("/element/")[1].split("/")[0]
             attrs = {
-                "current-user": {"data-sender-handle": "@alice"},
-                "user-profile": {"data-creator-uid": "creator"},
-                "like-button": {"aria-pressed": str(self.state["like"]).lower()},
-                "follow-button": {"aria-pressed": str(self.state["follow"]).lower()},
-                "comment-item": {"data-receipt-id": "new-comment", "data-sender-handle": "@alice", "data-creator-uid": "creator"},
-                "message-item": {"data-receipt-id": "new-message", "data-sender-handle": "@alice", "data-creator-uid": "creator"},
+                "current-user": {"content-desc": "@alice"},
+                "user-profile": {"content-desc": "@target"},
+                "video-id": {"data-video-id": "123"},
+                "like-button": {"selected": str(self.state["like"]).lower()},
+                "follow-button": {"selected": str(self.state["follow"]).lower()},
+                "comment-item": {"data-receipt-id": "new-comment", "data-sender-handle": "@alice", "data-creator-handle": "@target"},
+                "message-item": {"data-receipt-id": "new-message", "data-sender-handle": "@alice", "data-creator-handle": "@target"},
             }
             value = attrs.get(control, {}).get(key)
         elif self.path.endswith("/text"):
@@ -82,19 +82,13 @@ class Provider(BaseHTTPRequestHandler):
         value = {}
         if self.path == "/session":
             self.state["sessions"] += 1
-            value = {"sessionId": f"session-{self.state['sessions']}", "capabilities": {"platformName": "iOS", "appium:automationName": "XCUITest", "appium:udid": "test-udid"}}
-        elif body.get("script") == "mobile: deviceInfo":
-            value = {"UniqueDeviceID": "test-udid"}
-        elif body.get("script") == "mobile: isLocked":
-            value = False
+            value = {"sessionId": f"session-{self.state['sessions']}", "capabilities": {"platformName": "Android", "appium:automationName": "UiAutomator2", "appium:udid": "test-udid"}}
         elif self.path.endswith("/element") or self.path.endswith("/elements"):
             name = body["value"]
             self.state["locators"].append((body["using"], name))
             raw = {"element-6066-11e4-a52e-4f735466cecf": name}
             if self.path.endswith("/elements"):
                 value = [raw] if self.state.get(name) else []
-            elif name in {"login-button", "captcha-container"}:
-                return self.send({"error": "no such element"}, 404)
             else:
                 value = raw
         elif self.path.endswith("/click"):
@@ -118,7 +112,11 @@ class Provider(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def provider():
+def provider(tmp_path, monkeypatch):
+    adb = tmp_path / "adb"
+    adb.write_text("#!/bin/sh\nprintf 'List of devices attached\\ntest-udid device\\n'\n")
+    adb.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     state = {"sessions": 0, "deleted": 0, "like": False, "follow": False, "actions": [], "locators": []}
     handler = type("BoundProvider", (Provider,), {"state": state})
     http = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -133,7 +131,32 @@ def provider():
 def config(url):
     return {
         "pilot": {"enabled": True, "owner_user_id": "owner", "sender_account_id": "sender", "creator_uid": "creator", "actions": ["like", "comment", "follow", "message"], "message_enabled": True},
-        "sender": {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "ios", "appium_url": url, "wda_url": url, "device": {"udid": "test-udid", "platform_version": "18", "wda_bundle_id": "test.wda"}},
+        "sender": {
+            "owner_user_id": "owner",
+            "sender_account_id": "sender",
+            "channel": "android",
+            "device_ref": "test-phone",
+            "locators": {
+                "version": "pilot-test-1",
+                "senderIdentity": {"accessibility_id": "current-user"},
+                "creatorIdentity": {"accessibility_id": "user-profile"},
+                "videoIdentity": {"accessibility_id": "video-id"},
+                "videoIdentityProof": {"attribute": "data-video-id"},
+                "likeButton": {"accessibility_id": "like-button"},
+                "likeState": {"attribute": "selected", "active": "true"},
+                "followButton": {"accessibility_id": "follow-button"},
+                "followState": {"attribute": "selected", "active": "true"},
+                "commentInput": {"accessibility_id": "comment-input"},
+                "commentSubmit": {"accessibility_id": "comment-submit"},
+                "commentReceipt": {"accessibility_id": "comment-item"},
+                "messageInput": {"accessibility_id": "message-input"},
+                "messageSubmit": {"accessibility_id": "message-submit"},
+                "messageReceipt": {"accessibility_id": "message-item"},
+                "commentProof": {"id_attribute": "data-receipt-id", "sender_attribute": "data-sender-handle", "target_attribute": "data-creator-handle"},
+                "messageProof": {"id_attribute": "data-receipt-id", "sender_attribute": "data-sender-handle", "target_attribute": "data-creator-handle"},
+            },
+        },
+        "devices": [{"device_ref": "test-phone", "udid": "test-udid", "system_port": 8201, "appium_url": url, "app_package": "com.zhiliaoapp.musically"}],
     }
 
 
@@ -156,10 +179,10 @@ async def test_native_task_real_node_appium_transport_stores_receipt_and_never_r
             assert result["task"]["state"] == "completed", result
             receipt = await repo.read_action_receipt("owner", task["task_id"])
             assert receipt["verified"] is True
-            assert receipt["payload_json"]["observed_creator"]["creator_uid"] == "creator"
+            assert receipt["payload_json"]["observed_creator"] == "target"
             if task["action"] in {"like", "follow"}:
-                assert receipt["payload_json"]["transition"] == {"before": False, "after": True}
-            assert receipt["payload_json"]["observed_sender"]["handle"] == "@alice"
+                assert receipt["payload_json"]["transition"] == {"before": "false", "after": "true"}
+            assert receipt["payload_json"]["observed_sender"] == "alice"
         assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == "contacted"
         assert state["actions"] == ["like-button", "comment-submit", "follow-button", "message-submit"]
         assert state["deleted"] == 4
@@ -385,40 +408,13 @@ async def test_mcp_pooled_stdio_credentials_follow_runtime_identity_not_config(t
 
 
 @pytest.mark.asyncio
-async def test_native_web_sequence_uses_shipped_node_composition_and_method_shaped_chromium(repo, tmp_path):
-    tasks = await bound(repo, "web")
-    configuration = config("http://127.0.0.1:1")
-    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web"}
-    source = tmp_path / "web-config.json"
-    source.write_text(json.dumps(configuration))
-    worker = ROOT / "ops/guild-runtime/public-outreach-operator/fixtures/web-worker.mjs"
-    transport = NodeExecutorTransport(worker_path=worker, config_path=source, runtime_root=tmp_path / "runtime", node=shutil.which("node"))
-    service = PublicOutreachService(repo, transport, config=configuration)
-    try:
-        for task in tasks:
-            result = await service.execute_task("owner", task["task_id"])
-            assert result["task"]["state"] == "completed", result
-            receipt = await repo.read_action_receipt("owner", task["task_id"])
-            assert receipt["verified"] is True
-            assert receipt["payload_json"]["observed_creator"]["creator_uid"] == "creator"
-            if task["action"] in {"like", "follow"}:
-                assert receipt["payload_json"]["transition"] == {"before": False, "after": True}
-        assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == "contacted"
-        assert (await service.capacity())["active"] == 0
-    finally:
-        await service.close()
-
-
-@pytest.mark.asyncio
-async def test_capacity_keeps_unconfirmed_browser_cleanup_occupied_after_owner_death(repo, tmp_path):
-    slots = tmp_path / "slots" / "web"
+async def test_capacity_keeps_unconfirmed_android_cleanup_occupied_after_owner_death(repo, tmp_path):
+    slots = tmp_path / "slots" / "android"
     slots.mkdir(parents=True)
     (slots / "0.lock").write_text(json.dumps({"pid": 999999999, "cleanup_required": True}))
-    (slots / "1.lock").write_text(json.dumps({"pid": 999999998}))
-    (slots / "2.lock").write_text("interrupted lock write")
     transport = NodeExecutorTransport(worker_path=WORKER, config_path=None, runtime_root=tmp_path)
     service = PublicOutreachService(repo, transport, config={})
-    assert await service.capacity() == {"active": 2, "active_limit": 10}
+    assert await service.capacity() == {"active": 1, "active_limit": 1}
 
 
 @pytest.mark.asyncio
@@ -574,7 +570,7 @@ asyncio.run(main())
         str(pid_file),
         phase,
         cwd=ROOT / "backend",
-        env={**os.environ, "PYTHONPATH": str(ROOT / "backend")},
+        env={**os.environ, "PYTHONPATH": os.environ.get("PYTHONPATH", str(ROOT / "backend"))},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -613,59 +609,6 @@ asyncio.run(main())
                 os.killpg(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["follow", "message"])
-async def test_reviewer_web_worker_final_action_cancel_after_commit_has_advanced_native_claim(repo, tmp_path, monkeypatch, action):
-    tasks = await bound(repo, "web")
-    configuration = config("http://127.0.0.1:1")
-    configuration["sender"] = {"owner_user_id": "owner", "sender_account_id": "sender", "channel": "web"}
-    source = tmp_path / "web-config.json"
-    source.write_text(json.dumps(configuration))
-    worker = ROOT / "ops/guild-runtime/public-outreach-operator/fixtures/web-worker.mjs"
-    transport = NodeExecutorTransport(worker_path=worker, config_path=source, runtime_root=tmp_path / "runtime", node=shutil.which("node"))
-    service = PublicOutreachService(repo, transport, config=configuration)
-    target_index = 2 if action == "follow" else 3
-    target = tasks[target_index]
-    expected_status = "public_touched" if action == "follow" else "contacted"
-    calls = []
-    original_execute = transport.execute
-    original_complete = repo.complete_action
-    entered = asyncio.Event()
-
-    async def counted_execute(**kwargs):
-        calls.append(kwargs["action"])
-        return await original_execute(**kwargs)
-
-    async def after_commit(*args, **kwargs):
-        result = await original_complete(*args, **kwargs)
-        if args[0] == target["task_id"]:
-            entered.set()
-            await asyncio.Event().wait()
-        return result
-
-    monkeypatch.setattr(transport, "execute", counted_execute)
-    try:
-        for prior in tasks[:target_index]:
-            assert (await service.execute_task("owner", prior["task_id"]))["task"]["state"] == "completed"
-        monkeypatch.setattr(repo, "complete_action", after_commit)
-        execution = asyncio.create_task(service.execute_task("owner", target["task_id"]))
-        await asyncio.wait_for(entered.wait(), 5)
-        await service.cancel_task(target["task_id"])
-        assert (await execution)["status"] == "duplicate"
-        monkeypatch.setattr(repo, "complete_action", original_complete)
-        assert (await repo.read_action_receipt("owner", target["task_id"]))["verified"] is True
-        assert (await repo.read_model(owner_user_id="owner", creator_uid="creator"))["claim"]["status"] == expected_status
-        assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
-        assert calls.count(action) == 1
-        if action == "follow":
-            assert (await service.execute_task("owner", tasks[3]["task_id"]))["task"]["state"] == "completed"
-            assert calls.count("message") == 1
-            assert (await service.execute_task("owner", target["task_id"]))["status"] == "duplicate"
-    finally:
-        monkeypatch.setattr(repo, "complete_action", original_complete)
-        await service.close()
 
 
 @pytest.mark.asyncio
@@ -996,7 +939,7 @@ asyncio.run(main())
         str(pid_file),
         phase,
         cwd=ROOT / "backend",
-        env={**os.environ, "PYTHONPATH": str(ROOT / "backend")},
+        env={**os.environ, "PYTHONPATH": os.environ.get("PYTHONPATH", str(ROOT / "backend"))},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

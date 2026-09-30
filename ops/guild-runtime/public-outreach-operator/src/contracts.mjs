@@ -2,7 +2,7 @@ const COMMON_PROPERTIES = Object.freeze({
   owner_user_id: { type: 'string', minLength: 1, maxLength: 128 },
   task_id: { type: ['string', 'null'], maxLength: 128 },
   sender_account_id: { type: ['string', 'null'], maxLength: 128 },
-  channel: { type: ['string', 'null'], enum: ['web', 'ios', null] },
+  channel: { type: ['string', 'null'], enum: ['android', 'web', 'ios', null] },
   creator_uid: { type: ['string', 'null'], maxLength: 128 },
   action: { type: ['string', 'null'], enum: ['like', 'comment', 'follow', 'message', null] },
   idempotency_key: { type: ['string', 'null'], maxLength: 255 },

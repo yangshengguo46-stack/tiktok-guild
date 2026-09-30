@@ -56,10 +56,10 @@ export const LIVE_DOCTOR_CHECKS = Object.freeze([
 export const PUBLIC_OUTREACH_DOCTOR_CHECKS = Object.freeze([
   'public_outreach_operator_root',
   'public_outreach_config',
-  'public_outreach_playwright',
   'public_outreach_appium',
-  'public_outreach_xcuitest_registration',
-  'public_outreach_profile_root',
+  'public_outreach_uiautomator2_registration',
+  'public_outreach_android_tools',
+  'public_outreach_runtime_root',
   'public_outreach_devices',
 ]);
 
@@ -136,16 +136,15 @@ async function inspectPublicOutreachPackage({ environment }) {
     throw new Error('public outreach operator package metadata is not approved');
   }
   const expected = {
-    playwright: '1.59.1',
     appium: '3.1.0',
-    'appium-xcuitest-driver': '12.13.3',
+    'appium-uiautomator2-driver': '8.7.0',
   };
   for (const [name, version] of Object.entries(expected)) {
     if (packageJson.dependencies?.[name] !== version) {
       throw new Error(`public outreach operator must pin ${name}@${version}`);
     }
   }
-  return { detail: `${operatorRoot}; Playwright ${expected.playwright}; Appium ${expected.appium}; XCUITest ${expected['appium-xcuitest-driver']}` };
+  return { detail: `${operatorRoot}; Appium ${expected.appium}; UiAutomator2 ${expected['appium-uiautomator2-driver']}` };
 }
 
 async function inspectInstalledDependency({ operatorRoot, packageName, expectedVersion }) {
@@ -165,7 +164,7 @@ async function inspectInstalledDependency({ operatorRoot, packageName, expectedV
   return { detail: `${packageName}@${installed}` };
 }
 
-export async function inspectXcuitestDriverRegistration({ operatorRoot, run = runCommand }) {
+export async function inspectUiAutomator2DriverRegistration({ operatorRoot, run = runCommand }) {
   const appiumBinary = path.join(
     operatorRoot,
     'node_modules',
@@ -186,25 +185,25 @@ export async function inspectXcuitestDriverRegistration({ operatorRoot, run = ru
   }
   if (result.code !== 0) {
     const diagnostic = result.stderr?.trim() || result.stdout?.trim() || `exit ${result.code}`;
-    throw new Error(`XCUITest driver registration unavailable: ${diagnostic.slice(0, 512)}`);
+    throw new Error(`UiAutomator2 driver registration unavailable: ${diagnostic.slice(0, 512)}`);
   }
   const text = String(result.stdout ?? '').trim();
   const start = text.indexOf('{');
-  if (start < 0) throw new Error('XCUITest driver registration unavailable: Appium returned no JSON');
+  if (start < 0) throw new Error('UiAutomator2 driver registration unavailable: Appium returned no JSON');
   let catalog;
   try {
     catalog = JSON.parse(text.slice(start));
   } catch {
-    throw new Error('XCUITest driver registration unavailable: Appium returned invalid JSON');
+    throw new Error('UiAutomator2 driver registration unavailable: Appium returned invalid JSON');
   }
-  const driver = catalog?.xcuitest;
+  const driver = catalog?.uiautomator2;
   if (driver?.installed !== true) {
-    throw new Error('XCUITest driver registration_required: run npm run ios:install-driver');
+    throw new Error('UiAutomator2 driver registration_required: run npm ci in public-outreach-operator');
   }
-  if (driver.version !== '12.13.3') {
-    throw new Error(`XCUITest driver version mismatch: found ${driver.version ?? 'unknown'}, expected 12.13.3`);
+  if (driver.version !== '8.7.0') {
+    throw new Error(`UiAutomator2 driver version mismatch: found ${driver.version ?? 'unknown'}, expected 8.7.0`);
   }
-  return { detail: `xcuitest@${driver.version} registered in the Appium driver catalog` };
+  return { detail: `uiautomator2@${driver.version} registered in the Appium driver catalog` };
 }
 
 async function existingAncestor(target) {
@@ -233,26 +232,29 @@ async function inspectWritableStateRoot(target, label) {
   };
 }
 
-async function inspectRegisteredDevices({ environment }) {
-  const root = path.resolve(environment.PUBLIC_OUTREACH_IOS_DEVICE_ROOT);
-  const file = path.join(root, 'devices.json');
-  let values;
-  try {
-    values = JSON.parse(await readFile(file, 'utf8'));
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return { detail: `no registered iPhone at ${root}; live WDA pilot remains unavailable` };
+async function inspectRegisteredDevices({ environment, run = runCommand }) {
+  const file = environment.PUBLIC_OUTREACH_EXECUTION_CONFIG;
+  if (!file) return { detail: 'no Android pilot device configuration; external writes remain disabled' };
+  const config = await readJsonFile(file, 'Android execution configuration');
+  const values = config.devices;
+  if (!Array.isArray(values) || values.length < 1 || values.length > 50) throw new Error('Android device configuration must contain 1–50 devices');
+  const refs = new Set();
+  const serials = new Set();
+  const ports = new Set();
+  for (const device of values) {
+    if (!device?.device_ref || !device?.udid || !Number.isInteger(device.system_port)
+      || device.system_port < 1024 || device.system_port > 65535 || !device.appium_url
+      || refs.has(device.device_ref) || serials.has(device.udid) || ports.has(device.system_port)) {
+      throw new Error('Android devices need distinct device_ref, udid, system_port and appium_url');
     }
-    throw new Error(`iPhone device registry is unavailable: ${error.message}`);
+    refs.add(device.device_ref); serials.add(device.udid); ports.add(device.system_port);
   }
-  if (!Array.isArray(values)) throw new Error('iPhone device registry must contain an array');
-  const ready = values.filter((device) => device?.state === 'ready'
-    && device?.health === 'healthy'
-    && device?.health_detail?.ok === true
-    && device?.health_detail?.probe?.ready === true
-    && device?.health_detail?.probe?.device_verified === true
-    && device?.health_detail?.probe?.wda_verified === true);
-  return { detail: `${ready.length}/${values.length} registered iPhones satisfy the strict WDA health contract; read-only check` };
+  const result = await run('adb', ['devices', '-l'], { timeoutMs: 5000 });
+  if (result.code !== 0) throw new Error('adb devices -l failed');
+  const online = new Set(String(result.stdout).split(/\r?\n/).slice(1)
+    .map((line) => line.trim().split(/\s+/)).filter(([, state]) => state === 'device').map(([serial]) => serial));
+  const count = values.filter((device) => online.has(device.udid)).length;
+  return { detail: `${count}/${values.length} configured Android devices online via adb; TikTok UI proof still requires a live pilot` };
 }
 
 export async function inspectForkAncestor({ forkRoot, commit = DEERFLOW_COMMIT, run = runCommand }) {
@@ -435,13 +437,13 @@ export async function inspectDatabaseRevision({ databasePath, statPath = lstat, 
       { cwd: snapshotRoot },
       run,
     );
-    if (revision !== '0026_social_runtime') {
-      throw new Error(`DeerFlow database is ${revision || 'unversioned'}, expected 0026_social_runtime`);
+    if (revision !== '0032_android_outreach_sender') {
+      throw new Error(`DeerFlow database is ${revision || 'unversioned'}, expected 0032_android_outreach_sender`);
     }
   } finally {
     await rm(snapshotRoot, { recursive: true, force: true });
   }
-  return { detail: 'database at 0026_social_runtime' };
+  return { detail: 'database at 0032_android_outreach_sender' };
 }
 
 export async function inspectPinnedPnpm({ frontendRoot }) {
@@ -595,47 +597,33 @@ function defaultAdapters(packageRoot, { gatewayUrl, environment, timeoutMs }) {
     tkdesk_mcp: async () => ({ detail: (await getCatalogs()).tkdesk }),
     public_outreach_operator_root: async () => inspectPublicOutreachPackage({ environment: runtimeEnvironment }),
     public_outreach_config: async () => {
-      const maxActive = Number(runtimeEnvironment.PUBLIC_OUTREACH_MAX_ACTIVE);
-      const wdaPort = Number(runtimeEnvironment.PUBLIC_OUTREACH_IOS_WDA_PORT);
-      const wdaTimeout = Number(runtimeEnvironment.PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS);
-      if (!Number.isInteger(maxActive) || maxActive < 1 || maxActive > 10) {
-        throw new Error('PUBLIC_OUTREACH_MAX_ACTIVE must be an integer between 1 and 10');
-      }
-      if (!Number.isInteger(wdaPort) || wdaPort < 1 || wdaPort > 65535) {
-        throw new Error('PUBLIC_OUTREACH_IOS_WDA_PORT must be a valid TCP port');
-      }
-      if (!Number.isInteger(wdaTimeout) || wdaTimeout < 1000 || wdaTimeout > 120000) {
-        throw new Error('PUBLIC_OUTREACH_IOS_WDA_TIMEOUT_MS must be between 1000 and 120000');
-      }
-      if (runtimeEnvironment.PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE !== 'true') {
-        throw new Error('PUBLIC_OUTREACH_IOS_REQUIRE_WDA_PROBE must remain true');
-      }
       return {
-        detail: `max_active=${maxActive}; profile_root=${runtimeEnvironment.PUBLIC_OUTREACH_PROFILE_ROOT}; ios_device_root=${runtimeEnvironment.PUBLIC_OUTREACH_IOS_DEVICE_ROOT}; WDA port=${wdaPort}`,
+        detail: `max_active=1; runtime_root=${runtimeEnvironment.PUBLIC_OUTREACH_RUNTIME_ROOT}`,
       };
     },
-    public_outreach_playwright: async () => inspectInstalledDependency({
-      operatorRoot,
-      packageName: 'playwright',
-      expectedVersion: '1.59.1',
-    }),
     public_outreach_appium: async () => {
       const appium = await inspectInstalledDependency({
         operatorRoot,
         packageName: 'appium',
         expectedVersion: '3.1.0',
       });
-      const xcuitest = await inspectInstalledDependency({
+      const uiautomator2 = await inspectInstalledDependency({
         operatorRoot,
-        packageName: 'appium-xcuitest-driver',
-        expectedVersion: '12.13.3',
+        packageName: 'appium-uiautomator2-driver',
+        expectedVersion: '8.7.0',
       });
-      return { detail: `${appium.detail}; ${xcuitest.detail}; XCUITest driver install script is available` };
+      return { detail: `${appium.detail}; ${uiautomator2.detail}` };
     },
-    public_outreach_xcuitest_registration: async () => inspectXcuitestDriverRegistration({ operatorRoot }),
-    public_outreach_profile_root: async () => inspectWritableStateRoot(
-      runtimeEnvironment.PUBLIC_OUTREACH_PROFILE_ROOT,
-      'public outreach profile root',
+    public_outreach_uiautomator2_registration: async () => inspectUiAutomator2DriverRegistration({ operatorRoot }),
+    public_outreach_android_tools: async () => {
+      if (!runtimeEnvironment.ANDROID_HOME && !runtimeEnvironment.ANDROID_SDK_ROOT) throw new Error('ANDROID_HOME or ANDROID_SDK_ROOT is required');
+      await requireSuccess('adb', ['version'], { timeoutMs: 5000 });
+      await requireSuccess('java', ['-version'], { timeoutMs: 5000 });
+      return { detail: 'Android SDK path, adb and Java are available' };
+    },
+    public_outreach_runtime_root: async () => inspectWritableStateRoot(
+      runtimeEnvironment.PUBLIC_OUTREACH_RUNTIME_ROOT,
+      'public outreach runtime root',
     ),
     public_outreach_devices: async () => inspectRegisteredDevices({ environment: runtimeEnvironment }),
     gateway_mcp_config: async () => inspectGatewayMcpConfig({ gatewayUrl,

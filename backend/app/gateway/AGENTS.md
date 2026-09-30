@@ -8,8 +8,10 @@ existing auth provider with normal admin/permission checks. Caller receipts and
 model identities cannot complete tasks. Only explicit execute may write externally,
 under the deployment single-owner/sender/creator pilot allowlist (DM permission is
 separate). Unknown execution persists failed/manual-required and pauses the sender;
-it must not return to the automatic queue. Shared host resource slots enforce
-10 active Web sessions and one iPhone; native tasks/receipts remain database-owned.
+it must not return to the automatic queue. Shared host resource slots and
+per-device locks gate Android Appium sessions; native tasks/receipts remain
+database-owned. Web/iPhone accounts remain historical read-only records and
+cannot claim or execute new work.
 See [production runbook](../../../docs/verification/creator-agent/public-outreach-production-runbook.md)
 for private configuration, cleanup and the still-unverified TikTok readback mapping.
 

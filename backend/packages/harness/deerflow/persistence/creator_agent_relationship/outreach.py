@@ -39,13 +39,14 @@ _REQUIRED_EVIDENCE = {
     "closed": "closure_receipt",
 }
 _RECEIPT_KINDS = frozenset(_REQUIRED_EVIDENCE.values())
-_SENDER_CHANNELS = frozenset({"web", "ios"})
+_SENDER_CHANNELS = frozenset({"android"})
+_HISTORICAL_SENDER_CHANNELS = frozenset({"web", "ios", "android"})
 _ACTION_KINDS = frozenset({"like", "comment", "follow", "message"})
 _ACTION_STATES = frozenset({"pending", "leased", "completed", "failed"})
 _ACTIVE_SEQUENCE_STATES = ("pending", "public_touched", "contacted", "replied")
 _ACTIVE_SENDER_STATES = frozenset({"enabled", "healthy", "ready", "active"})
-_MAX_WEB_SENDER_ACCOUNTS = 50
-_MAX_ACTIVE_SENDER_ACCOUNTS = 10
+_MAX_ANDROID_SENDER_ACCOUNTS = 50
+_MAX_ACTIVE_SENDER_ACCOUNTS = 50
 _ATTEMPT_STARTED = "_external_attempt_started"
 _ATTEMPT_TOKEN = "_external_attempt_token"
 _ACTION_GROUP_KEY = "action_group"
@@ -185,7 +186,12 @@ class CreatorOutreachRepository:
                     CreatorOutreachActionTaskRow.lease_until > datetime.now(UTC),
                     ~_no_contact(row),
                     exists(
-                        select(SenderAccountRow.sender_account_id).where(SenderAccountRow.owner_user_id == row.owner_user_id, SenderAccountRow.sender_account_id == row.sender_account_id, SenderAccountRow.status.in_(_ACTIVE_SENDER_STATES))
+                        select(SenderAccountRow.sender_account_id).where(
+                            SenderAccountRow.owner_user_id == row.owner_user_id,
+                            SenderAccountRow.sender_account_id == row.sender_account_id,
+                            SenderAccountRow.channel == "android",
+                            SenderAccountRow.status.in_(_ACTIVE_SENDER_STATES),
+                        )
                     ),
                     exists(
                         select(CreatorOutreachSequenceRow.sequence_no).where(
@@ -225,7 +231,11 @@ class CreatorOutreachRepository:
         owner_user_id = _text(owner_user_id, "owner_user_id")
         sender_account_id = _text(sender_account_id, "sender_account_id")
         if channel not in _SENDER_CHANNELS:
-            raise ValueError("channel must be web or ios")
+            raise ValueError("new sender channel must be android")
+        if not device_ref:
+            raise ValueError("device_ref is required for android senders")
+        if profile_ref is not None:
+            raise ValueError("profile_ref is only retained for historical senders")
         status = _text(status, "status", 32)
         if capabilities is not None and capabilities_json is not None and capabilities != capabilities_json:
             raise ValueError("capabilities and capabilities_json conflict")
@@ -255,10 +265,9 @@ class CreatorOutreachRepository:
                 if actual[:-1] != expected[:-1] or not _same_datetime(actual[-1], expected[-1]):
                     raise ValueError("sender account replay conflict")
                 return existing.to_dict()
-            if channel == "web":
-                web_count = await session.scalar(select(func.count()).select_from(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id, SenderAccountRow.channel == "web"))
-                if int(web_count or 0) >= _MAX_WEB_SENDER_ACCOUNTS:
-                    raise ValueError("maximum of 50 web sender accounts reached")
+            android_count = await session.scalar(select(func.count()).select_from(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id, SenderAccountRow.channel == "android"))
+            if int(android_count or 0) >= _MAX_ANDROID_SENDER_ACCOUNTS:
+                raise ValueError("maximum of 50 android sender accounts reached")
             row = SenderAccountRow(
                 owner_user_id=owner_user_id,
                 sender_account_id=sender_account_id,
@@ -303,8 +312,8 @@ class CreatorOutreachRepository:
         max_active: int | None = None,
     ) -> list[dict[str, Any]]:
         owner_user_id = _text(owner_user_id, "owner_user_id")
-        if channel is not None and channel not in _SENDER_CHANNELS:
-            raise ValueError("channel must be web or ios")
+        if channel is not None and channel not in _HISTORICAL_SENDER_CHANNELS:
+            raise ValueError("unknown sender channel")
         if status is not None:
             status = _text(status, "status", 32)
         if active_limit is not None and max_active is not None and active_limit != max_active:
@@ -319,7 +328,7 @@ class CreatorOutreachRepository:
         if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("limit must be a positive integer")
         if active_only and limit is not None and limit > _MAX_ACTIVE_SENDER_ACCOUNTS:
-            raise ValueError("active sender batch cannot exceed 10 accounts")
+            raise ValueError("active sender batch cannot exceed 50 accounts")
         stmt = select(SenderAccountRow).where(SenderAccountRow.owner_user_id == owner_user_id)
         if channel is not None:
             stmt = stmt.where(SenderAccountRow.channel == channel)
@@ -394,6 +403,8 @@ class CreatorOutreachRepository:
             sender = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
             if sender is None:
                 raise ValueError("sender account must be registered before enqueueing actions")
+            if sender.channel != "android":
+                raise ValueError("historical web and ios senders cannot receive new actions")
             sequence = await session.get(CreatorOutreachSequenceRow, (owner_user_id, creator_uid, sequence_no))
             if sequence is None or sequence.status not in _ACTIVE_SEQUENCE_STATES:
                 raise ValueError("an active bound sequence is required")
@@ -470,6 +481,7 @@ class CreatorOutreachRepository:
                 select(SenderAccountRow.sender_account_id).where(
                     SenderAccountRow.owner_user_id == task.owner_user_id,
                     SenderAccountRow.sender_account_id == task.sender_account_id,
+                    SenderAccountRow.channel == "android",
                     SenderAccountRow.status.in_(_ACTIVE_SENDER_STATES),
                 )
             )
@@ -1003,6 +1015,8 @@ class CreatorOutreachRepository:
             row = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
             if row is None:
                 raise ValueError("sender account does not exist")
+            if row.channel != "android":
+                raise ValueError("historical web and ios senders are read only")
             row.status = status
             row.capabilities_json = {**(row.capabilities_json or {}), "last_operator_reason": reason}
             row.updated_at = datetime.now(UTC)
@@ -1383,6 +1397,8 @@ class CreatorOutreachRepository:
             sender = await session.get(SenderAccountRow, (owner_user_id, sender_account_id))
             if sender is None:
                 raise ValueError("sender account must be registered before binding a sequence")
+            if sender.channel != "android":
+                raise ValueError("historical web and ios senders cannot start a sequence")
             claim = await session.get(CreatorClaimRow, (owner_user_id, creator_uid))
             if claim is None:
                 raise ValueError("creator must be claimed before sequence binding")

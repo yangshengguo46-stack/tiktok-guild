@@ -21,7 +21,7 @@ async def repo(tmp_path):
 
 
 async def _bound_sequence(repo, *, sender_account_id: str = "web-001") -> None:
-    await repo.register_sender_account("guild", sender_account_id, "web", profile_ref="profile-001")
+    await repo.register_sender_account("guild", sender_account_id, "android", device_ref="profile-001")
     await repo.claim_creator(owner_user_id="guild", creator_uid="creator-1")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="creator-1", sender_account_id=sender_account_id)
 
@@ -31,56 +31,56 @@ async def test_sender_registration_is_idempotent_and_rejects_channel_conflicts(r
     first = await repo.register_sender_account(
         "guild",
         "web-001",
-        "web",
+        "android",
         external_ref="ordinary-account",
-        profile_ref="profile-001",
+        device_ref="profile-001",
         capabilities={"like": True, "comment": True},
     )
     duplicate = await repo.register_sender_account(
         "guild",
         "web-001",
-        "web",
+        "android",
         external_ref="ordinary-account",
-        profile_ref="profile-001",
+        device_ref="profile-001",
         capabilities={"like": True, "comment": True},
     )
     assert duplicate["sender_account_id"] == first["sender_account_id"]
-    assert duplicate["channel"] == first["channel"] == "web"
+    assert duplicate["channel"] == first["channel"] == "android"
     assert duplicate["capabilities_json"] == first["capabilities_json"] == {"like": True, "comment": True}
     with pytest.raises(ValueError, match="replay conflict"):
-        await repo.register_sender_account("guild", "web-001", "ios", external_ref="ordinary-account")
-    with pytest.raises(ValueError, match="web or ios"):
+        await repo.register_sender_account("guild", "web-001", "android", external_ref="ordinary-account", device_ref="different-device")
+    with pytest.raises(ValueError, match="device_ref"):
         await repo.register_sender_account("guild", "bad", "android")
 
 
 @pytest.mark.asyncio
 async def test_sender_pool_allows_fifty_profiles_and_limits_active_batch_to_ten(repo):
     for number in range(50):
-        await repo.register_sender_account("guild", f"web-{number:03d}", "web", profile_ref=f"profile-{number:03d}")
-    accounts = await repo.list_sender_accounts("guild", channel="web")
-    active_batch = await repo.list_sender_accounts("guild", channel="web", active_only=True)
+        await repo.register_sender_account("guild", f"web-{number:03d}", "android", device_ref=f"profile-{number:03d}")
+    accounts = await repo.list_sender_accounts("guild", channel="android")
+    active_batch = await repo.list_sender_accounts("guild", channel="android", active_only=True)
     assert len(accounts) == 50
-    assert len(active_batch) == 10
-    with pytest.raises(ValueError, match="cannot exceed 10"):
-        await repo.list_sender_accounts("guild", channel="web", active_only=True, limit=11)
+    assert len(active_batch) == 50
+    with pytest.raises(ValueError, match="cannot exceed 50"):
+        await repo.list_sender_accounts("guild", channel="android", active_only=True, limit=51)
     with pytest.raises(ValueError, match="maximum of 50"):
-        await repo.register_sender_account("guild", "web-050", "web", profile_ref="profile-050")
+        await repo.register_sender_account("guild", "web-050", "android", device_ref="profile-050")
 
 
 @pytest.mark.asyncio
 async def test_concurrent_web_registration_stays_within_owner_cap(repo):
     results = await asyncio.gather(
-        *(repo.register_sender_account("guild", f"web-{number:03d}", "web", profile_ref=f"profile-{number:03d}") for number in range(55)),
+        *(repo.register_sender_account("guild", f"web-{number:03d}", "android", device_ref=f"profile-{number:03d}") for number in range(55)),
         return_exceptions=True,
     )
     assert sum(isinstance(result, dict) for result in results) == 50
     assert sum(isinstance(result, ValueError) for result in results) == 5
-    assert len(await repo.list_sender_accounts("guild", channel="web")) == 50
+    assert len(await repo.list_sender_accounts("guild", channel="android")) == 50
 
 
 @pytest.mark.asyncio
 async def test_action_idempotency_and_sender_continuity(repo):
-    await repo.register_sender_account("guild", "web-001", "web", profile_ref="profile-001")
+    await repo.register_sender_account("guild", "web-001", "android", device_ref="profile-001")
     await _bound_sequence(repo)
     first = await repo.enqueue_action(
         "guild",
@@ -111,7 +111,7 @@ async def test_action_idempotency_and_sender_continuity(repo):
             "outreach:guild:creator-1:1:like",
             payload={"target": "different-video"},
         )
-    await repo.register_sender_account("guild", "ios-001", "ios", device_ref="device-001")
+    await repo.register_sender_account("guild", "ios-001", "android", device_ref="device-001")
     with pytest.raises(ValueError, match="differs from"):
         await repo.enqueue_action(
             "guild",
@@ -185,7 +185,7 @@ async def test_bind_and_enqueue_require_registered_sender(repo):
     await repo.claim_creator(owner_user_id="guild", creator_uid="creator-1")
     with pytest.raises(ValueError, match="registered"):
         await repo.bind_sequence(owner_user_id="guild", creator_uid="creator-1", sender_account_id="web-unknown")
-    await repo.register_sender_account("guild", "web-001", "web", profile_ref="profile-001")
+    await repo.register_sender_account("guild", "web-001", "android", device_ref="profile-001")
     await repo.bind_sequence(owner_user_id="guild", creator_uid="creator-1", sender_account_id="web-001")
     with pytest.raises(ValueError, match="registered"):
         await repo.enqueue_action("guild", "creator-1", 1, "ios-unknown", "like", "unknown-sender")

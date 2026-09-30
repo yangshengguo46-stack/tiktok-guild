@@ -27,7 +27,7 @@ import { useI18n } from "@/core/i18n/hooks";
 
 type AccountPayload = {
   accounts: PublicOutreachAccount[];
-  web_batch_capacity: {
+  android_capacity: {
     registered: number;
     maximum: number;
     active_limit: number;
@@ -35,7 +35,6 @@ type AccountPayload = {
     ready: number;
   };
   operator: { external_writes_enabled: boolean };
-  ios_readiness: { registered: number; ready: number };
 };
 
 type TaskDetail = PublicOutreachTask & {
@@ -58,18 +57,22 @@ type PublicOutreachCopy = {
   loadTasks: string;
   accountPool: {
     title: string;
-    web: string;
-    ios: string;
+    android: string;
+    history: string;
     healthy: string;
     attention: string;
     active: string;
     batchCapacity: string;
-    iosReadiness: string;
     registered: string;
     maximum: string;
     ready: string;
     pause: string;
     resume: string;
+    observe: string;
+    manualControl: string;
+    deviceResult: string;
+    manualCommand: string;
+    noNodes: string;
   };
   taskList: {
     title: string;
@@ -123,6 +126,17 @@ export default function PublicOutreachWorkbenchPage() {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busyDeviceRef, setBusyDeviceRef] = useState<string | null>(null);
+  const [deviceResult, setDeviceResult] = useState<{
+    device_ref: string;
+    nodes?: Array<{
+      text?: string;
+      resource_id?: string;
+      description?: string;
+      class?: string;
+    }>;
+    scrcpy?: string[];
+  } | null>(null);
 
   const loadAccounts = useCallback(async () => {
     setLoading(true);
@@ -204,6 +218,57 @@ export default function PublicOutreachWorkbenchPage() {
       setError(
         cause instanceof Error ? cause.message : copy.operatorUnavailable,
       );
+    }
+  }
+
+  async function operateDevice(
+    account: PublicOutreachAccount,
+    action: "observe" | "takeover",
+  ) {
+    if (!account.device_ref) return;
+    setError(null);
+    setBusyDeviceRef(account.device_ref);
+    setDeviceResult(null);
+    try {
+      const endpoint = action === "observe" ? "control" : "takeover";
+      const response = await fetchWithAuth(
+        `${getBackendBaseURL()}/api/public-outreach/devices/${encodeURIComponent(account.device_ref)}/${endpoint}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            action === "observe" ? { commands: [{ type: "observe" }] } : {},
+          ),
+        },
+      );
+      const result = await readJson<{
+        ok: boolean;
+        error_code?: string;
+        device_ref: string;
+        results?: Array<{
+          nodes?: Array<{
+            text?: string;
+            resource_id?: string;
+            description?: string;
+            class?: string;
+          }>;
+        }>;
+        scrcpy?: string[];
+      }>(response);
+      if (!result.ok)
+        throw new Error(result.error_code ?? copy.operatorUnavailable);
+      setDeviceResult({
+        device_ref: result.device_ref,
+        nodes: result.results?.[0]?.nodes,
+        scrcpy: result.scrcpy,
+      });
+      if (action === "takeover") await loadAccounts();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : copy.operatorUnavailable,
+      );
+    } finally {
+      setBusyDeviceRef(null);
     }
   }
 
@@ -308,12 +373,42 @@ export default function PublicOutreachWorkbenchPage() {
           ) : accounts ? (
             <PublicOutreachAccountPool
               accounts={accounts.accounts}
-              iosReadiness={accounts.ios_readiness}
               labels={copy.accountPool}
               onPause={(account) => void updateAccount(account, "pause")}
               onResume={(account) => void updateAccount(account, "resume")}
-              webBatchCapacity={accounts.web_batch_capacity}
+              onObserve={(account) => void operateDevice(account, "observe")}
+              onTakeover={(account) => void operateDevice(account, "takeover")}
+              busyDeviceRef={busyDeviceRef}
+              androidCapacity={accounts.android_capacity}
             />
+          ) : null}
+
+          {deviceResult ? (
+            <section
+              className="border-border/70 rounded-lg border p-4"
+              aria-live="polite"
+            >
+              <h2 className="font-medium">
+                {copy.accountPool.deviceResult}: {deviceResult.device_ref}
+              </h2>
+              {deviceResult.scrcpy ? (
+                <p className="mt-2 text-sm">
+                  {copy.accountPool.manualCommand}:{" "}
+                  <code>{deviceResult.scrcpy.join(" ")}</code>
+                </p>
+              ) : null}
+              {deviceResult.nodes ? (
+                deviceResult.nodes.length ? (
+                  <pre className="bg-muted/30 mt-2 max-h-64 overflow-auto rounded p-2 text-xs">
+                    {JSON.stringify(deviceResult.nodes, null, 2)}
+                  </pre>
+                ) : (
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    {copy.accountPool.noNodes}
+                  </p>
+                )
+              ) : null}
+            </section>
           ) : null}
 
           <section className="border-border/70 rounded-lg border p-4">

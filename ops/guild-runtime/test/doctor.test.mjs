@@ -16,7 +16,7 @@ import {
   inspectNativeSocialRuntime,
   inspectPersonaCatalog,
   inspectPinnedPnpm,
-  inspectXcuitestDriverRegistration,
+  inspectUiAutomator2DriverRegistration,
   runDoctor,
 } from '../scripts/doctor.mjs';
 import { createServer } from 'node:http';
@@ -102,10 +102,11 @@ test('live doctor marks public outreach catalog evidence as direct discovery', a
   for (const name of [
     'public_outreach_operator_root',
     'public_outreach_config',
-    'public_outreach_playwright',
+    'public_outreach_uiautomator2_registration',
     'public_outreach_appium',
-    'public_outreach_profile_root',
+    'public_outreach_runtime_root',
     'public_outreach_devices',
+    'public_outreach_android_tools',
     'public_outreach_direct_catalog',
     'guild_direct_catalog',
     'broker_direct_catalog',
@@ -119,8 +120,8 @@ test('live doctor marks public outreach catalog evidence as direct discovery', a
   assert.equal(check?.evidence, 'direct-discovery');
 });
 
-test('doctor accepts a registered XCUITest driver from the Appium JSON catalog', async () => {
-  const result = await inspectXcuitestDriverRegistration({
+test('doctor accepts a registered UiAutomator2 driver from the Appium JSON catalog', async () => {
+  const result = await inspectUiAutomator2DriverRegistration({
     operatorRoot: '/fixture/operator',
     run: async (command, args, options) => {
       assert.match(command, /node_modules[\\/]\.bin[\\/]appium$/u);
@@ -128,25 +129,25 @@ test('doctor accepts a registered XCUITest driver from the Appium JSON catalog',
       assert.equal(options.cwd, '/fixture/operator');
       return {
         code: 0,
-        stdout: JSON.stringify({ xcuitest: { installed: true, version: '12.13.3' } }),
+        stdout: JSON.stringify({ uiautomator2: { installed: true, version: '8.7.0' } }),
         stderr: '',
       };
     },
   });
-  assert.deepEqual(result, { detail: 'xcuitest@12.13.3 registered in the Appium driver catalog' });
+  assert.deepEqual(result, { detail: 'uiautomator2@8.7.0 registered in the Appium driver catalog' });
 });
 
-test('doctor keeps an unregistered XCUITest driver unavailable', async () => {
+test('doctor keeps an unregistered UiAutomator2 driver unavailable', async () => {
   await assert.rejects(
-    inspectXcuitestDriverRegistration({
+    inspectUiAutomator2DriverRegistration({
       operatorRoot: '/fixture/operator',
       run: async () => ({
         code: 0,
-        stdout: JSON.stringify({ xcuitest: { installed: false } }),
+        stdout: JSON.stringify({ uiautomator2: { installed: false } }),
         stderr: '',
       }),
     }),
-    /registration_required.*npm run ios:install-driver/u,
+    /registration_required.*npm ci in public-outreach-operator/u,
   );
 });
 
@@ -242,7 +243,7 @@ test('database revision inspection warms a WAL snapshot when the source has no s
   const seed = [
     'PRAGMA journal_mode=WAL;',
     'CREATE TABLE alembic_version(version_num TEXT);',
-    "INSERT INTO alembic_version VALUES ('0026_social_runtime');",
+    "INSERT INTO alembic_version VALUES ('0032_android_outreach_sender');",
     'PRAGMA wal_checkpoint(TRUNCATE);',
   ].join(' ');
   const seeded = await runCommand('sqlite3', [databasePath, seed], { cwd: databaseRoot });
@@ -251,7 +252,7 @@ test('database revision inspection warms a WAL snapshot when the source has no s
   const before = await readdir(databaseRoot);
 
   assert.deepEqual(await inspectDatabaseRevision({ databasePath }), {
-    detail: 'database at 0026_social_runtime',
+    detail: 'database at 0032_android_outreach_sender',
   });
   assert.deepEqual(await readdir(databaseRoot), before);
 });
@@ -297,9 +298,9 @@ test('database revision inspection queries a disposable snapshot without changin
       assert.equal(new URL(args[0]).searchParams.get('mode'), 'ro');
       assert.equal(args[1], 'SELECT version_num FROM alembic_version;');
       assert.equal(await readFile(`${snapshotPath}-shm`, 'utf8'), 'sqlite side effect');
-      return { code: 0, stdout: '0026_social_runtime\n', stderr: '' };
+      return { code: 0, stdout: '0032_android_outreach_sender\n', stderr: '' };
     },
-  }), { detail: 'database at 0026_social_runtime' });
+  }), { detail: 'database at 0032_android_outreach_sender' });
   assert.equal(calls.length, 2);
   assert.deepEqual(calls.map(({ command }) => command), ['sqlite3', 'sqlite3']);
   assert.notEqual(calls[1].args[0], `${pathToFileURL(databasePath).href}?mode=ro`);

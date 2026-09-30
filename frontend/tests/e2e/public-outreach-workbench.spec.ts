@@ -8,28 +8,27 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
       json: {
         accounts: [
           {
-            sender_account_id: "web:ordinary-001",
-            channel: "web",
+            sender_account_id: "android:ordinary-001",
+            channel: "android",
             status: "healthy",
             health: "healthy",
+            device_ref: "mac:serial-1",
             capabilities: { like: true, comment: true, follow: true },
           },
           {
-            sender_account_id: "ios:device-001:ordinary-002",
-            channel: "ios",
-            status: "ready",
-            health: "ready",
-            device_ref: "device-001",
+            sender_account_id: "web:legacy-002",
+            channel: "web",
+            status: "retired",
+            health: "retired",
             capabilities: { like: true, comment: true, follow: true },
           },
         ],
-        web_batch_capacity: {
+        android_capacity: {
           registered: 1,
           maximum: 50,
-          active_limit: 10,
-          active: 1,
+          active_limit: 1,
+          active: 0,
         },
-        ios_readiness: { registered: 1, ready: 1 },
         operator: { configured: true },
       },
     }),
@@ -42,7 +41,7 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
             task_id: "task-like-001",
             creator_uid: "creator-001",
             sequence_no: 1,
-            sender_account_id: "web:ordinary-001",
+            sender_account_id: "android:ordinary-001",
             action: "like",
             current_action: "like",
             state: "completed",
@@ -53,13 +52,31 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
       },
     }),
   );
+  await page.route("**/api/public-outreach/devices/*/control", (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        device_ref: "mac:serial-1",
+        results: [{ nodes: [{ text: "Ready", resource_id: "app:id/title" }] }],
+      },
+    }),
+  );
+  await page.route("**/api/public-outreach/devices/*/takeover", (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        device_ref: "mac:serial-1",
+        scrcpy: ["scrcpy", "-s", "serial-1"],
+      },
+    }),
+  );
   await page.route("**/api/public-outreach/tasks/task-like-001", (route) =>
     route.fulfill({
       json: {
         task_id: "task-like-001",
         creator_uid: "creator-001",
         sequence_no: 1,
-        sender_account_id: "web:ordinary-001",
+        sender_account_id: "android:ordinary-001",
         action: "like",
         current_action: "like",
         state: "completed",
@@ -84,7 +101,7 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
           task_id: "task-like-001",
           creator_uid: "creator-001",
           sequence_no: 1,
-          sender_account_id: "web:ordinary-001",
+          sender_account_id: "android:ordinary-001",
           action: "like",
           current_action: "like",
           state: "pending",
@@ -102,7 +119,7 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
           task_id: "task-like-001",
           creator_uid: "creator-001",
           sequence_no: 1,
-          sender_account_id: "web:ordinary-001",
+          sender_account_id: "android:ordinary-001",
           action: "like",
           current_action: "like",
           state: "failed",
@@ -120,7 +137,7 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
           task_id: "task-like-001",
           creator_uid: "creator-001",
           sequence_no: 1,
-          sender_account_id: "web:ordinary-001",
+          sender_account_id: "android:ordinary-001",
           action: "like",
           current_action: "like",
           state: "pending",
@@ -144,8 +161,16 @@ test("renders the mocked public outreach workbench and receipt evidence", async 
   await expect(
     page.getByRole("heading", { name: "Creator outreach workbench" }),
   ).toBeVisible();
-  await expect(page.getByText("web:ordinary-001")).toBeVisible();
-  await expect(page.getByText("iPhone accounts")).toBeVisible();
+  await expect(page.getByText("android:ordinary-001")).toBeVisible();
+  await expect(page.getByText("Legacy account (read only)")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Inspect UI android:ordinary-001" })
+    .click();
+  await expect(page.getByText(/app:id\/title/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Take over device android:ordinary-001" })
+    .click();
+  await expect(page.getByText(/scrcpy -s serial-1/)).toBeVisible();
 
   await page.getByLabel("Creator UID").fill("creator-001");
   await page.getByRole("button", { name: "Load tasks" }).click();

@@ -1,78 +1,65 @@
-import crypto from 'node:crypto';
-import path from 'node:path';
-import { createPlaywrightPool } from './web/playwright-pool.mjs';
-import { executeWebAction } from './web/tiktok-web-executor.mjs';
-import { createXcuitestSession } from './ios/xcuitest-session.mjs';
-import { executeIosAction } from './ios/tiktok-ios-executor.mjs';
-import { createAppiumDriver } from './ios/appium-driver.mjs';
+import { createAndroidDeviceRuntime } from './android/device-runtime.mjs';
+import { executeAndroidAction } from './android/tiktok-android-executor.mjs';
 import { acquireResourceSlot } from './resource-slots.mjs';
 
-export function createProductionExecutor({ runtimeRoot, config = {}, chromium = null, driverFactory = createAppiumDriver }) {
-  let pool;
-  let closed = false;
-  const sessions = new Set();
-  const heldSlots = new Set();
+export function createProductionExecutor({ runtimeRoot, config = {}, driverFactory, runAdb } = {}) {
+  if (!runtimeRoot) throw new Error('Runtime root required.');
+  const devices = Array.isArray(config.devices) ? config.devices : (config.sender?.device ? [{ ...config.sender.device, device_ref: config.sender.device_ref }] : []);
+  for (const key of ['device_ref', 'udid', 'system_port']) {
+    const values = devices.map((device) => device[key]);
+    if (values.some((value) => value === undefined || value === null || value === '') || new Set(values).size !== values.length) {
+      throw new Error(`Android devices require unique ${key} values.`);
+    }
+  }
+  const runtime = createAndroidDeviceRuntime({ root: runtimeRoot, ...(driverFactory ? { driverFactory } : {}), ...(runAdb ? { runAdb } : {}) });
   const pilot = config.pilot ?? {};
+  let closed = false;
+  function deviceFor(ref) {
+    const device = devices.find((item) => item.device_ref === ref);
+    return device && {
+      device_ref: device.device_ref, udid: device.udid, system_port: device.system_port,
+      appium_url: device.appium_url, app_package: device.app_package, app_activity: device.app_activity,
+    };
+  }
   function admitted({ account, creator, action }) {
-    return pilot.enabled === true && pilot.owner_user_id === account.owner_user_id
-      && pilot.sender_account_id === account.sender_account_id && pilot.creator_uid === creator.creator_uid
+    return pilot.enabled === true && pilot.owner_user_id === account?.owner_user_id
+      && pilot.sender_account_id === account?.sender_account_id && pilot.creator_uid === creator?.creator_uid
       && Array.isArray(pilot.actions) && pilot.actions.includes(action)
       && (action !== 'message' || pilot.message_enabled === true);
   }
-  async function execute(request) {
-    if (closed) return { verified: false, error_code: 'operator_closed' };
+  async function executeBusiness(request) {
     if (!admitted(request)) return { verified: false, error_code: 'pilot_required' };
     const { account, creator, action } = request;
-    const binding = config.sender;
-    if (!binding || binding.owner_user_id !== account.owner_user_id || binding.sender_account_id !== account.sender_account_id || binding.channel !== account.channel) {
-      return { verified: false, error_code: 'sender_unconfigured' };
-    }
-    const slot = await acquireResourceSlot({ root: runtimeRoot, kind: account.channel, maximum: account.channel === 'web' ? 10 : 1 });
+    const sender = config.sender;
+    if (!sender || sender.channel !== 'android' || account?.channel !== 'android'
+      || sender.owner_user_id !== account.owner_user_id || sender.sender_account_id !== account.sender_account_id
+      || sender.device_ref !== account.device_ref) return { verified: false, error_code: 'sender_unconfigured' };
+    const device = deviceFor(account.device_ref);
+    if (!device) return { verified: false, error_code: 'device_unconfigured' };
+    const slot = await acquireResourceSlot({ root: runtimeRoot, kind: 'android', maximum: 1 });
     if (!slot.ok) return { verified: false, error_code: slot.error_code };
-    let cleanupSucceeded = true;
+    let hold = false;
     try {
-      const payload = { comment: request.payload?.comment, message: request.payload?.message, pilotEnabled: true, locators: binding.locators };
-      if (account.channel === 'web') {
-        if (!pool) {
-          const realChromium = chromium ?? (await import('playwright')).chromium;
-          pool = createPlaywrightPool({ profileRoot: path.join(runtimeRoot, 'web-profiles'), launchPersistentContext: (directory) => realChromium.launchPersistentContext(directory, { headless: binding.headless !== false }) });
-        }
-        const resourceId = crypto.createHash('sha256').update(`${account.owner_user_id}\0${account.sender_account_id}`).digest('hex');
-        const registered = await pool.register({ sender_account_id: resourceId, channel: 'web', status: 'enabled', health: 'healthy', external_ref: account.external_ref });
-        if (!registered.ok) return { verified: false, error_code: registered.error_code };
-        await slot.markCleanupRequired();
-        const lease = await pool.claim(resourceId);
-        if (!lease.ok) return { verified: false, error_code: lease.error_code };
-        try {
-          const browserPage = await lease.context.newPage();
-          await browserPage.goto('https://www.tiktok.com/');
-          // Keep the resource id private. Receipts identify the native sender.
-          return await executeWebAction({ account: { ...lease, account: { ...lease.account, sender_account_id: account.sender_account_id, page: browserPage } }, creator, action, payload, signal: request.signal });
-        } finally {
-          try { await slot.markCleanupRequired(); await pool.release(lease.lease_id); } catch (error) { cleanupSucceeded = false; throw error; }
-        }
-      }
-      if (account.channel !== 'ios') return { verified: false, error_code: 'channel_mismatch' };
-      const device = { ...binding.device, device_ref: account.device_ref };
-      const session = createXcuitestSession({ device,
-        driverFactory: () => driverFactory({ ...binding.device, appiumUrl: binding.appium_url, wdaUrl: binding.wda_url, wdaBundleId: binding.device.wda_bundle_id, platformVersion: binding.device.platform_version, bundleId: binding.bundle_id ?? 'com.zhiliaoapp.musically' }),
-        healthCheck: ({ driver }) => driver.verifyHealth(),
-        navigationAdapter: ({ driver, profile_url }) => driver.openProfile(profile_url, binding.bundle_id ?? 'com.zhiliaoapp.musically'),
-      });
-      sessions.add(session);
-      try { return await executeIosAction({ device, account: { ...account, session }, creator, action, payload, signal: request.signal }); }
-      finally {
-        try { await session.close(); sessions.delete(session); } catch (error) { cleanupSucceeded = false; throw error; }
-      }
-    } finally { if (cleanupSucceeded) await slot.release(); else heldSlots.add(slot); }
+      const result = await runtime.run(device, (driver) => executeAndroidAction({
+        driver, account, creator, action, payload: request.payload,
+        locators: sender.locators, appPackage: device.app_package, signal: request.signal,
+      }));
+      if (result.error_code === 'cleanup_unknown') { await slot.markCleanupRequired(); hold = true; }
+      return result;
+    } finally { if (!hold) await slot.release(); }
   }
-  async function close() {
-    closed = true;
-    const results = await Promise.allSettled([...sessions].map((session) => session.close()));
-    const failed = results.filter((result) => result.status === 'rejected');
-    if (failed.length) throw new AggregateError(failed.map((result) => result.reason), 'Device cleanup remains unconfirmed');
-    await pool?.close();
-    await Promise.all([...heldSlots].map(async (slot) => { await slot.release(); heldSlots.delete(slot); }));
+  async function execute(request) {
+    if (closed) return { verified: false, error_code: 'operator_closed' };
+    const operation = request.operation ?? 'business';
+    if (operation === 'business') return executeBusiness(request);
+    const device = deviceFor(request.device_ref);
+    if (!device) return { ok: false, error_code: 'device_unconfigured' };
+    if (operation === 'doctor') return runtime.doctor(device);
+    if (operation === 'control') return runtime.control(device, request.commands);
+    if (operation === 'takeover') return runtime.takeover(device);
+    if (operation === 'resume') return runtime.resume(device);
+    return { ok: false, error_code: 'unsupported_operation' };
   }
+  async function close() { closed = true; }
   return { execute, close };
 }

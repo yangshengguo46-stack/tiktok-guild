@@ -1,9 +1,4 @@
-"""Channel-neutral coordinator for public creator outreach.
-
-The Web Playwright and iPhone XCUITest packages own provider interaction.  This
-module only selects the registered sender, executes an injected operator, and
-persists provider-owned receipts in the native DeerFlow repository.
-"""
+"""Native public outreach coordinator using an injected Android operator."""
 
 from __future__ import annotations
 
@@ -99,7 +94,7 @@ def _operator_callable(operator: Any) -> Callable[..., Any] | None:
         return None
     if callable(operator):
         return operator
-    for name in ("execute_public_outreach", "execute_web_action", "executeWebAction", "execute_ios_action", "executeIosAction", "execute"):
+    for name in ("execute_public_outreach", "execute_android_action", "executeAndroidAction", "execute"):
         candidate = getattr(operator, name, None)
         if callable(candidate):
             return candidate
@@ -121,20 +116,18 @@ def _diagnostic_message(result: Any) -> str:
 
 
 class PublicOutreachWorkflow:
-    """Coordinate either provider channel through one native sequence."""
+    """Coordinate Android outreach through one native sequence."""
 
     def __init__(
         self,
         repository: CreatorOutreachRepository,
         *,
-        web_operator: Any = None,
-        ios_operator: Any = None,
+        android_operator: Any = None,
         worker_id: str = "public-outreach-workflow",
         lease_seconds: int = 300,
     ) -> None:
         self.repository = repository
-        self.web_operator = web_operator
-        self.ios_operator = ios_operator
+        self.android_operator = android_operator
         self.worker_id = _text(worker_id, "worker_id")
         if type(lease_seconds) is not int or lease_seconds <= 0:
             raise ValueError("lease_seconds must be a positive integer")
@@ -678,6 +671,8 @@ class PublicOutreachWorkflow:
         if task["state"] == "completed":
             return await self._duplicate_result(task)
         sender = await self._sender_for_task(task)
+        if sender["channel"] != "android":
+            raise ValueError("historical web and ios tasks cannot execute")
         if task["action"] == "message":
             public_ready, model = await self._public_ready(task)
             if not public_ready:
@@ -699,8 +694,7 @@ class PublicOutreachWorkflow:
                 "error_code": "sequence_closed",
                 "task": current,
             }
-        operator = self.web_operator if sender["channel"] == "web" else self.ios_operator
-        callback = _operator_callable(operator)
+        callback = _operator_callable(self.android_operator)
         if callback is None:
             return await self._record_unknown_result(
                 task,
@@ -720,8 +714,7 @@ class PublicOutreachWorkflow:
             "payload": {**(task.get("payload_json") or {}), **(payload or {})},
             "signal": signal,
         }
-        if sender["channel"] == "ios":
-            kwargs["device"] = device or {}
+        kwargs["device"] = device or {"device_ref": sender["device_ref"]}
         finalizing = False
         try:
             task = await self.repository.mark_external_attempt_started(task_id, lease_owner=claim["lease_owner"], lease_token=claim["lease_token"])
