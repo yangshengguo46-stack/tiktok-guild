@@ -14,10 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from deerflow.persistence.base import Base
 from deerflow.persistence.bootstrap import _get_alembic_config
-from deerflow.social.contracts import ClaimPatch, FollowUp, SocialScope, TurnResult
+from deerflow.social.contracts import ClaimPatch, FollowUp, MemoryCandidate, SocialScope, TurnResult
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import PersonaBindings, PersonaProfile, ProfileScope
 from deerflow.social.persona.resolver import resolve_profile
+from deerflow.social.turns import commit_turn
 
 SCOPE = SocialScope("owner", "account", "person", "channel")
 
@@ -207,6 +208,42 @@ async def test_claim_types_retraction_self_and_commitment_remain_distinct(db):
     assert hypothesis["evidence_ids"] == ["ref1"]
     assert hypothesis["retraction_evidence_ids"] == ["ref2"]
     assert len(retracted.snapshot.outbound) == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_delta_is_atomic(db):
+    social, repo, _ = db
+    snapshot = await repo.record_event(SCOPE, event(social))
+    snapshot = await repo.set_boundaries(SCOPE, expected_revision=1, update=social.BoundaryUpdate(True, False, False, ("ref1",)))
+    result = TurnResult("hi", memory_delta=(MemoryCandidate("assert", "pref:short", "relationship", ("ref1",), "brief"),))
+    saved = await commit_turn(repo, snapshot, event_id="e1", result=result)
+    assert saved.outbound.reply_text == "hi"
+    assert saved.snapshot.relationship[0]["memory_id"] == "pref:short"
+
+
+@pytest.mark.asyncio
+async def test_memory_delta_replay_does_not_duplicate_mutation(db):
+    social, repo, _ = db
+    snapshot = await repo.record_event(SCOPE, event(social))
+    snapshot = await repo.set_boundaries(SCOPE, expected_revision=1, update=social.BoundaryUpdate(True, False, False, ("ref1",)))
+    result = TurnResult("hi", memory_delta=(MemoryCandidate("assert", "pref:short", "relationship", ("ref1",), "brief"),))
+    first = await commit_turn(repo, snapshot, event_id="e1", result=result)
+    replay = await commit_turn(repo, snapshot, event_id="e1", result=result)
+    assert replay.snapshot == first.snapshot
+    assert len(replay.snapshot.relationship) == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_delta_cross_scope_evidence_fails_closed(db):
+    social, repo, _ = db
+    snapshot = await repo.record_event(SCOPE, event(social))
+    snapshot = await repo.set_boundaries(SCOPE, expected_revision=1, update=social.BoundaryUpdate(True, False, False, ("ref1",)))
+    result = TurnResult("hi", memory_delta=(MemoryCandidate("assert", "pref:short", "relationship", ("ref-other",), "brief"),))
+    with pytest.raises(ValueError, match="evidence"):
+        await commit_turn(repo, snapshot, event_id="e1", result=result)
+    restored = await repo.restore(SCOPE)
+    assert restored.outbound == ()
+    assert restored.relationship == ()
 
 
 @pytest.mark.asyncio

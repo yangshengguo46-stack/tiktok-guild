@@ -9,6 +9,7 @@ import pytest
 
 from deerflow.social.contracts import ClaimPatch, FollowUp, IdentityProfile, RoleProfile, SocialAction, SocialScope, TurnResult
 from deerflow.social.persona.models import EffectivePersona, PersonaBindings, PersonaProfile, ProfileScope
+from deerflow.social.turns import parse_turn_result
 
 
 def test_turn_result_distinguishes_reply_wait_and_no_reply():
@@ -76,6 +77,16 @@ def test_turn_result_rejects_blank_reply_duplicate_claims_and_oversized_note():
         TurnResult(reply=None, state_delta=(patch, patch))
     with pytest.raises(ValueError):
         TurnResult(reply=None, decision_note="x" * 241)
+
+
+def test_turn_result_parses_evidence_backed_memory_delta():
+    result = parse_turn_result('{"reply":"收到","state_delta":[],"memory_delta":[{"op":"assert","memory_id":"pref:short","category":"relationship","evidence_ids":["creator:1"],"text":"对方偏好简短回复"}]}')
+    assert result.memory_delta[0].category == "relationship"
+
+
+def test_turn_result_rejects_memory_delta_without_evidence():
+    with pytest.raises(ValueError):
+        parse_turn_result('{"reply":null,"memory_delta":[{"op":"assert","memory_id":"m1","category":"relationship","evidence_ids":[],"text":"x"}]}')
 
 
 def test_profile_scope_and_identity_role_are_bounded_and_immutable():

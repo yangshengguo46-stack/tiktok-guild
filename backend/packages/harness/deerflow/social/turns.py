@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 
-from deerflow.social.contracts import ClaimPatch, FollowUp, TurnResult
+from deerflow.persistence.social.model import SelfMemoryChange
+from deerflow.social.contracts import ClaimPatch, FollowUp, MemoryCandidate, TurnResult
 
 
 def _unique(pairs):
@@ -48,7 +49,7 @@ def parse_turn_result(content: object) -> TurnResult:
     if not isinstance(content, str) or len(content) > 65536:
         raise ValueError("turn must be bounded JSON text")
     raw = json.loads(content, object_pairs_hook=_unique, parse_constant=lambda value: (_ for _ in ()).throw(ValueError("nonfinite JSON")))
-    if not isinstance(raw, dict) or "reply" not in raw or set(raw) - {"reply", "state_delta", "decision_note", "followup"}:
+    if not isinstance(raw, dict) or "reply" not in raw or set(raw) - {"reply", "state_delta", "decision_note", "followup", "memory_delta"}:
         raise ValueError("invalid turn fields")
     patches = raw.get("state_delta", [])
     if not isinstance(patches, list) or len(patches) > 16:
@@ -63,7 +64,20 @@ def parse_turn_result(content: object) -> TurnResult:
         if not isinstance(followup, dict) or set(followup) - {"check", "cancel_when", "not_before"} or not {"check", "cancel_when"} <= set(followup):
             raise ValueError("invalid followup fields")
         followup = FollowUp(**followup)
-    return TurnResult(raw["reply"], tuple(parsed), raw.get("decision_note", ""), followup)
+    memory_delta = raw.get("memory_delta", [])
+    if not isinstance(memory_delta, list) or len(memory_delta) > 16:
+        raise ValueError("memory_delta must be a bounded array")
+    memories = []
+    for candidate in memory_delta:
+        if (
+            not isinstance(candidate, dict)
+            or set(candidate) - {"op", "memory_id", "category", "evidence_ids", "text"}
+            or not {"op", "memory_id", "category", "evidence_ids"} <= set(candidate)
+            or not isinstance(candidate["evidence_ids"], list)
+        ):
+            raise ValueError("invalid memory candidate fields")
+        memories.append(MemoryCandidate(**{**candidate, "evidence_ids": tuple(candidate["evidence_ids"])}))
+    return TurnResult(raw["reply"], tuple(parsed), raw.get("decision_note", ""), followup, tuple(memories))
 
 
 def receipt_status(snapshot):
@@ -80,11 +94,15 @@ def contact_blocked(snapshot) -> bool:
 
 async def commit_turn(repository, snapshot, *, event_id: str, result: TurnResult):
     """No retry: the repository owns transaction, evidence, fingerprint and CAS."""
+    if not isinstance(result, TurnResult):
+        raise ValueError("result must be a TurnResult")
+    memory_changes = tuple(SelfMemoryChange(item.op, item.memory_id, item.category, item.evidence_ids, item.text) for item in result.memory_delta)
     return await repository.commit_turn(
         snapshot.scope,
         expected_revision=snapshot.revision,
         event_id=event_id,
         result=result,
+        memory_changes=memory_changes,
         persona_fingerprint=snapshot.effective_persona.fingerprint,
         enforce_contact_boundaries=True,
     )

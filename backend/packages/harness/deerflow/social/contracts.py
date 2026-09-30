@@ -105,6 +105,27 @@ class ClaimPatch:
 
 
 @dataclass(frozen=True)
+class MemoryCandidate:
+    """Model-proposed memory change; the host validates evidence and persists it."""
+
+    op: Literal["assert", "retract"]
+    memory_id: str
+    category: Literal["self_statement", "self_viewpoint", "commitment", "relationship"]
+    evidence_ids: tuple[str, ...]
+    text: str | None = None
+
+    def __post_init__(self) -> None:
+        bounded_text(self.memory_id, "memory_id", 128)
+        bounded_refs(self.evidence_ids, "evidence_ids", minimum=1)
+        if self.category not in {"self_statement", "self_viewpoint", "commitment", "relationship"}:
+            raise ValueError("invalid memory category")
+        if self.op == "assert":
+            bounded_text(self.text, "text", 2048)  # type: ignore[arg-type]
+        elif self.op != "retract" or self.text is not None:
+            raise ValueError("invalid memory operation")
+
+
+@dataclass(frozen=True)
 class FollowUp:
     check: str
     cancel_when: str
@@ -129,6 +150,7 @@ class TurnResult:
     state_delta: tuple[ClaimPatch, ...] = ()
     decision_note: str = ""
     followup: FollowUp | None = None
+    memory_delta: tuple[MemoryCandidate, ...] = ()
 
     def __post_init__(self) -> None:
         if self.reply is not None:
@@ -141,6 +163,11 @@ class TurnResult:
         bounded_text(self.decision_note, "decision_note", 240, allow_empty=True)
         if self.followup is not None and not isinstance(self.followup, FollowUp):
             raise ValueError("followup must be a FollowUp")
+        if not isinstance(self.memory_delta, tuple) or len(self.memory_delta) > 16 or any(not isinstance(item, MemoryCandidate) for item in self.memory_delta):
+            raise ValueError("memory_delta must contain at most 16 memory candidates")
+        memory_ids = [item.memory_id for item in self.memory_delta]
+        if len(memory_ids) != len(set(memory_ids)):
+            raise ValueError("at most one memory candidate per id per turn")
 
     @property
     def action(self) -> SocialAction:

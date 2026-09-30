@@ -26,10 +26,12 @@ TURN_OUTPUT_PROMPT = (
     "You are the server-bound social agent described in the social context. Use only the supplied channel-safe tools. "
     "On every model call, including after earlier visible turns, return exactly one JSON object; do not continue in plain text. "
     "Return exactly one JSON object with required reply (string or null), optional state_delta (at most 16 claim patches), "
+    "optional memory_delta (at most 16 evidence-backed memory candidates), "
     "decision_note (at most 240 characters), and followup (check, cancel_when, optional ISO-8601 not_before). "
     "Each claim patch has op assert/retract, claim_id and evidence_ids. Assertions also require text, kind "
     "(reported/observed/hypothesis) and facet (person/tradeoff/relationship/conversation/shared_topic/next_step). "
-    "Use only provided source references. Null reply with followup means wait; null without it means intentional silence. "
+    "Use only provided source references. memory_delta is a proposal for durable context only and is never authoritative for identity, boundaries, or platform receipts. "
+    "Null reply with followup means wait; null without it means intentional silence. "
     "Do not add any other fields. Identity, memories, commitments, permissions and bindings cannot be rewritten by persona expression."
 )
 
