@@ -387,8 +387,29 @@ async def test_formal_invite_requires_typed_creator_consent_and_application_rece
         current = await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage=target, evidence_ids=(consent_ref,), reason="synthetic progression")
     current = await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage="formal_invite", evidence_ids=(consent_ref,), reason="creator consented")
     assert current.conversation_stage == "formal_invite"
-    with pytest.raises(ValueError, match="explicit provider receipt"):
+    with pytest.raises(ValueError, match="explicit receipt"):
         await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage="application", evidence_ids=(consent_ref,), reason="no application receipt")
+
+
+@pytest.mark.asyncio
+async def test_application_cannot_reuse_receipt_from_before_formal_invite(db):
+    social, repo, _ = db
+    first = await repo.record_event(SCOPE, event(social))
+    turn = await repo.commit_turn(SCOPE, expected_revision=first.revision, event_id="e1", result=TurnResult("old outbound"), persona_fingerprint=(await resolved_persona(repo)).fingerprint)
+    claimed = await repo.claim_outbound(SCOPE, turn.outbound.action_id, expected_revision=turn.outbound.revision)
+    await repo.record_outbound_result(SCOPE, turn.outbound.action_id, expected_revision=claimed.outbound.revision, state="accepted", provider_ref="provider-old", evidence_ids=("receipt:old",))
+    consent_ref = "creator:consent:new"
+    consent = await repo.record_event(
+        SCOPE,
+        social.ExternalEvent("consent-new", consent_ref, "creator_message", "Yes, send terms.", social.CreatorConsent("formal_invite", True, consent_ref)),
+        expected_revision=(await repo.restore(SCOPE)).revision,
+    )
+    current = consent
+    for target in ("rapport", "discovery", "value_fit", "objection_handling", "permission_to_invite"):
+        current = await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage=target, evidence_ids=(consent_ref,), reason="progress")
+    current = await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage="formal_invite", evidence_ids=(consent_ref,), reason="consent")
+    with pytest.raises(ValueError, match="tied to the current stage"):
+        await repo.advance_conversation_stage(SCOPE, expected_revision=current.revision, target_stage="application", evidence_ids=("receipt:old",), reason="stale receipt")
 
 
 @pytest.mark.asyncio

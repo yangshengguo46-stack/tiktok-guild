@@ -144,7 +144,7 @@ async def test_runtime_binding_injects_bounded_creator_plan_and_omits_stale_evid
     restored_context = await restored_runtime.restore_context()
     assert restored_context.conversation_plan is not None
     assert restored_context.conversation_plan.stage == ConversationStage.first_contact
-    with pytest.raises(SocialConflictError):
+    with pytest.raises(ValueError, match="conversation_plan"):
         await repo.commit_turn(
             SCOPE,
             expected_revision=current.revision,
@@ -162,6 +162,37 @@ def install_host_journal(config, journal):
     context = {**config.get("context", {}), "__run_journal": journal}
     config["context"] = context
     config.setdefault("configurable", {})["__pregel_runtime"] = Runtime(context=context)
+
+
+@pytest.mark.asyncio
+async def test_creator_evidence_refs_can_back_memory_delta(monkeypatch, repo):
+    now = datetime.now(UTC)
+    evidence = CreatorEvidence(SCOPE, "work-current", "tikhub", "video:1", now, None, 0.9, "content", "A current work")
+    model = ScriptedModel(
+        responses=[
+            AIMessage(
+                content=json.dumps(
+                    {
+                        "reply": None,
+                        "state_delta": [],
+                        "memory_delta": [
+                            {
+                                "op": "assert",
+                                "memory_id": "memory-work",
+                                "category": "relationship",
+                                "evidence_ids": ["work-current"],
+                                "text": "Creator uses tutorial content",
+                            }
+                        ],
+                    }
+                )
+            )
+        ]
+    )
+    graph, config = await assembly(monkeypatch, repo, model, binding_changes={"creator_evidence": (evidence,)})
+    await graph.ainvoke({"messages": [HumanMessage(content="use the work context")]}, config)
+    saved = await repo.restore(SCOPE)
+    assert any(item["memory_id"] == "memory-work" and item["status"] == "active" for item in saved.relationship)
 
 
 @pytest.mark.asyncio
@@ -451,7 +482,6 @@ async def test_persona_claim_survives_crash_and_only_one_concurrent_claim_wins(r
 @pytest.mark.parametrize("race", ["binding", "event", "commit"])
 async def test_selector_finish_loses_to_current_evidence_binding_or_turn(repo, race):
     assert hasattr(repo, "claim_persona_evaluation"), "durable selector claim is missing"
-    from deerflow.persistence.social import SocialConflictError
     from deerflow.social.persona.selector import AutomaticPersonaChoice
 
     claim = await repo.claim_persona_evaluation(SCOPE, expected_revision=2, event_id="e1", expected_binding_generation=1)
@@ -541,7 +571,6 @@ async def test_assembly_rejects_a_second_social_context_middleware(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_contact_fence_rejects_reply_but_allows_explicit_wait_and_no_reply(repo):
-    from deerflow.persistence.social import SocialConflictError
     from deerflow.social.contracts import FollowUp
 
     await repo.set_boundaries(SCOPE, expected_revision=2, update=BoundaryUpdate(True, True, False, ("ref1",)))

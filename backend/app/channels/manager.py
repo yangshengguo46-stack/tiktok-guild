@@ -2182,6 +2182,14 @@ class ChannelManager:
         followup_scheduler = resolved.schedule_followup or self._social_followup_scheduler
         if followup_scheduler is not None and hasattr(followup_scheduler, "cancel_for_creator_event"):
             await followup_scheduler.cancel_for_creator_event(envelope.scope, envelope.source_event_id)
+        schedule_followup = resolved.schedule_followup
+        if schedule_followup is None and self._social_followup_scheduler is not None:
+
+            async def schedule_followup(**kwargs):
+                return await self._social_followup_scheduler.schedule(**kwargs, revision_reader=resolved.repository.restore)
+        elif schedule_followup is not None and not callable(schedule_followup):
+            schedule_followup = getattr(schedule_followup, "schedule", schedule_followup)
+
         binding = SocialRuntimeBinding(
             repository,
             envelope.scope,
@@ -2191,7 +2199,7 @@ class ChannelManager:
             resolved.channel_safe_tool_names,
             creator_evidence=resolved.creator_evidence,
             conversation_goal=resolved.conversation_goal,
-            schedule_followup=getattr(resolved.schedule_followup or self._social_followup_scheduler, "schedule", resolved.schedule_followup or self._social_followup_scheduler),
+            schedule_followup=schedule_followup or getattr(self._social_followup_scheduler, "schedule", self._social_followup_scheduler),
         )
         action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
         if action is not None and action.state != "pending":

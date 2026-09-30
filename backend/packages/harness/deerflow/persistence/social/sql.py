@@ -123,8 +123,8 @@ def _projection(snapshot):
     return {field.name: deepcopy(getattr(snapshot, field.name)) for field in fields(snapshot) if field.name not in {"scope", "events", "outbound", "effective_persona"}}
 
 
-def _evidence(snapshot, refs):
-    if not set(refs) <= {event["source_ref"] for event in snapshot.events}:
+def _evidence(snapshot, refs, *, additional_refs=()):
+    if not set(refs) <= ({event["source_ref"] for event in snapshot.events} | set(additional_refs)):
         raise ValueError("evidence references must belong to this channel scope")
 
 
@@ -393,8 +393,13 @@ class SocialRepository:
                     if current == ConversationStage.first_contact:
                         raise ValueError("formal invitation requires verified consent evidence (typed creator consent)")
                     raise ValueError("formal sales stages require verified consent evidence")
-            if target in {ConversationStage.application, ConversationStage.signed} and snapshot.receipt_state not in {"accepted", "delivered"}:
-                raise ValueError("application and signing require an explicit provider receipt")
+            if target in {ConversationStage.application, ConversationStage.signed}:
+                anchor_stage = ConversationStage.formal_invite if target == ConversationStage.application else ConversationStage.application
+                anchors = [item for item in snapshot.boundary_history if item.get("conversation_stage") == anchor_stage.value]
+                anchor_revision = anchors[-1].get("revision") if anchors else None
+                receipt_refs = {ref for action in snapshot.outbound if action.state in {"accepted", "delivered"} and (anchor_revision is None or action.turn_revision > anchor_revision) for ref in action.evidence_ids}
+                if snapshot.receipt_state not in {"accepted", "delivered"} or not set(evidence_ids) & receipt_refs:
+                    raise ValueError("application and signing require an explicit receipt tied to the current stage")
             if current in {ConversationStage.paused, ConversationStage.human_takeover} and target != current:
                 raise ValueError("paused or human takeover stages are terminal")
             if target not in {ConversationStage.paused, ConversationStage.human_takeover} and current in order and target in order:
@@ -453,6 +458,7 @@ class SocialRepository:
         turn_adjustment: TurnAdjustment | None = None,
         enforce_contact_boundaries: bool = False,
         conversation_plan: dict | None = None,
+        creator_evidence_refs: tuple[str, ...] = (),
     ) -> CommitResult:
         if not isinstance(result, TurnResult):
             raise ValueError("result must be TurnResult")
@@ -464,8 +470,19 @@ class SocialRepository:
             raise ValueError("persona_fingerprint must be a SHA-256 digest")
         if turn_adjustment is not None and not isinstance(turn_adjustment, TurnAdjustment):
             raise ValueError("turn_adjustment must be a host-owned TurnAdjustment")
-        if conversation_plan is not None and not isinstance(conversation_plan, dict):
-            raise ValueError("conversation_plan must be a host-owned JSON projection")
+        if not isinstance(creator_evidence_refs, tuple) or len(creator_evidence_refs) > 128:
+            raise ValueError("creator_evidence_refs must be a bounded tuple")
+        bounded_refs(creator_evidence_refs, "creator_evidence_refs", maximum=128)
+        if conversation_plan is not None:
+            from deerflow.social.intelligence import ConversationPlan
+
+            if not isinstance(conversation_plan, dict):
+                raise ValueError("conversation_plan must be a host-owned JSON projection")
+            try:
+                validated_plan = ConversationPlan.from_payload(conversation_plan)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("conversation_plan failed validation") from exc
+            conversation_plan = validated_plan.to_payload()
         adjustment_payload = turn_adjustment.to_payload() if turn_adjustment else None
         digest = _digest(
             {
@@ -474,6 +491,7 @@ class SocialRepository:
                 "persona_fingerprint": persona_fingerprint,
                 "turn_adjustment": adjustment_payload,
                 "conversation_plan": deepcopy(conversation_plan),
+                "creator_evidence_refs": list(creator_evidence_refs),
             }
         )
         async with self._write(scope) as session:
@@ -492,6 +510,11 @@ class SocialRepository:
                     raise SocialConflictError(snapshot)
                 return CommitResult(snapshot, next((item for item in snapshot.outbound if item.action_id == event["action_id"]), None))
             _check_revision(snapshot.revision, expected_revision, snapshot)
+            if conversation_plan is not None:
+                if conversation_plan["stage"] != snapshot.conversation_stage:
+                    raise ValueError("conversation_plan stage does not match the current funnel stage")
+                if conversation_plan["snapshot_revision"] != snapshot.revision:
+                    raise ValueError("conversation_plan revision does not match the current snapshot")
             profile_scope = ProfileScope(scope.owner_user_id, scope.account_id, scope.agent_instance_id, scope.person_ref)
             bindings = await self._bindings(session, profile_scope)
             authoritative_persona = snapshot.effective_persona
@@ -505,10 +528,10 @@ class SocialRepository:
             event_context = {**(event["turn_context_json"] or {}), **turn_context}
             projection = _projection(snapshot)
             for patch in result.state_delta:
-                _evidence(snapshot, patch.evidence_ids)
+                _evidence(snapshot, patch.evidence_ids, additional_refs=creator_evidence_refs)
                 projection["claims"] = _patch(projection["claims"], asdict(patch), id_key="claim_id")
             for change in memory_changes:
-                _evidence(snapshot, change.evidence_ids)
+                _evidence(snapshot, change.evidence_ids, additional_refs=creator_evidence_refs)
                 section = "self_state" if change.category.startswith("self_") else "commitments" if change.category == "commitment" else "relationship"
                 projection[section] = _patch(projection[section], asdict(change), id_key="memory_id")
             projection["revision"] = expected_revision + 1

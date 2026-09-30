@@ -13,6 +13,7 @@ class FakeRepository:
     def __init__(self):
         self.tasks = []
         self.active = {}
+        self.cancelled = []
 
     async def list_by_user(self, user_id):
         return [task for task in self.tasks if task["user_id"] == user_id]
@@ -27,6 +28,7 @@ class FakeRepository:
         return self.active.get(task_id)
 
     async def pause_with_queue_cancellation(self, task_id, **kwargs):
+        self.cancelled.append((task_id, kwargs))
         return "executing" if self.active.get(task_id) in {"launching", "running"} else "paused"
 
 
@@ -43,6 +45,15 @@ class RaceRepository(FakeRepository):
             self.tasks.append(kwargs | {"id": kwargs["task_id"]})
             raise IntegrityError("duplicate", {}, None)
         await super().create(**kwargs)
+
+
+class AdvancingRevision:
+    def __init__(self):
+        self.calls = 0
+
+    async def __call__(self, scope):
+        self.calls += 1
+        return 4 if self.calls == 1 else 5
 
 
 @pytest.mark.asyncio
@@ -70,6 +81,23 @@ async def test_followup_insert_race_recovers_existing_same_revision():
     scheduler = SocialFollowupScheduler(repo)
     task_id = await scheduler.schedule(SCOPE, thread_id="thread-1", followup=FollowUp("check", "new"), expected_revision=7, cancel_event_id="first")
     assert task_id == "social-followup-" + scheduler._key(SCOPE, 7)
+
+
+@pytest.mark.asyncio
+async def test_followup_revision_fence_cancels_task_if_creator_event_wins_race():
+    repo = FakeRepository()
+    scheduler = SocialFollowupScheduler(repo)
+    with pytest.raises(ValueError, match="became stale"):
+        await scheduler.schedule(
+            SCOPE,
+            thread_id="thread-1",
+            followup=FollowUp("check", "new"),
+            expected_revision=4,
+            cancel_event_id="event-4",
+            revision_reader=AdvancingRevision(),
+        )
+    assert len(repo.cancelled) == 1
+    assert repo.cancelled[0][0] == "social-followup-" + scheduler._key(SCOPE, 4)
 
 
 @pytest.mark.parametrize("delay", [0, -1, True, 1.5])

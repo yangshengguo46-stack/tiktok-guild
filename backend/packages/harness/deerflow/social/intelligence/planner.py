@@ -229,7 +229,8 @@ def plan_conversation(
     objective = _OBJECTIVES[stage]
     if stage == ConversationStage.discovery and goal is not None:
         objective = f"verify whether the creator wants help with {goal}"
-    allowed = tuple(dict.fromkeys((*snapshot.evidence_refs, *consent_evidence_ids)))
+    source_refs = tuple(item.source_ref for group in (snapshot.identity, snapshot.works, snapshot.signals) for item in group)
+    allowed = tuple(dict.fromkeys((*snapshot.evidence_refs, *source_refs, *consent_evidence_ids)))
     turns = ({"objective": objective, "allowed_evidence_ids": allowed, "success_signal": "creator responds or corrects the picture", "next_if_yes": _NEXT[stage], "next_if_no": "paused"},)
     basis = ["current scoped evidence", f"stage:{stage.value}"]
     confidence = 0.35 if not relationship_signals else 0.5

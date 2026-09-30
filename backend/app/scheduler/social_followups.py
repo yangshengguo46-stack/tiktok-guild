@@ -46,11 +46,33 @@ class SocialFollowupScheduler:
         metadata = task.get("schedule_spec", {}).get("social_followup", {})
         return {**(metadata.get("social_scope") or {}), "expected_revision": metadata.get("expected_revision")} == identity
 
-    async def schedule(self, scope: SocialScope, *, thread_id: str, followup: FollowUp, expected_revision: int, cancel_event_id: str) -> str:
+    @staticmethod
+    async def _read_revision(revision_reader, scope: SocialScope) -> int:
+        if revision_reader is None:
+            return -1
+        value = revision_reader(scope)
+        value = await value if hasattr(value, "__await__") else value
+        revision = getattr(value, "revision", value)
+        if type(revision) is not int or revision < 0:
+            raise ValueError("revision_reader must return a nonnegative revision")
+        return revision
+
+    async def schedule(
+        self,
+        scope: SocialScope,
+        *,
+        thread_id: str,
+        followup: FollowUp,
+        expected_revision: int,
+        cancel_event_id: str,
+        revision_reader=None,
+    ) -> str:
         if not isinstance(scope, SocialScope) or not isinstance(followup, FollowUp) or type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("invalid social followup inputs")
         bounded_text(thread_id, "thread_id", 128)
         bounded_text(cancel_event_id, "cancel_event_id", 128)
+        if revision_reader is not None and await self._read_revision(revision_reader, scope) != expected_revision:
+            raise ValueError("social followup revision is stale")
         identity = self._identity(scope, expected_revision)
         metadata = {
             "social_scope": {
@@ -94,11 +116,19 @@ class SocialFollowupScheduler:
             existing = await self.repository.get_internal(task_id)
             if existing is None or not self._matches_identity(existing, identity):
                 raise ValueError("conflicting social followup already exists")
+        if revision_reader is not None and await self._read_revision(revision_reader, scope) != expected_revision:
+            await self.repository.pause_with_queue_cancellation(
+                task_id,
+                user_id=scope.owner_user_id,
+                error="stale social followup revision",
+                now=datetime.now(UTC),
+            )
+            raise ValueError("social followup revision became stale")
         return task_id
 
-    async def reconcile(self, scope: SocialScope, *, thread_id: str, followup: FollowUp, expected_revision: int, cancel_event_id: str) -> str:
+    async def reconcile(self, scope: SocialScope, *, thread_id: str, followup: FollowUp, expected_revision: int, cancel_event_id: str, revision_reader=None) -> str:
         """Host-owned retry entrypoint for a durable social followup intent."""
-        return await self.schedule(scope, thread_id=thread_id, followup=followup, expected_revision=expected_revision, cancel_event_id=cancel_event_id)
+        return await self.schedule(scope, thread_id=thread_id, followup=followup, expected_revision=expected_revision, cancel_event_id=cancel_event_id, revision_reader=revision_reader)
 
     async def cancel_for_scope_event(self, scope: SocialScope, event_id: str, *, reason: str = "creator event") -> list[str]:
         cancelled: list[str] = []
