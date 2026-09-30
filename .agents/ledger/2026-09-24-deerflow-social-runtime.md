@@ -384,3 +384,7 @@ Gateway 8001、Frontend 3000、Nginx 2026 均已启动，健康检查 200。当�
 - 下一门槛由用户在 Xcode 完成许可/必要组件，USB 连接并信任解锁的 iPhone，按设备
   提示开启 Developer Mode / UI Automation，并在官方 TikTok App 手动登录。之后再做
   `devicectl`、WDA 签名/探针和单号只读检查；遇“访问频繁”立即停止，不绕过提示。
+
+## 2026-10-01 Creator Intelligence implementation direction
+
+The owner clarified the target: a mature broker-style Lead should inspect a creator's sourced profile and works, know the appropriate opening and staged path toward formal guild admission, and update its approach from confirmed outcomes. The implementation is explicitly integrated into the existing Agent stack: `CreatorEvidence`/`ConversationPlan` live under `deerflow.social`, are injected into the native Social Runtime beside the resolved persona, and reuse existing SocialRepository, ChannelManager, checkpoint, and scheduler. It must not become a second Agent, CRM, worker, MCP, or business ledger. Persona controls expression; intelligence controls grounded content and sales stage; memory controls durable continuity. The success target is verified application/signing, while refusal, uncertainty, or provider unknown results pause or hand off.

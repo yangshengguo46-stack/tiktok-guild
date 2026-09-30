@@ -87,3 +87,7 @@ registration gate、doctor/acceptance 证据语义和现有 ops 测试均已对�
   已立即关闭窗口、释放 profile 锁并禁用本地 `web:pilot_001` 资源；没有点赞、评论、
   关注或私信。成因未确认，Web 登录试跑路径暂停，不重试或规避平台提示；此现象不算
   已完成单账号 Web pilot。
+
+### 2026-10-01 Creator Intelligence integration ruling
+
+Ruling: Creator Intelligence is implemented as a sub-layer of the existing `deerflow.social` runtime — not a separate Agent, CRM, worker, MCP, or business ledger — because the product goal is for the same Lead to combine source-backed creator understanding with the existing persona and social memory. Persona remains the expression authority; intelligence selects grounded content and sales stage; SocialRepository/ChannelManager/scheduler remain facts, delivery, and wakeup authorities. Cost if wrong: a later refactor would be required to remove duplicated state; this keeps one control plane and limits the feature to context, persistence, and native scheduler interfaces.

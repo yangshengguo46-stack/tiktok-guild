@@ -4,7 +4,7 @@
 
 **Goal:** Add an evidence-backed creator intelligence and broker playbook layer, wire durable memory candidates into native social turns, and connect consented followups to the native scheduler without creating a second business ledger.
 
-**Architecture:** Read-only provider adapters normalize TikHub, crawler, homepage, TKDesk, and creator-message observations into scoped `CreatorEvidence`. A deterministic host planner creates a versioned `CreatorIntelligenceSnapshot` and staged `ConversationPlan`; the native social runtime injects the plan as bounded data. Model output may propose bounded memory candidates, but host validation and the existing CAS transaction decide what is persisted. A host-owned followup callback creates a native scheduled occurrence and is cancelled by creator input or contact safety state.
+**Architecture:** Read-only provider adapters normalize TikHub, crawler, homepage, TKDesk, and creator-message observations into scoped `CreatorEvidence`. A deterministic host planner creates a versioned `CreatorIntelligenceSnapshot` and staged `ConversationPlan` inside the existing `deerflow.social` package; this is not a second agent or ledger. The native social runtime injects the plan beside the resolved persona, so the plan determines grounded content and sales stage while the persona determines expression. Model output may propose bounded memory candidates, but host validation and the existing CAS transaction decide what is persisted. A host-owned followup callback creates a native scheduled occurrence and is cancelled by creator input or contact safety state.
 
 **Tech Stack:** Python 3.11+, dataclasses, SQLAlchemy async persistence, LangChain middleware, pytest, existing scheduled-task repository/service, no new runtime dependency.
 
@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - DeerFlow native Lead, Gateway, ChannelManager, checkpoint, SocialRepository, and scheduler remain the only business control plane.
+- Creator intelligence is a Social Runtime sub-layer and must never become a second Agent, CRM, worker, MCP, or business ledger.
 - TikHub/crawler/homepage data is read-only until a provider supplies a scoped, authorized, source-backed record; no raw provider payload enters model context.
 - Every material creator fact and strategy claim carries a source reference and freshness/confidence metadata.
 - No sensitive demographic or vulnerability inference, hidden pretext, fabricated scarcity, impersonation, or coercive continuation after refusal.
@@ -37,6 +38,7 @@
 - `build_snapshot(scope, evidence, revision)` returns a snapshot after dropping expired observations and rejecting duplicate IDs or cross-scope evidence.
 - `plan_conversation(snapshot, *, stage, relationship_signals=(), goal=None)` returns a deterministic plan that cites only snapshot evidence, provides one objective per turn, and returns `p50_turns`, `p80_turns`, `confidence`, and `basis`.
 - `CreatorEvidenceProvider` is a `Protocol` with `async collect(scope, *, creator_ref: str) -> tuple[CreatorEvidence, ...]`; adapters are not implemented against live credentials in this task.
+- The package is imported by `deerflow.social.runtime`; its output is injected beside `EffectivePersona`, never exposed as a separate agent/tool surface.
 
 - [ ] **Step 1: Write failing contract tests**
 
