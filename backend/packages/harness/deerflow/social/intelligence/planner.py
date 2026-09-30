@@ -144,7 +144,7 @@ class ConversationPlan:
         accepts only the exact bounded JSON shape emitted by ``to_payload``;
         malformed or extended projections fail closed at the runtime boundary.
         """
-        if not isinstance(payload, Mapping) or set(payload) != {
+        required_fields = {
             "plan_id",
             "snapshot_revision",
             "stage",
@@ -154,8 +154,9 @@ class ConversationPlan:
             "consent_checkpoint",
             "stop_conditions",
             "estimate",
-            "consent_evidence_ids",
-        }:
+        }
+        payload_fields = set(payload) if isinstance(payload, Mapping) else None
+        if payload_fields not in (required_fields, required_fields | {"consent_evidence_ids"}):
             raise ValueError("persisted conversation_plan has invalid fields")
         try:
             stage = ConversationStage(payload["stage"])
@@ -166,7 +167,7 @@ class ConversationPlan:
         estimate = payload["estimate"]
         avoid = payload["avoid"]
         stop_conditions = payload["stop_conditions"]
-        consent_evidence_ids = payload["consent_evidence_ids"]
+        consent_evidence_ids = payload.get("consent_evidence_ids", ())
         if (
             not isinstance(openings, (list, tuple))
             or not isinstance(turns, (list, tuple))
