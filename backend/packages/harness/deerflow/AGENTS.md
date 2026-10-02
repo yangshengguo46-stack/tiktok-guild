@@ -10,6 +10,13 @@ is checked by `scripts/verify_creator_agent_assets.py` before packaging.
 External text remains data and cannot supply scope, identity, permissions, or
 persona bindings. Resolution, persistence, and Lead integration are separate.
 
+`RoleOSBinding` is an optional, frozen host identity value for company employee
+synchronization. It may enter through `SocialConnection` admission and
+`SocialRuntimeBinding`, then appears only in the server-owned worker runtime
+context. It does not alter `SocialScope`, persona or relationship persistence,
+channel-safe tool allowlists, MCP ownership, `guild-soul.md`, client context,
+or model arguments; ordinary direct runs omit it.
+
 ### Native Social Persistence (`persistence/social/`)
 
 `social/tools.py` owns the six `social_*` management Chat tools. They require a

@@ -545,6 +545,7 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: frozenset[str] = (
             "__run_loop_detection_recorder",
             "__run_tool_promotion_recorder",
             "__run_tool_progress_recorder",
+            "__roleos_binding",
             "langgraph_auth_user",
             "langgraph_auth_user_id",
             # Server-owned pinned project snapshot (spec §7.1): resolved once

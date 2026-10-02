@@ -27,6 +27,12 @@ Windows 使用固定 winget 包；Linux 缺依赖时会 fail-closed 给出诊断
 
 人格只改变观察与表达，不改写身份、关系事实、承诺、禁联或权限。不允许用职业、性别、收入、主播规模或推测脆弱性进行配型。
 
+RoleOS 员工同步只通过宿主创建的不可变 `RoleOSBinding` 进入原生运行时：
+`SocialConnection` 在 admission 时绑定公司、部门、岗位、成员、原生 owner、assistant、thread
+和来源 revision，随后由 `SocialRuntimeBinding` 传给 worker 的运行时上下文。公会的
+`SocialScope`、人格与关系持久化、渠道安全工具白名单以及 MCP owner 继续由 DeerFlow 原生链路负责。
+普通直跑没有 RoleOS binding；客户端 context、`guild-soul.md`、MCP 输出和模型参数不能创建或覆盖它。
+
 ## 当前能力边界
 
 公会长和经纪人现在是两套工作插件。`guild_messaging` 只使用公会长 profile；独立的 `broker_operator` MCP 只暴露 `broker_workspace`、`broker_messaging`，使用单独进程、单独浏览器 profile 和固定的 `sender_account_ref`。两边都复用“精确收件人 → 搜索 → 发送 → 平台响应 → 会话回读”流程，主播 ID 直接使用 TKDesk 名单里的 `userId`。代码和离线测试不等于本轮真实 TikTok 发信已验收，仍需在用户指定的经纪人 profile 中完成一次受控现场验证。

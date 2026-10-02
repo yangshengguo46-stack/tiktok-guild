@@ -20,6 +20,7 @@ from deerflow.social.middleware import SocialContextMiddleware
 from deerflow.social.persona.catalog import load_persona_catalog
 from deerflow.social.persona.models import ProfileScope
 from deerflow.social.persona.selector import AutomaticPersonaSelector
+from deerflow.social.roleos_binding import RoleOSBinding, validate_roleos_binding
 from deerflow.social.turns import commit_turn, contact_blocked, parse_turn_result, private_output_text, receipt_status
 from deerflow.utils.file_io import run_file_io
 
@@ -51,6 +52,7 @@ class SocialRuntimeBinding:
     creator_evidence: tuple = ()
     conversation_goal: str | None = None
     schedule_followup: Any = None
+    roleos_binding: RoleOSBinding | None = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -68,6 +70,8 @@ class SocialRuntimeBinding:
             bounded_text(self.conversation_goal, "conversation_goal", 512)
         if self.schedule_followup is not None and not callable(self.schedule_followup):
             raise ValueError("schedule_followup must be callable")
+        if self.roleos_binding is not None:
+            validate_roleos_binding(self.roleos_binding, assistant_id=self.scope.agent_instance_id)
 
 
 def binding_for_lead(config, *, user_id):

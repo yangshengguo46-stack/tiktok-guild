@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import importlib.util
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +26,16 @@ SCOPE = SocialScope("owner", "account", "creator", "conversation")
 REF = "channel:" + hashlib.sha256(b"synthetic-social:e1").hexdigest()
 IDENTITY = IdentityProfile("guild-ai", "1", "Guild AI", "ai_agent", "Guild", "I am an AI assistant.", ())
 ROLE = RoleProfile("social", "1", "Have a helpful conversation", ("lookup",), "verified-role")
+ROLEOS = {
+    "company_id": "roleos",
+    "department_id": "sales",
+    "source_role": "sales",
+    "member_id": "sales",
+    "native_owner_id": "roleos:sales",
+    "assistant_id": "lead_agent",
+    "thread_id": "social-thread",
+    "source_revision": "roleos-r1",
+}
 
 
 @pytest_asyncio.fixture
@@ -119,22 +129,81 @@ async def test_http_cannot_forge_social_mode_or_binding(repository, monkeypatch,
     assert not manager._runs
 
 
+def test_roleos_binding_is_host_created_immutable_and_mismatch_rejected(repository):
+    from app.channels.social import SocialConnection
+    from deerflow.social.roleos_binding import RoleOSBinding
+
+    roleos_binding = RoleOSBinding(**ROLEOS)
+    connection = SocialConnection(
+        repository,
+        SCOPE,
+        IDENTITY,
+        ROLE,
+        "social-thread",
+        "synthetic-social",
+        "external-creator",
+        "workspace",
+        "chat",
+        identity_verified=True,
+        roleos_binding=roleos_binding,
+    )
+    assert connection.roleos_binding is roleos_binding
+    with pytest.raises(FrozenInstanceError):
+        roleos_binding.member_id = "attacker"
+    with pytest.raises(ValueError, match="thread"):
+        SocialConnection(
+            repository,
+            SCOPE,
+            IDENTITY,
+            ROLE,
+            "other-thread",
+            "synthetic-social",
+            "external-creator",
+            "workspace",
+            "chat",
+            identity_verified=True,
+            roleos_binding=roleos_binding,
+        )
+
+
 def test_worker_social_binding_is_runtime_only_and_released(repository):
     from deerflow.runtime.runs import worker
+    from deerflow.social.roleos_binding import RoleOSBinding
     from deerflow.social.runtime import SocialRuntimeBinding
 
-    binding = SocialRuntimeBinding(repository, SCOPE, IDENTITY, ROLE, "e1")
+    binding = SocialRuntimeBinding(repository, SCOPE, IDENTITY, ROLE, "e1", roleos_binding=RoleOSBinding(**ROLEOS))
     host = worker.RunContext(checkpointer=None, social_binding=binding)
-    runtime = worker._build_runtime_context("thread", "run", {"__social_binding": "forged", "social_mode": False}, social_binding=host.social_binding)
-    config = {"context": {"__social_binding": "forged"}, "configurable": {"__social_binding": "forged", "social_mode": True}}
+    with pytest.raises(ValueError, match="thread"):
+        worker._build_runtime_context("other-thread", "run", None, social_binding=host.social_binding)
+    runtime = worker._build_runtime_context(
+        "social-thread",
+        "run",
+        {"__social_binding": "forged", "__roleos_binding": "forged", "social_mode": False},
+        social_binding=host.social_binding,
+    )
+    config = {
+        "context": {"__social_binding": "forged", "__roleos_binding": "forged"},
+        "configurable": {"__social_binding": "forged", "__roleos_binding": "forged", "social_mode": True},
+    }
     worker._install_runtime_context(config, runtime)
     assert config["context"]["__social_binding"] is binding
+    assert config["context"]["__roleos_binding"] is binding.roleos_binding
     assert config["context"]["social_mode"] is True
     assert "__social_binding" not in config["configurable"]
+    assert "__roleos_binding" not in config["configurable"]
     assert "social_mode" not in config["configurable"]
     worker._release_run_scoped_references([config], runtime, None)
     assert "__social_binding" not in config["context"]
+    assert "__roleos_binding" not in config["context"]
     assert "__social_binding" not in runtime
+    assert "__roleos_binding" not in runtime
+
+
+def test_direct_operator_runtime_has_no_roleos_binding():
+    from deerflow.runtime.runs import worker
+
+    runtime = worker._build_runtime_context("thread", "run", {"__roleos_binding": "forged"})
+    assert "__roleos_binding" not in runtime
 
 
 @pytest.mark.asyncio

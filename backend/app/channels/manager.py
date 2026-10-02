@@ -2207,6 +2207,7 @@ class ChannelManager:
             creator_evidence=resolved.creator_evidence,
             conversation_goal=resolved.conversation_goal,
             schedule_followup=schedule_followup or getattr(self._social_followup_scheduler, "schedule", self._social_followup_scheduler),
+            roleos_binding=resolved.roleos_binding,
         )
         action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
         if action is not None and action.state != "pending":

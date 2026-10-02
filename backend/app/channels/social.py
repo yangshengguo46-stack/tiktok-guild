@@ -7,6 +7,7 @@ from types import MappingProxyType
 
 from deerflow.persistence.social import SocialRepository
 from deerflow.social.contracts import IdentityProfile, RoleProfile, SocialScope, bounded_text
+from deerflow.social.roleos_binding import RoleOSBinding, validate_roleos_binding
 
 SOCIAL_CAPABILITY_MATRIX = MappingProxyType({"tiktok": MappingProxyType({"inbound": "unverified", "outbound": "unverified", "receipts": "unverified"})})
 _ENVELOPE_AUTHORITY = object()
@@ -68,6 +69,7 @@ class SocialConnection:
     creator_evidence: tuple = ()
     conversation_goal: str | None = None
     schedule_followup: object | None = None
+    roleos_binding: RoleOSBinding | None = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -84,6 +86,8 @@ class SocialConnection:
 
         if any(not isinstance(item, CreatorEvidence) or item.scope != self.scope for item in self.creator_evidence):
             raise ValueError("creator_evidence must contain scoped CreatorEvidence values")
+        if self.roleos_binding is not None:
+            validate_roleos_binding(self.roleos_binding, thread_id=self.thread_id, assistant_id=self.scope.agent_instance_id)
 
 
 @dataclass(frozen=True)

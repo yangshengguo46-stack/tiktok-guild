@@ -208,6 +208,7 @@ def _release_run_scoped_references(
         "__run_journal",
         "__social_binding",
         "__social_management",
+        "__roleos_binding",
         CURRENT_RUN_PRE_EXISTING_MESSAGE_IDS_KEY,
         CONVERSATION_READER_CONTEXT_KEY,
     }
@@ -236,6 +237,7 @@ def _release_run_scoped_references(
             configurable.pop(CONVERSATION_READER_CONTEXT_KEY, None)
             configurable.pop("__social_binding", None)
             configurable.pop("__social_management", None)
+            configurable.pop("__roleos_binding", None)
         context = runnable_config.get("context")
         if isinstance(context, dict):
             for key in internal_context_keys:
@@ -534,6 +536,7 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: Final[frozenset[str]] = (
             CONVERSATION_READER_CONTEXT_KEY,
             "__social_binding",
             "__social_management",
+            "__roleos_binding",
             "social_mode",
             "is_subagent",
             "agent_id",
@@ -591,6 +594,7 @@ def _build_runtime_context(
         runtime_ctx["__social_management"] = social_management
         runtime_ctx["user_id"] = social_management.owner_user_id
     if social_binding is not None:
+        from deerflow.social.roleos_binding import validate_roleos_binding
         from deerflow.social.runtime import SocialRuntimeBinding
 
         if not isinstance(social_binding, SocialRuntimeBinding):
@@ -598,6 +602,13 @@ def _build_runtime_context(
         runtime_ctx["__social_binding"] = social_binding
         runtime_ctx["social_mode"] = True
         runtime_ctx["user_id"] = social_binding.scope.owner_user_id
+        if social_binding.roleos_binding is not None:
+            roleos_binding = validate_roleos_binding(
+                social_binding.roleos_binding,
+                thread_id=thread_id,
+                assistant_id=social_binding.scope.agent_instance_id,
+            )
+            runtime_ctx["__roleos_binding"] = roleos_binding
     if task_store is not None:
         from deerflow_extension_api import EXTENSION_TASK_STORE_KEY
 
@@ -669,6 +680,7 @@ def _install_runtime_context(config: dict, runtime_context: dict[str, Any]) -> N
         configurable.pop(CONVERSATION_READER_CONTEXT_KEY, None)
         configurable.pop("__social_binding", None)
         configurable.pop("__social_management", None)
+        configurable.pop("__roleos_binding", None)
         configurable.pop("social_mode", None)
     existing_context = config.get("context")
     if isinstance(existing_context, dict):
