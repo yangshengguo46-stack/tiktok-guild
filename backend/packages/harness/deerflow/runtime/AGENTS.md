@@ -422,3 +422,14 @@ the admitted group keeps its records on success or completes rollback on failure
 This is a store-local guarantee, not a change to RunJournal cancellation policy or
 JSONL's single-process deployment constraint. Regression coverage is in
 `tests/test_jsonl_event_store_cancellation.py`.
+
+## Native request recovery
+
+`RunManager.get_by_idempotency_key(key, user_id=...)` reads a native durable
+request handle without admitting or launching work. The owner must be explicit
+and non-empty. Memory/SQL RunStore implementations enforce the same owner/key
+filter; unsupported stores or read failures propagate rather than turn an
+incomplete lookup into absence. Peer handles remain store-only. Idempotency
+collisions belonging to another thread/user are `ConflictError`, surfaced as
+HTTP 409 by native start_run. Guild/Sales recovery and terminal replay are pinned
+by `tests/test_roleos_native_delivery.py`, alongside the normal run-owner suites.

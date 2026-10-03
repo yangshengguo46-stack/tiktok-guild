@@ -703,6 +703,24 @@ class RunManager:
             logger.warning("Failed to map store row for run %s", run_id, exc_info=True)
             return None
 
+    async def get_by_idempotency_key(self, key: str, *, user_id: str) -> RunRecord | None:
+        """Recover the native request handle without creating or executing work."""
+        if not key or not user_id:
+            raise ValueError("Request lookup requires a key and explicit owner")
+        async with self._lock:
+            record = next((record for record in self._runs.values() if record.idempotency_key == key and record.user_id == user_id), None)
+        if record is not None:
+            return record
+        if self._store is None:
+            return None
+        row = await self._store.get_by_idempotency_key(key, user_id=user_id)
+        if row is None:
+            return None
+        record = self._record_from_store(row)
+        if record.user_id != user_id or record.idempotency_key != key:
+            raise RuntimeError("Native request lookup returned a mismatched reservation")
+        return record
+
     async def aget(
         self,
         run_id: str,
@@ -1633,7 +1651,7 @@ class RunManager:
                     if existing.idempotency_key != idempotency_key:
                         continue
                     if existing.thread_id != thread_id or existing.user_id != user_id:
-                        raise RuntimeError("Run idempotency key resolved to a different thread or user")
+                        raise ConflictError("Run idempotency key belongs to a different thread or user")
                     existing.idempotency_reused = True
                     return existing
 
@@ -1647,7 +1665,7 @@ class RunManager:
                 # for get(), cancel(), and orphan reconciliation.
                 existing = self._record_from_store(conflict.existing)
                 if existing.thread_id != thread_id or existing.user_id != user_id:
-                    raise RuntimeError("Run idempotency key resolved to a different thread or user") from conflict
+                    raise ConflictError("Run idempotency key belongs to a different thread or user") from conflict
                 existing.idempotency_reused = True
                 return existing
 

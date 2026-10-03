@@ -13,11 +13,11 @@ from test_social_channels import IDENTITY, ROLE, ROLEOS, SCOPE
 
 from app.channels.social import SocialConnection
 from app.gateway.auth_disabled import AUTH_SOURCE_INTERNAL, AUTH_SOURCE_SESSION
-from app.gateway.routers.roleos import RoleOSSocialRunRequest, admit_roleos_social_run, poll_roleos_social_run
+from app.gateway.routers.roleos import RoleOSSocialRunRequest, _connection_fingerprint, admit_roleos_social_run, poll_roleos_social_run
 from app.gateway.services import register_roleos_social_connection
 from deerflow.persistence.base import Base
 from deerflow.persistence.social import SocialRepository
-from deerflow.runtime import RunStatus
+from deerflow.runtime import RunManager, RunStatus
 from deerflow.social.roleos_binding import RoleOSBinding
 
 
@@ -50,7 +50,7 @@ def _connection(repository, *, thread_id: str = "social-thread") -> SocialConnec
 
 
 def _request(connection, *, internal: bool = True):
-    app = SimpleNamespace(state=SimpleNamespace())
+    app = SimpleNamespace(state=SimpleNamespace(run_manager=RunManager()))
     register_roleos_social_connection(app, "connection", connection)
     return SimpleNamespace(
         app=app,
@@ -139,6 +139,7 @@ async def test_poll_maps_native_refs_and_artifact_failure(repository):
     request = _request(connection)
     record = SimpleNamespace(
         run_id="native-run-1",
+        idempotency_key="roleos-social:request-1",
         thread_id=connection.thread_id,
         assistant_id="lead_agent",
         user_id=SCOPE.owner_user_id,
@@ -149,6 +150,8 @@ async def test_poll_maps_native_refs_and_artifact_failure(repository):
             "roleos_member_id": "sales",
             "roleos_source_revision": "roleos-r1",
             "roleos_request_id": "request-1",
+            "roleos_connection_id": "connection",
+            "roleos_social_scope_fingerprint": _connection_fingerprint(connection),
             "artifact_upload_error": "artifact upload timed out",
         },
         kwargs={"input": {"artifact_refs": ["artifact://output/1"], "evidence_refs": ["evidence://output/1"]}},
@@ -163,6 +166,6 @@ async def test_poll_maps_native_refs_and_artifact_failure(repository):
     with patch("app.gateway.routers.roleos.get_run_manager", return_value=Manager()):
         receipt = await poll_roleos_social_run("native-run-1", request, connection_id="connection")
     assert receipt.status == "failed"
-    assert receipt.artifact_refs == ["artifact://output/1"]
-    assert receipt.evidence_refs == ["evidence://output/1"]
+    assert receipt.artifact_refs == []
+    assert receipt.evidence_refs == []
     assert receipt.error == "artifact upload timed out"

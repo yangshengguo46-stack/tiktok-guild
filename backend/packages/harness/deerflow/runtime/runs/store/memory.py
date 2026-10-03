@@ -100,6 +100,9 @@ class MemoryRunStore(RunStore):
             return None
         return run
 
+    async def get_by_idempotency_key(self, key: str, *, user_id: str):
+        return next((run for run in self._runs.values() if run.get("idempotency_key") == key and run.get("user_id") == user_id), None)
+
     async def list_changed(
         self,
         *,

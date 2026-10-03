@@ -153,6 +153,14 @@ class RunStore(abc.ABC):
     ) -> dict[str, Any] | None:
         pass
 
+    async def get_by_idempotency_key(self, key: str, *, user_id: str) -> dict[str, Any] | None:
+        """Read a durable request reservation within one explicit owner scope.
+
+        Unsupported stores fail explicitly; absence must not be inferred from
+        an incomplete history scan.
+        """
+        raise NotImplementedError
+
     @abc.abstractmethod
     async def list_by_thread(
         self,

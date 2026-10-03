@@ -205,3 +205,39 @@ Proxied through nginx: `/api/langgraph/*` → Gateway LangGraph-compatible runti
 archive/search behavior, read [Thread lifecycle invariants](../../docs/THREAD_LIFECYCLE.md).
 It owns lineage and settled-checkpoint rules, legacy fallback boundaries, archive
 filtering before pagination, owner isolation, and activity-time preservation.
+
+## RoleOS Guild/Sales native delivery
+
+The host-only `/api/internal/roleos/{sales|guild|social}` router resolves the
+registered immutable `SocialConnection` for both admission and reads. POST
+`/runs` retains native `roleos-social:<request_id>` durable idempotency. A
+host-generated work fingerprint rejects changed envelope reuse; a connection
+fingerprint binds scope, provider, account, identity, role and MCP tool bounds
+across restart. Native admission remains the authority and a cross-owner/thread
+key collision returns 409 before worker execution.
+
+GET `/requests/{request_id}?connection_id=...&source_revision=...` reads the
+native request reservation directly through `RunManager.get_by_idempotency_key`.
+It never executes work; unsupported/unavailable stores fail rather than report
+an exhaustive miss. The lookup uses the existing unique SQL idempotency index,
+with an explicit SocialScope owner filter. A missing reservation returns unknown
+with an empty run_id. The source selector is optional but mismatches return 409.
+
+GET `/runs/{run_id}` and `/runs/{run_id}/delivery` return the same shared reply:
+run/thread/request/source IDs, status/error, produced artifact_refs, native
+receipt evidence_refs, native_receipt_ref and the full persisted native_receipt
+`run.delivery` event. They do not manufacture receipts or use kwargs.input or
+client metadata refs as output. Native outputs_changed/matched_paths/satisfied
+fields govern material delivery; plain native terminal work may have empty refs.
+Success without its matching receipt remains unknown; unsatisfied verification
+or unavailable output files stays failed. Error/timeout/interrupted stay failed.
+Legacy rows without host connection provenance fail closed as unknown.
+
+GET `/runs/{run_id}/artifacts/{path:path}?connection_id=...` reads only a file
+attested by that run's native delivery. It uses native outputs confinement and
+artifact MIME/download helpers; arbitrary paths and escaping symlinks fail.
+All reads require internal authentication (`X-DeerFlow-Internal-Token`), and
+connection_id may be omitted only when exactly one host connection is registered.
+Returned refs are authenticated host-relative URLs; the RoleOS host publisher
+owns any portable copying. Platform receipts/outbox and persona/relationship
+changes remain owned by SocialRuntime, not this read projection.

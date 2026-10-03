@@ -2005,3 +2005,13 @@ Your unwavering commitment and expertise have been the driving force behind Deer
 ### Creator Intelligence 离线预验收
 
 离线预验收使用合成、public-like fixture，报告记录 snapshot revision、plan stage、P50/P80 回合估计、合成记忆提升和 verified funnel stage。它只证明来源约束、记忆连续性和 consent gate；没有明确同意或 verified receipt 时不会写成申请、签约或 TikTok 转化。真实 provider、手机、客户安装和平台回执仍需独立验收。
+
+### Host-only Guild/Sales request recovery
+
+A host registered RoleOS social employee can recover a lost admission response
+through `/api/internal/roleos/sales/requests/{request_id}` and read native terminal
+delivery through `/sales/runs/{run_id}/delivery`. These internal-token endpoints
+project persisted native receipts and verified output files, preserving request
+idempotency across restart. They do not perform TikTok actions. See
+[Gateway development contract](backend/app/gateway/AGENTS.md#roleos-guildsales-native-delivery)
+for scoped query parameters, aliases and artifact reads.
