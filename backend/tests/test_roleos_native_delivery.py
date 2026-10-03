@@ -452,3 +452,136 @@ async def test_native_content_capture_rejects_mutation_during_read(native_host, 
     with pytest.raises(ValueError, match="changed during content capture"):
         delivery.read_attested_output("social-thread", identity["path"], identity, user_id="owner")
     assert buffers and all(buffer.closed for buffer in buffers)
+
+
+async def _artifact_response(host, run_id):
+    from app.gateway.auth_disabled import AUTH_SOURCE_INTERNAL
+    from app.gateway.routers.roleos import read_roleos_social_artifact
+
+    request = SimpleNamespace(app=host.app, state=SimpleNamespace(auth_source=AUTH_SOURCE_INTERNAL), headers=create_internal_auth_headers())
+    return await read_roleos_social_artifact(run_id, "mnt/user-data/outputs/report.md", request, connection_id="connection")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_frame", ["http.response.start", "http.response.body"])
+async def test_asgi_24_disconnect_closes_exact_verified_spool(native_host, monkeypatch, failure_frame):
+    from starlette.requests import ClientDisconnect
+
+    import app.gateway.routers.roleos as route
+
+    host = native_host
+    host.output_text = "A" * (3 * 1024 * 1024)
+    run_id = await _execute(host)
+    original_read = route.read_attested_output
+    captured = []
+
+    def track_read(*args, **kwargs):
+        buffer = original_read(*args, **kwargs)
+        captured.append(buffer)
+        return buffer
+
+    monkeypatch.setattr(route, "read_attested_output", track_read)
+    response = await _artifact_response(host, run_id)
+    assert len(captured) == 1 and not captured[0].closed
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == failure_frame:
+            raise OSError("client disconnected")
+
+    with pytest.raises(ClientDisconnect):
+        await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert captured[0].closed
+
+
+@pytest.mark.asyncio
+async def test_response_cancellation_closes_verified_spool(native_host, monkeypatch):
+    import anyio
+
+    import app.gateway.routers.roleos as route
+
+    host = native_host
+    run_id = await _execute(host)
+    original_read = route.read_attested_output
+    captured = []
+
+    def track_read(*args, **kwargs):
+        buffer = original_read(*args, **kwargs)
+        captured.append(buffer)
+        return buffer
+
+    monkeypatch.setattr(route, "read_attested_output", track_read)
+    response = await _artifact_response(host, run_id)
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    with anyio.CancelScope() as cancellation:
+
+        async def send(message):
+            if message["type"] == "http.response.body":
+                cancellation.cancel()
+                await anyio.sleep(0)
+
+        await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert cancellation.cancelled_caught
+    assert len(captured) == 1 and captured[0].closed
+
+
+@pytest.mark.asyncio
+async def test_construction_cancellation_closes_verified_spool(native_host, monkeypatch):
+    import asyncio
+    import mimetypes
+
+    import app.gateway.routers.roleos as route
+
+    host = native_host
+    run_id = await _execute(host)
+    original_read = route.read_attested_output
+    captured = []
+
+    def track_read(*args, **kwargs):
+        buffer = original_read(*args, **kwargs)
+        captured.append(buffer)
+        return buffer
+
+    def cancel_mime(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(route, "read_attested_output", track_read)
+    monkeypatch.setattr(mimetypes, "guess_type", cancel_mime)
+    with pytest.raises(asyncio.CancelledError):
+        await _artifact_response(host, run_id)
+    assert len(captured) == 1 and captured[0].closed
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_capture_drains_and_closes_late_verified_spool(native_host, monkeypatch):
+    import asyncio
+    import threading
+
+    import app.gateway.routers.roleos as route
+
+    host = native_host
+    run_id = await _execute(host)
+    original_read = route.read_attested_output
+    started, release = threading.Event(), threading.Event()
+    captured = []
+
+    def delayed_read(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=5)
+        buffer = original_read(*args, **kwargs)
+        captured.append(buffer)
+        return buffer
+
+    monkeypatch.setattr(route, "read_attested_output", delayed_read)
+    pending = asyncio.create_task(_artifact_response(host, run_id))
+    await asyncio.to_thread(started.wait)
+    pending.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert len(captured) == 1 and captured[0].closed

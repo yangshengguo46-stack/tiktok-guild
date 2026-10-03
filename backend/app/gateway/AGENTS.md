@@ -248,7 +248,11 @@ carry canonical path, SHA-256 and size_bytes (or an explicit capture error).
 Projection/read require that identity; overwritten/deleted/unattested output
 is unavailable even when the historical native run status was success. Never
 capture identity at first HTTP poll or borrow later bytes from the same filename.
-The scoped GET streams an already verified private spooled buffer, sets ETag to
-the native digest and closes the buffer on completion; it does not hash then
-reopen the mutable output with FileResponse. Larger than 2 MiB spills to a
-private temporary file. There is no persistent competing artifact ledger.
+The scoped GET streams an already verified private spooled buffer and sets ETag
+to the native digest; it does not hash then reopen the mutable output with
+FileResponse. The response owns buffer closure in `__call__`'s finally, including
+ASGI 2.4 send failures that skip StreamingResponse background/iterator cleanup.
+Cancellation during capture drains the admitted reader and closes its returned
+buffer; response construction cancellation also closes the captured buffer.
+Larger than 2 MiB spills to a private temporary file. There is no persistent
+competing artifact ledger.

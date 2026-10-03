@@ -7,10 +7,12 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, BinaryIO, Literal
 from urllib.parse import quote, urlencode
 
+from anyio import CancelScope
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.channels.social import SocialInternalWork
@@ -326,6 +328,58 @@ async def poll_roleos_social_run(run_id: str, request: Request, connection_id: s
     return await _project_delivery(record, request, connection, connection_id)
 
 
+async def _settle_owned_task(task: asyncio.Task):
+    """Drain admitted resource work under both AnyIO and asyncio cancellation."""
+    cancellation = None
+    with CancelScope(shield=True):
+        while True:
+            try:
+                return await asyncio.shield(task), cancellation
+            except asyncio.CancelledError as exc:
+                if task.done():
+                    return task.result(), exc
+                cancellation = exc
+
+
+async def _close_verified_buffer(buffer: BinaryIO) -> None:
+    _, cancellation = await _settle_owned_task(asyncio.create_task(asyncio.to_thread(buffer.close)))
+    if cancellation is not None:
+        raise cancellation
+
+
+async def _capture_verified_buffer(*args, **kwargs) -> BinaryIO:
+    capture = asyncio.create_task(asyncio.to_thread(read_attested_output, *args, **kwargs))
+    try:
+        return await asyncio.shield(capture)
+    except BaseException:
+        # Cancellation cannot abandon a thread that will return a live spool.
+        try:
+            buffer, _ = await _settle_owned_task(capture)
+        except BaseException:
+            pass  # Native capture failures already close their private buffer.
+        else:
+            await _close_verified_buffer(buffer)
+        raise
+
+
+class _VerifiedArtifactResponse(StreamingResponse):
+    """Own the exact attested spool even when ASGI send aborts streaming."""
+
+    def __init__(self, buffer: BinaryIO, **kwargs):
+        self._verified_buffer = buffer
+        super().__init__(self._chunks(), **kwargs)
+
+    def _chunks(self):
+        while chunk := self._verified_buffer.read(64 * 1024):
+            yield chunk
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await _close_verified_buffer(self._verified_buffer)
+
+
 @router.get("/sales/runs/{run_id}/artifacts/{path:path}")
 @router.get("/guild/runs/{run_id}/artifacts/{path:path}")
 @router.get("/social/runs/{run_id}/artifacts/{path:path}")
@@ -333,9 +387,6 @@ async def read_roleos_social_artifact(run_id: str, path: str, request: Request, 
     """Read only a file attested by this scoped native delivery event."""
     import mimetypes
     from pathlib import PurePosixPath
-
-    from fastapi.responses import StreamingResponse
-    from starlette.background import BackgroundTask
 
     from app.gateway.routers.artifacts import _build_attachment_headers
 
@@ -349,21 +400,18 @@ async def read_roleos_social_artifact(run_id: str, path: str, request: Request, 
         raise HTTPException(status_code=404, detail="Path is not a verified output of this run")
     identity = _artifact_identity(receipt.native_receipt["content"], normalized)
     try:
-        buffer = await asyncio.to_thread(read_attested_output, receipt.thread_id, normalized, identity, user_id=connection.scope.owner_user_id)
+        buffer = await _capture_verified_buffer(receipt.thread_id, normalized, identity, user_id=connection.scope.owner_user_id)
     except (ValueError, OSError):
         raise HTTPException(status_code=404, detail="Verified native artifact content is unavailable") from None
 
-    def chunks():
-        try:
-            while chunk := buffer.read(64 * 1024):
-                yield chunk
-        finally:
-            buffer.close()
-
-    filename = PurePosixPath(normalized).name
-    mime_type, _ = await asyncio.to_thread(mimetypes.guess_type, filename)
-    headers = _build_attachment_headers(filename, {"ETag": f'"{identity["sha256"]}"', "Content-Length": str(identity["size_bytes"])})
-    return StreamingResponse(chunks(), media_type=mime_type or "application/octet-stream", headers=headers, background=BackgroundTask(buffer.close))
+    try:
+        filename = PurePosixPath(normalized).name
+        mime_type, _ = await asyncio.to_thread(mimetypes.guess_type, filename)
+        headers = _build_attachment_headers(filename, {"ETag": f'"{identity["sha256"]}"', "Content-Length": str(identity["size_bytes"])})
+        return _VerifiedArtifactResponse(buffer, media_type=mime_type or "application/octet-stream", headers=headers)
+    except BaseException:
+        await _close_verified_buffer(buffer)
+        raise
 
 
 RoleOSSalesRunRequest = RoleOSSocialRunRequest
