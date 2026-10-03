@@ -36,6 +36,7 @@ from app.gateway.routers import (
     project_thread_files,
     projects,
     public_outreach,
+    roleos,
     runs,
     scheduled_tasks,
     skills,
@@ -978,6 +979,9 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Stateless Runs API (stream/wait without a pre-existing thread)
     app.include_router(runs.router)
+
+    # Host-only RoleOS admission for the registered Guild/Sales social owner.
+    app.include_router(roleos.router)
 
     # GitHub webhooks API is mounted at /api/webhooks/github
     # Exempt from auth and CSRF middleware (see auth_middleware._PUBLIC_PATH_PREFIXES

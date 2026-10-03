@@ -34,7 +34,7 @@ from app.channels.message_bus import (
     ResolvedAttachment,
 )
 from app.channels.run_policy import CHANNEL_RUN_POLICY, ChannelRunPolicy
-from app.channels.social import _ENVELOPE_AUTHORITY, AuthenticatedSocialEvent, AuthenticatedSocialReceipt, SocialCapabilities, SocialConnection, SocialInboundEnvelope, SocialProviderResult
+from app.channels.social import _ENVELOPE_AUTHORITY, AuthenticatedSocialEvent, AuthenticatedSocialReceipt, SocialCapabilities, SocialConnection, SocialInboundEnvelope, SocialInternalWork, SocialProviderResult
 from app.channels.store import ChannelStore
 from app.gateway.csrf_middleware import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
 
@@ -2131,6 +2131,58 @@ class ChannelManager:
             # for the dedupe TTL.
             await self._release_inbound_dedupe_key(msg)
             await self._send_error(msg, "An internal error occurred. Please try again.")
+
+    async def admit_roleos_social_work(self, connection_id: str, work: SocialInternalWork) -> SocialRuntimeBinding:
+        """Admit trusted RoleOS work against a registered social connection.
+
+        RoleOS work is an internal operator note.  It is recorded in the
+        native social repository before the existing SocialRuntime path is
+        launched, so the runtime still owns persona, relationship, boundary,
+        account, and channel-safe tool checks.  Provider inbound envelopes are
+        deliberately not used for this route.
+        """
+        if not isinstance(connection_id, str) or not connection_id.strip() or not isinstance(work, SocialInternalWork):
+            raise ValueError("RoleOS social admission requires a registered connection and typed work")
+        resolved = self._social_connections.get(connection_id)
+        if not isinstance(resolved, SocialConnection) or resolved.roleos_binding is None:
+            raise ValueError("RoleOS social connection is not registered on this host")
+        if resolved.roleos_binding.thread_id != resolved.thread_id or resolved.roleos_binding.assistant_id != resolved.scope.agent_instance_id:
+            raise ValueError("RoleOS binding does not match the registered social connection")
+        if self._connection_repo is not None:
+            connection = await self._connection_repo.find_connection_by_external_identity(
+                provider=resolved.provider,
+                external_account_id=resolved.external_account_id,
+                workspace_id=resolved.workspace_id,
+            )
+            if not isinstance(connection, dict) or connection.get("status") != "connected" or connection.get("id") != connection_id:
+                raise ValueError("RoleOS social connection is not active")
+            if connection.get("owner_user_id") != resolved.scope.owner_user_id:
+                raise ValueError("RoleOS social connection owner does not match its scope")
+
+        event = work.external_event(resolved.scope)
+        snapshot = await resolved.repository.record_event(resolved.scope, event)
+        # A host-registered, verified connection may establish the first
+        # identity boundary for this scope using the same evidence-backed
+        # repository CAS as provider inbound admission.  The runtime still
+        # enforces the resulting boundary before producing any reply.
+        if resolved.identity_verified and not snapshot.boundary_history and not snapshot.identity_verified:
+            snapshot = await resolved.repository.set_boundaries(
+                resolved.scope,
+                expected_revision=snapshot.revision,
+                update=BoundaryUpdate(True, snapshot.human_takeover, snapshot.do_not_contact, (event.source_ref,)),
+            )
+        return SocialRuntimeBinding(
+            resolved.repository,
+            resolved.scope,
+            resolved.identity,
+            resolved.role,
+            event.source_event_id,
+            resolved.channel_safe_tool_names,
+            creator_evidence=resolved.creator_evidence,
+            conversation_goal=resolved.conversation_goal,
+            schedule_followup=resolved.schedule_followup or getattr(self._social_followup_scheduler, "schedule", self._social_followup_scheduler),
+            roleos_binding=resolved.roleos_binding,
+        )
 
     async def _handle_social_message(self, msg: InboundMessage) -> None:
         channel = self._social_channels[msg.channel_name]

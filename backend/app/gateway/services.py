@@ -16,7 +16,7 @@ import threading
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 from deerflow_extension_api import PROVENANCE_KEYS
@@ -121,6 +121,114 @@ _TERMINAL_RUN_STATUSES = {
 }
 
 _THREAD_METADATA_SETUP_TIMEOUT_SECONDS = 5.0
+
+
+def register_roleos_social_connection(app: Any, connection_id: str, connection: Any) -> Any:
+    """Register one immutable host-owned Guild/Sales SocialConnection."""
+    from app.channels.social import SocialConnection
+
+    if not isinstance(connection_id, str) or not connection_id.strip() or not isinstance(connection, SocialConnection) or connection.roleos_binding is None:
+        raise ValueError("invalid RoleOS social connection registration")
+    binding = connection.roleos_binding
+    if (binding.company_id, binding.department_id, binding.source_role, binding.member_id) != ("roleos", "sales", "sales", "sales"):
+        raise ValueError("RoleOS social registration must identify the Guild/Sales employee")
+    state = getattr(app, "state", None)
+    if state is None:
+        raise ValueError("Gateway app state is required for RoleOS social registration")
+    registry = getattr(state, "roleos_social_connections", None)
+    if registry is None:
+        registry = {}
+    if not isinstance(registry, Mapping):
+        raise ValueError("RoleOS social connection registry is invalid")
+    existing = registry.get(connection_id)
+    if existing is not None and existing != connection:
+        raise ValueError("RoleOS social connection is already registered")
+    updated = dict(registry)
+    updated[connection_id] = connection
+    state.roleos_social_connections = MappingProxyType(updated)
+    return connection
+
+
+def resolve_registered_roleos_social_connection(request: Request, connection_id: str) -> Any:
+    """Resolve a frozen SocialConnection from the Guild host registry."""
+    from app.channels.social import SocialConnection
+
+    state = getattr(getattr(request, "app", None), "state", None)
+    candidates = []
+    registry = getattr(state, "roleos_social_connections", None)
+    if isinstance(registry, Mapping):
+        candidates.append(registry.get(connection_id))
+    service = getattr(state, "channel_service", None)
+    if service is None:
+        try:
+            from app.channels.service import get_channel_service
+
+            service = get_channel_service()
+        except Exception:
+            service = None
+    manager = getattr(service, "manager", None)
+    manager_registry = getattr(manager, "_social_connections", None)
+    if isinstance(manager_registry, Mapping):
+        candidates.append(manager_registry.get(connection_id))
+    connection = next((item for item in candidates if isinstance(item, SocialConnection)), None)
+    if connection is None or connection.roleos_binding is None:
+        raise HTTPException(status_code=503, detail="RoleOS Guild/Sales social connection is not registered on this host")
+    binding = connection.roleos_binding
+    if (binding.company_id, binding.department_id, binding.source_role, binding.member_id) != ("roleos", "sales", "sales", "sales"):
+        raise HTTPException(status_code=503, detail="RoleOS host binding is not the registered Guild/Sales employee")
+    return connection
+
+
+async def admit_registered_roleos_social_work(request: Request, connection_id: str, work: Any) -> Any:
+    """Record internal work and build the native SocialRuntimeBinding."""
+    service = getattr(getattr(request, "app", None), "state", None)
+    service = getattr(service, "channel_service", None)
+    if service is None:
+        try:
+            from app.channels.service import get_channel_service
+
+            service = get_channel_service()
+        except Exception:
+            service = None
+    manager = getattr(service, "manager", None)
+    if manager is not None and hasattr(manager, "admit_roleos_social_work"):
+        return await manager.admit_roleos_social_work(connection_id, work)
+
+    # Direct host compositions (and unit tests) may register a connection
+    # without starting the channel worker. Keep the same native contract and
+    # never construct a provider-authenticated inbound envelope here.
+    connection = resolve_registered_roleos_social_connection(request, connection_id)
+    event = work.external_event(connection.scope)
+    snapshot = await connection.repository.record_event(connection.scope, event)
+    if connection.identity_verified and not snapshot.boundary_history and not snapshot.identity_verified:
+        from deerflow.persistence.social import BoundaryUpdate
+
+        await connection.repository.set_boundaries(
+            connection.scope,
+            expected_revision=snapshot.revision,
+            update=BoundaryUpdate(True, snapshot.human_takeover, snapshot.do_not_contact, (event.source_ref,)),
+        )
+    from deerflow.social.runtime import SocialRuntimeBinding
+
+    return SocialRuntimeBinding(
+        connection.repository,
+        connection.scope,
+        connection.identity,
+        connection.role,
+        event.source_event_id,
+        connection.channel_safe_tool_names,
+        creator_evidence=connection.creator_evidence,
+        conversation_goal=connection.conversation_goal,
+        schedule_followup=connection.schedule_followup,
+        roleos_binding=connection.roleos_binding,
+    )
+
+
+# Explicit names used by Guild/Sales host bootstrap code.
+register_roleos_guild_social_connection = register_roleos_social_connection
+register_roleos_sales_connection = register_roleos_social_connection
+resolve_registered_roleos_guild_social_connection = resolve_registered_roleos_social_connection
+
 
 _SERVER_OWNED_MESSAGE_METADATA_KEYS = (
     frozenset(
@@ -1567,7 +1675,14 @@ async def start_run(
     if social_binding is not None:
         from deerflow.social.runtime import SocialRuntimeBinding
 
-        if not isinstance(social_binding, SocialRuntimeBinding) or social_binding.scope.owner_user_id != owner_user_id or getattr(request.state, "auth_source", None) != AUTH_SOURCE_INTERNAL:
+        if not isinstance(social_binding, SocialRuntimeBinding) or getattr(request.state, "auth_source", None) != AUTH_SOURCE_INTERNAL:
+            raise HTTPException(status_code=403, detail="Social binding does not match authenticated owner")
+        # Host-only RoleOS admission resolves the owner from the registered
+        # SocialConnection.  Internal requests may omit the transport owner
+        # header; the typed binding is the trusted source in that narrow path.
+        if owner_user_id is None:
+            owner_user_id = social_binding.scope.owner_user_id
+        elif social_binding.scope.owner_user_id != owner_user_id:
             raise HTTPException(status_code=403, detail="Social binding does not match authenticated owner")
         run_ctx = replace(run_ctx, social_binding=social_binding)
         require_existing_thread = True

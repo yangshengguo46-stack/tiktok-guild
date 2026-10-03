@@ -2,15 +2,49 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from deerflow.persistence.social import SocialRepository
+from deerflow.persistence.social import ExternalEvent, SocialRepository
 from deerflow.social.contracts import IdentityProfile, RoleProfile, SocialScope, bounded_text
 from deerflow.social.roleos_binding import RoleOSBinding, validate_roleos_binding
 
 SOCIAL_CAPABILITY_MATRIX = MappingProxyType({"tiktok": MappingProxyType({"inbound": "unverified", "outbound": "unverified", "receipts": "unverified"})})
 _ENVELOPE_AUTHORITY = object()
+
+
+@dataclass(frozen=True)
+class SocialInternalWork:
+    """Host-authenticated RoleOS work projected into one social turn.
+
+    The work envelope carries business input only.  Scope, account, owner,
+    provider, persona, relationship, and MCP authority remain on the
+    registered :class:`SocialConnection` and are never accepted here.
+    """
+
+    request_id: str
+    objective: str
+    input_refs: tuple[str, ...] = ()
+    artifact_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        bounded_text(self.request_id, "request_id", 128)
+        bounded_text(self.objective, "objective", 32_000)
+        for name, refs in (("input_refs", self.input_refs), ("artifact_refs", self.artifact_refs)):
+            if not isinstance(refs, tuple) or len(refs) > 64 or any(not isinstance(ref, str) or not ref.strip() or len(ref) > 2_048 for ref in refs):
+                raise ValueError(f"{name} must be a bounded tuple of references")
+            if len(set(refs)) != len(refs):
+                raise ValueError(f"{name} must not contain duplicates")
+
+    def event_ids(self, scope: SocialScope) -> tuple[str, str]:
+        """Return deterministic event/source refs for idempotent admission."""
+        digest = hashlib.sha256(f"{scope.owner_user_id}:{scope.account_id}:{scope.person_ref}:{scope.channel_thread_ref}:{scope.agent_instance_id}:{self.request_id}".encode()).hexdigest()
+        return f"roleos:{digest}", f"roleos:{hashlib.sha256((digest + ':source').encode()).hexdigest()}"
+
+    def external_event(self, scope: SocialScope) -> ExternalEvent:
+        event_id, source_ref = self.event_ids(scope)
+        return ExternalEvent(event_id, source_ref, "operator_note", self.objective)
 
 
 @dataclass(frozen=True)
