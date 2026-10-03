@@ -145,6 +145,11 @@ def register_roleos_social_connection(app: Any, connection_id: str, connection: 
         raise ValueError("RoleOS social connection is already registered")
     updated = dict(registry)
     updated[connection_id] = connection
+    from deerflow.social.peer_tools import host_peer_tools
+
+    peers = dict(getattr(state, "roleos_peer_tools", {}))
+    peers[connection_id] = host_peer_tools(binding, connection)
+    state.roleos_peer_tools = MappingProxyType(peers)
     state.roleos_social_connections = MappingProxyType(updated)
     return connection
 
@@ -181,6 +186,12 @@ def resolve_registered_roleos_social_connection(request: Request, connection_id:
 
 async def admit_registered_roleos_social_work(request: Request, connection_id: str, work: Any) -> Any:
     """Record internal work and build the native SocialRuntimeBinding."""
+    # ChannelManager registrations are another native host lifecycle entry.
+    # Resolve the actual registered connection before creating any capability;
+    # caller work/context never selects an employee identity or credential.
+    if connection_id not in getattr(request.app.state, "roleos_peer_tools", {}):
+        connection = resolve_registered_roleos_social_connection(request, connection_id)
+        register_roleos_social_connection(request.app, connection_id, connection)
     service = getattr(getattr(request, "app", None), "state", None)
     service = getattr(service, "channel_service", None)
     if service is None:
@@ -192,7 +203,11 @@ async def admit_registered_roleos_social_work(request: Request, connection_id: s
             service = None
     manager = getattr(service, "manager", None)
     if manager is not None and hasattr(manager, "admit_roleos_social_work"):
-        return await manager.admit_roleos_social_work(connection_id, work)
+        from dataclasses import replace
+
+        binding = await manager.admit_roleos_social_work(connection_id, work)
+        peers = getattr(request.app.state, "roleos_peer_tools", {})
+        return replace(binding, peer_tools=peers.get(connection_id))
 
     # Direct host compositions (and unit tests) may register a connection
     # without starting the channel worker. Keep the same native contract and
@@ -221,6 +236,7 @@ async def admit_registered_roleos_social_work(request: Request, connection_id: s
         conversation_goal=connection.conversation_goal,
         schedule_followup=connection.schedule_followup,
         roleos_binding=connection.roleos_binding,
+        peer_tools=getattr(request.app.state, "roleos_peer_tools", {}).get(connection_id),
     )
 
 

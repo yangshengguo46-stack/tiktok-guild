@@ -53,6 +53,7 @@ class SocialRuntimeBinding:
     conversation_goal: str | None = None
     schedule_followup: Any = None
     roleos_binding: RoleOSBinding | None = None
+    peer_tools: Any = None
 
     def __post_init__(self):
         if not isinstance(self.repository, SocialRepository) or not isinstance(self.scope, SocialScope) or not isinstance(self.identity, IdentityProfile) or not isinstance(self.role, RoleProfile):
@@ -72,6 +73,16 @@ class SocialRuntimeBinding:
             raise ValueError("schedule_followup must be callable")
         if self.roleos_binding is not None:
             validate_roleos_binding(self.roleos_binding, assistant_id=self.scope.agent_instance_id)
+
+        if self.peer_tools is not None:
+            from roleos.peer_tools import PeerTools
+
+            if not isinstance(self.peer_tools, PeerTools) or self.roleos_binding is None:
+                raise ValueError("RoleOS peer tools require a registered host capability")
+            employee = self.peer_tools.employee
+            fields = ("company_id", "department_id", "source_role", "member_id", "native_owner_id", "assistant_id", "source_revision", "thread_id")
+            if any(getattr(employee, name) != getattr(self.roleos_binding, name) for name in fields):
+                raise ValueError("RoleOS peer capability owner mismatch")
 
 
 def binding_for_lead(config, *, user_id):
@@ -358,6 +369,11 @@ def middlewares_for_lead(runtime, middlewares):
         "ReadBeforeWriteMiddleware",
         "ToolErrorHandlingMiddleware",
     }
+    if runtime.binding.peer_tools is not None:
+        # Internal employee material work uses the same host-owned file/sandbox
+        # middleware as the ordinary Lead. The channel-safe catalog still gates
+        # every business tool; public social turns never receive this capability.
+        safe_names.update({"ThreadDataMiddleware", "SandboxMiddleware"})
     # Unrecognized extensions may contain permission checks. Refuse assembly
     # rather than silently discarding a policy or letting it disclose raw JSON.
     operator_names = {

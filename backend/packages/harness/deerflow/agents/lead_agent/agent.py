@@ -1192,7 +1192,10 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         include_conversation_reader=callable(cfg.get(CONVERSATION_READER_CONTEXT_KEY)) and not bool(cfg.get("is_subagent")),
         app_config=resolved_app_config,
     )
-    configured_tools = raw_tools + extra_tools
+    from deerflow.social.peer_tools import tools_for_runtime
+
+    peer_tools = tools_for_runtime(social_runtime)
+    configured_tools = raw_tools + extra_tools + peer_tools
     creator_agent_runtime = None
     if agent_name is None and social_runtime is None:
         from deerflow.social.tools import tools_for_lead
@@ -1212,7 +1215,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
     _append_project_document_tools_if_pinned(authorization_candidates, cfg)
     append_task_continuity_tools(authorization_candidates, resolved_app_config)
     if social_binding is not None:
-        authorization_candidates = [tool for tool in authorization_candidates if tool.name in social_binding.channel_safe_tool_names]
+        authorization_candidates = [tool for tool in authorization_candidates if tool.name in social_binding.channel_safe_tool_names or tool in peer_tools]
     configured_tool_ids = {id(tool) for tool in configured_tools}
     authorized_tools, _authz_provider = apply_tool_authorization(
         authorization_candidates,
