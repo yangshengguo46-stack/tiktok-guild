@@ -241,3 +241,14 @@ connection_id may be omitted only when exactly one host connection is registered
 Returned refs are authenticated host-relative URLs; the RoleOS host publisher
 owns any portable copying. Platform receipts/outbox and persona/relationship
 changes remain owned by SocialRuntime, not this read projection.
+
+Native content identity is captured by the worker before `run.delivery` is
+persisted: `content.artifact_integrity_version=1` and `artifact_integrity` entries
+carry canonical path, SHA-256 and size_bytes (or an explicit capture error).
+Projection/read require that identity; overwritten/deleted/unattested output
+is unavailable even when the historical native run status was success. Never
+capture identity at first HTTP poll or borrow later bytes from the same filename.
+The scoped GET streams an already verified private spooled buffer, sets ETag to
+the native digest and closes the buffer on completion; it does not hash then
+reopen the mutable output with FileResponse. Larger than 2 MiB spills to a
+private temporary file. There is no persistent competing artifact ledger.

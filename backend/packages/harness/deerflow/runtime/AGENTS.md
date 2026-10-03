@@ -433,3 +433,18 @@ incomplete lookup into absence. Peer handles remain store-only. Idempotency
 collisions belonging to another thread/user are `ConflictError`, surfaced as
 HTTP 409 by native start_run. Guild/Sales recovery and terminal replay are pinned
 by `tests/test_roleos_native_delivery.py`, alongside the normal run-owner suites.
+
+## Terminal artifact content identity
+
+`runtime/delivery.py` captures native output bytes and their SHA-256/size before
+`_persist_delivery_receipt` writes the singleton run.delivery event. The event
+carries artifact_integrity_version=1 and per-path artifact_integrity; failed
+capture is recorded explicitly. Content identities are terminal-run lineage,
+not a first-read cache. Named output paths remain mutable native thread files;
+a changed file fails a read of the older attestation instead of impersonating
+that run. `read_attested_output` returns the same private spooled buffer it
+hashed and checks file inode/size/mtime/ctime and confinement across capture;
+consumers must stream that buffer, never reopen the named mutable path.
+No platform receipt/outbox or immutable export owner is added. Native terminal
+status/required-material verification retains its existing semantics; content
+unavailability is visible in the receipt and scoped delivery projection.

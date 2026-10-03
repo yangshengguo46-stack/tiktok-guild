@@ -17,9 +17,10 @@ from app.channels.social import SocialInternalWork
 from app.gateway.auth_disabled import AUTH_SOURCE_INTERNAL
 from app.gateway.deps import get_run_event_store, get_run_manager
 from app.gateway.internal_auth import INTERNAL_AUTH_HEADER_NAME, is_valid_internal_auth_token
-from app.gateway.path_utils import normalize_outputs_virtual_path, resolve_outputs_confined_path
+from app.gateway.path_utils import normalize_outputs_virtual_path
 from app.gateway.run_models import RunCreateRequest
 from app.gateway.services import admit_registered_roleos_social_work, resolve_registered_roleos_social_connection, start_run
+from deerflow.runtime.delivery import ARTIFACT_INTEGRITY_VERSION, read_attested_output, verify_attested_output
 
 router = APIRouter(prefix="/api/internal/roleos", tags=["roleos"])
 
@@ -224,6 +225,18 @@ def _verified_paths(content: dict) -> list[str]:
     return list(dict.fromkeys(normalize_outputs_virtual_path(path) for path in paths))
 
 
+def _artifact_identity(content: dict, path: str) -> dict:
+    if content.get("artifact_integrity_version") != ARTIFACT_INTEGRITY_VERSION:
+        raise ValueError("native delivery content identity is unavailable")
+    identities = content.get("artifact_integrity")
+    if not isinstance(identities, list):
+        raise ValueError("native delivery content identity is unavailable")
+    matches = [identity for identity in identities if isinstance(identity, dict) and identity.get("path") == path]
+    if len(matches) != 1 or matches[0].get("error") or not isinstance(matches[0].get("sha256"), str) or not isinstance(matches[0].get("size_bytes"), int):
+        raise ValueError("native delivered output content could not be attested")
+    return matches[0]
+
+
 async def _project_delivery(record: object, request: Request, connection: object, connection_id: str) -> RoleOSSocialRunResponse:
     from deerflow.runtime import RunStatus
 
@@ -270,9 +283,8 @@ async def _project_delivery(record: object, request: Request, connection: object
         paths = _verified_paths(event["content"])
         available = []
         for path in paths:
-            actual_path = await asyncio.to_thread(resolve_outputs_confined_path, record.thread_id, path, user_id=connection.scope.owner_user_id)
-            if not await asyncio.to_thread(actual_path.is_file):
-                raise ValueError("native delivered output file is unavailable")
+            identity = _artifact_identity(event["content"], path)
+            await asyncio.to_thread(verify_attested_output, record.thread_id, path, identity, user_id=connection.scope.owner_user_id)
             available.append(f"{base}/artifacts/{quote(path.lstrip('/'), safe='/')}?{query}")
         response.artifact_refs = available
     except (ValueError, HTTPException, OSError) as exc:
@@ -319,9 +331,13 @@ async def poll_roleos_social_run(run_id: str, request: Request, connection_id: s
 @router.get("/social/runs/{run_id}/artifacts/{path:path}")
 async def read_roleos_social_artifact(run_id: str, path: str, request: Request, connection_id: str | None = Query(default=None, min_length=1, max_length=128)):
     """Read only a file attested by this scoped native delivery event."""
-    from fastapi.responses import FileResponse
+    import mimetypes
+    from pathlib import PurePosixPath
 
-    from app.gateway.routers.artifacts import _build_attachment_headers, _read_artifact_payload
+    from fastapi.responses import StreamingResponse
+    from starlette.background import BackgroundTask
+
+    from app.gateway.routers.artifacts import _build_attachment_headers
 
     _require_internal_roleos_request(request)
     connection_id, connection = _poll_connection(request, connection_id)
@@ -331,9 +347,23 @@ async def read_roleos_social_artifact(run_id: str, path: str, request: Request, 
     normalized = normalize_outputs_virtual_path(path)
     if normalized not in _verified_paths(receipt.native_receipt["content"]):
         raise HTTPException(status_code=404, detail="Path is not a verified output of this run")
-    actual_path = await asyncio.to_thread(resolve_outputs_confined_path, receipt.thread_id, normalized, user_id=connection.scope.owner_user_id)
-    _, mime_type = await asyncio.to_thread(_read_artifact_payload, actual_path, normalized, True)
-    return FileResponse(actual_path, media_type=mime_type, headers=_build_attachment_headers(actual_path.name))
+    identity = _artifact_identity(receipt.native_receipt["content"], normalized)
+    try:
+        buffer = await asyncio.to_thread(read_attested_output, receipt.thread_id, normalized, identity, user_id=connection.scope.owner_user_id)
+    except (ValueError, OSError):
+        raise HTTPException(status_code=404, detail="Verified native artifact content is unavailable") from None
+
+    def chunks():
+        try:
+            while chunk := buffer.read(64 * 1024):
+                yield chunk
+        finally:
+            buffer.close()
+
+    filename = PurePosixPath(normalized).name
+    mime_type, _ = await asyncio.to_thread(mimetypes.guess_type, filename)
+    headers = _build_attachment_headers(filename, {"ETag": f'"{identity["sha256"]}"', "Content-Length": str(identity["size_bytes"])})
+    return StreamingResponse(chunks(), media_type=mime_type or "application/octet-stream", headers=headers, background=BackgroundTask(buffer.close))
 
 
 RoleOSSalesRunRequest = RoleOSSocialRunRequest

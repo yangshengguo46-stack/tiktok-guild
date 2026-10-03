@@ -59,6 +59,7 @@ from deerflow.runtime.context_keys import (
     PROJECT_CONTEXT_KEY,
     checkpoint_agent_binding_metadata,
 )
+from deerflow.runtime.delivery import attest_delivery_outputs
 from deerflow.runtime.events.message_identity import attach_message_seq, message_identity
 from deerflow.runtime.goal import (
     DEFAULT_MAX_GOAL_CONTINUATIONS,
@@ -286,6 +287,7 @@ async def _persist_delivery_receipt(
     store failures without handing a successful run to orphan recovery, which
     cannot reconstruct either the terminal status or the detailed receipt.
     """
+    content = await asyncio.to_thread(attest_delivery_outputs, thread_id, content, user_id=get_effective_user_id())
     attempts = len(_DELIVERY_RECEIPT_RETRY_DELAYS_SECONDS) + 1
     for attempt in range(attempts):
         try:

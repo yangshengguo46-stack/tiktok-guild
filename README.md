@@ -2015,3 +2015,7 @@ project persisted native receipts and verified output files, preserving request
 idempotency across restart. They do not perform TikTok actions. See
 [Gateway development contract](backend/app/gateway/AGENTS.md#roleos-guildsales-native-delivery)
 for scoped query parameters, aliases and artifact reads.
+
+Native terminal receipts also record each delivered file's SHA-256 and size.
+If a later run overwrites the same filename, reads under the older run become
+unavailable instead of returning the newer run's bytes.

@@ -21,6 +21,11 @@ from deerflow.runtime.runs.worker import RunContext, _delivery_content_with_outp
 from deerflow.runtime.user_context import get_effective_user_id
 
 
+@pytest.fixture(autouse=True)
+def isolate_native_delivery_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr("deerflow.config.paths._paths", Paths(base_dir=tmp_path))
+
+
 def _make_bridge():
     return SimpleNamespace(publish=AsyncMock(), publish_end=AsyncMock(), cleanup=AsyncMock())
 
@@ -159,7 +164,9 @@ async def test_changed_outputs_succeed_when_a_produced_output_is_presented(monke
     )
 
     delivery = await _delivery_events(store, "thread-1", record.run_id)
-    assert delivery[0]["content"] == {
+    assert delivery[0]["content"]["artifact_integrity_version"] == 1
+    assert delivery[0]["content"]["artifact_integrity"][0]["error"]
+    assert {key: value for key, value in delivery[0]["content"].items() if not key.startswith("artifact_integrity")} == {
         "presented": 1,
         "paths": ["/mnt/user-data/outputs/report.md"],
         "by_tool": {"present_files": ["/mnt/user-data/outputs/report.md"]},
@@ -478,7 +485,10 @@ async def test_delivery_event_is_singleton_across_goal_continuations(monkeypatch
     delivery = await _delivery_events(store, "thread-1", record.run_id)
     assert stream_calls == 2
     assert len(delivery) == 1
-    assert delivery[0]["content"] == {
+    assert delivery[0]["content"]["artifact_integrity_version"] == 1
+    assert len(delivery[0]["content"]["artifact_integrity"]) == 2
+    assert all(identity["error"] for identity in delivery[0]["content"]["artifact_integrity"])
+    assert {key: value for key, value in delivery[0]["content"].items() if not key.startswith("artifact_integrity")} == {
         "presented": 2,
         "paths": [
             "/mnt/user-data/outputs/report.md",
