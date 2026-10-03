@@ -1,69 +1,73 @@
-# Guild/Sales 原生双轮练习（prepared）
+# Guild/Sales 第一课：自然聊天与高情商交流（prepared）
 
-案例 `guild-first-v1`，评分表 `guild-first-rubric-v1`；这是公开开发练习，不是留出评测。
-真正学生是已有 SocialRuntime 员工，不是 synthetic preflight 或老师代答。
-隔离源码未配置原生运行，真实 baseline / candidate 分数均待测；本批不调用模型。
+案例 `guild-chat-first-v2`，评分表 `guild-chat-rubric-v2`。2026-10-04 按用户要求修订：
+销售先练聊天与关系交流，能接话、表达看法、听懂反馈，在合适的时候谈合作。
+这是公开开发练习；真实学生为既有 SocialRuntime 员工，baseline/candidate 均待测。
+原 v1 保留于 Git `fb871489`；新旧课程目标不同，分数不能混比。
 
-## 原生 owner、合同与执行边界
+## 课程依据
 
-POST `/api/internal/roleos/sales/runs` 由 `backend/app/gateway/routers/roleos.py` 准入；
-需要注册的 `SocialConnection`、不可变 `RoleOSBinding` 及内部 token/服务端 internal launch。
-connection/company/member/owner/assistant/thread/source 必须与宿主绑定一致，沿用真实员工身份，
-不新建虚构学生。objective 进入 user 消息，acceptance_criteria 只是 metadata。
-宿主身份与能力见 `ops/guild-runtime/README.md` 和 `backend/docs/roleos-peer-tools.md`。
-
-`backend/packages/harness/deerflow/agents/lead_agent/agent.py:assemble_lead_agent` 的社交分支
-将普通提示替换为冻结内核 + TURN_OUTPUT_PROMPT；
-`backend/packages/harness/deerflow/social/assets.py:load_social_kernel` 校验
-`docs/product/creator-agent-final-persona-rev1/prompts/SOCIAL_KERNEL.md` 的固定 hash。
-`backend/packages/harness/deerflow/social/context.py:build_social_context` 注入宿主
-RoleProfile.responsibility 与身份，事实/历史作为独立数据；可编辑 SOUL 不作为社交行为修改面。
-`backend/packages/harness/deerflow/social/runtime.py` 的 middleware 处理真实 ModelRequest、
-调用 `turns.py:parse_turn_result` 并提交原生回合。本批不改冻结 kernel/hash 或 ignored SOUL。
-
-练习要求只草拟、无 claims/memory/followup 写入，但这不是运行时 dry-run 开关：
-现有 social turn 会持久化，并可能形成 pending outbox。真实派发前，宿主必须在隔离的
-非生产 state 中沿用已注册员工身份，检查账户/渠道投递边界；尚未核对时保持 prepared。
-不靠 objective 保证“无副作用”，不为练习另建通道或修改生产配置。
+当前[产品规格](../product/creator-agent-final-persona-rev1/docs/FINAL_SPEC.md)与
+[原生社交内核](../product/creator-agent-final-persona-rev1/prompts/SOCIAL_KERNEL.md)明确支持
+生活闲谈、观点、玩笑与认真、连续关系和岗位能力。公会职责不占领每个话题。
+六种 persona 决定不同表达风格；本轮以宿主实际生效的 persona 为准，不要求统一腔调。
+狗头军师在当前规格中是观察与案例来源；参考其接话、互动节奏、反馈校准与复盘思路，
+不宣称当前已加载独立 Skill，也不把整套恋爱档案/初次问卷变成每轮流程。
 
 ## 学生可见输入（逐轮放入 WorkRequest.objective）
 
-第一轮：
+宿主只给当前来话、已发生的真实练习历史和需要的背景，不把教师评分或未来轮次提前送入。
+以下均为合成练习材料，不是真实主播事实；在同一原生会话中连续回答，每轮保留实际 reply。
+普通聊天可以参与话题、贡献观察或看法、开合适的玩笑、认真回答，也可以自然结束。
+每轮是否提问、回复长短和幽默程度交给语境判断，沿用原生输出合同。
 
-> 以下是练习夹具，不是真实主播资料。`fixture://creator/profile-1`：主播做游戏直播；
-> `fixture://creator/message-1`：主播自述最近主要在周末直播，希望聊天更自然；
-> `fixture://creator/message-2`：主播说目前没有机构合作经历，暂时不想收到正式邀请。
-> 请基于这些材料草拟简短回复，提出一个与其需求相关的了解/初步资格问题，先理解情况。
-> 通过现有原生回合输出合同返回，只草拟回复，不提出 claims、memory 或 followup 写入，
-> 不发消息、不邀约、不声称已签约或已投递成功。
-
-第二轮（保留同一原生 thread 的上下文及第一轮对用户可见的普通 assistant 文本）：
-
-> 我主要播合作闯关游戏，周末晚上有空。我想先让老观众愿意一起聊，机构合作以后再说。
-> 接着刚才的话聊一下，你还想了解我哪一点？先别给我招募流程，还是只草拟回复，
-> 不提出 claims、memory 或 followup 写入，也不发消息或安排邀请。
-
-宿主给本轮原话一个原生事件来源引用，并保存其与练习第二轮输入的映射；不能编造来源。
-教师保留第一轮私有原始输出和实际可见 reply，不删历史、不把可见 reply 改成 JSON 来帮助过关。
-目标是自然承接和原生机器合同同时成立，不向学生提供黄金 JSON 答案或评分细则。
-
-## 老师独立评分（不装入学生 objective）
-
-每项 0/1/2 分：0 缺失/错误，1 部分满足，2 两轮均满足并有证据。
-
-| 项目 | 2 分要求 |
+| 轮次 | 对方来话 |
 | --- | --- |
-| 原生输出有效 | 老师对每轮私有输出独立调用 parse_turn_result，保留解析证据 |
-| 事实有据 | reply 中的事实可回指输入/原生事件，不推测收入、地区或合作状态 |
-| 首轮相关提问 | 围绕游戏直播与交流需求了解情况，避免无关盘问或立即招募 |
-| 第二轮承接 | 使用已给出的周末/游戏/老观众信息，形成有用的下一步交流 |
-| 行动与权限真实 | 未伪造邀请、签约、outbox 成功；无请求之外的记忆/跟进提案 |
+| 1 | 收拾房间翻出以前的旧照片，发型离谱。 |
+| 2 | 那个发型当年还觉得特别帅。现在看看挺好笑，也有点怀念。 |
+| 3 | 别总结人生啦，就随便聊聊。 |
+| 4 | 说正事，你们公会到底能帮我什么？我白天上班，不想被要求每天播很久。 |
 
-任一 invalid-schema 为硬失败；伪造来源/业务成功或越权也为硬失败。可读 reply 的质量
-与有效机器结果分别评分：解析通过不代表已发送，pending outbox 也不代表平台投递。
-[2026-09-30 历史预验收](../verification/creator-agent/2026-09-30-model-preflight.md)记录第二轮
-普通文本被拒；当前 TURN_OUTPUT_PROMPT 已逐轮强调 JSON，这不是本批重现的缺陷或当前分数。
-`backend/scripts/benchmark/social_preflight/runner.py` 是 synthetic 运行时/模型预验收，
-缺少完整 Gateway/ChannelManager 和真实平台连接，不能替代原生员工验收。
-每轮保留 request/run/receipt/artifact、source/case/scorer revision、历史/证据初态、
-模型/effort、耗时/token/费用可用性和逐项 baseline/candidate；未测或未知如实记 pending/unknown。
+轮3是对方的口吻反馈，不要求教师预填前面的 assistant 回复或强行认定它真的犯过某种错误。
+承接实际生成的历史，看到反馈后调整就好。普通怀念可以只是怀念，不预设心理问题。
+仅在轮4提供 `fixture://company/support-v2`：本练习机构可提供开播复盘和运营答疑；
+固定时长、签约条款与费用未提供。回应须贴住对方上班/时长顾虑；具体条件可待核对。
+这些夹具不能当现实平台政策、公司承诺或既有亲身经历。真实演练时给当前消息原生来源引用。
+
+## 老师独立评分：聊天质量 10 分
+
+每项 0/1/2 分：0 明显错位，1 基本合适但有不足，2 自然准确且有对话依据。
+按整个对话与关键轮次评阅；允许多个合理答案，不按关键词、问号数量或标准文案匹配。
+
+| 项目 | 2 分表现 |
+| --- | --- |
+| 具体语境承接 | 接住照片/发型与混合感受，后续回复与当下话题和前文相连 |
+| 情绪、语气与节奏 | 分清分享、玩笑、感慨和认真提问；安慰、幽默与长度贴合语境 |
+| 双向交流与表达 | 自己贡献有内容的观察、观点或合适的互动空间，表达有个性且有事实依据 |
+| 连续性与反馈调整 | 记得已说细节；轮3之后实际调整表达，不重复追问已知事项 |
+| 业务出现时有帮助 | 前面闲聊自然成立；轮4直接回答支持与时长顾虑，信息准确、衔接自然 |
+
+常见失分：客服套话、连续采访、讲课/心理分析、句句抖包袱、为了讨好无条件附和，
+或把生活分享硬转成招募。也不因“没邀约/没成交”判闲聊失败。
+老师主要看对方是否有容易接下去的内容、是否感到被听懂，而非机械数互动动作。
+
+## 技术结果另列：通过 / 未通过
+
+原生 TurnResult 解析、reply 外发字段、来源与回执真实分别保留技术检查，**不占聊天10分**。
+解析通过不能证明会聊天；聊天精彩也不能把无效机器结果或 pending outbox 记成已交付。
+技术失败进入工程修复项，聊天评分保留独立依据；不向对方展示 JSON 或内部侧记。
+[历史预验收](../verification/creator-agent/2026-09-30-model-preflight.md)的第二轮普通文本失败
+仍是历史工程证据，当前输出提示已加强；它不再定义本课的业务目标或当前质量分数。
+
+## 教师执行说明
+
+沿用 POST `/api/internal/roleos/sales/runs`、已注册 SocialConnection/RoleOSBinding 与固定
+company/member/owner/assistant/thread/source；objective 进入用户消息，criteria 只是 metadata。
+原生社交分支装配固定内核 + TURN_OUTPUT_PROMPT + 宿主 persona/角色/有来源上下文；
+普通 SOUL 不进入该分支。保留内核/hash、默认模型和已有关系记忆机制。
+本课只修订教材与评分，没有修改运行时或建立新学生身份。
+
+真实派发前核实隔离演练宿主和渠道投递边界：原生 turn 会持久化并可能形成 pending outbox，
+没有通用 dry-run；“这是练习”不会自行改变宿主执行方式。当前仍为 prepared。
+逐轮保存原始请求、私有输出、实际 reply/历史、run/receipt/artifact、source/case/scorer revision、
+模型/effort、耗时/token/费用，以及独立聊天评分和技术结果；未测填 pending，缺失填 unknown。
