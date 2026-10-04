@@ -39,6 +39,18 @@ def test_peer_file_capability_keeps_native_file_middlewares():
     assert {"ThreadDataMiddleware", "SandboxMiddleware"} <= {type(m).__name__ for m in middlewares_for_lead(runtime, middlewares)}
 
 
+def test_social_file_capability_without_peer_tools_keeps_native_file_middlewares():
+    from types import SimpleNamespace
+
+    from deerflow.agents.middlewares.thread_data_middleware import ThreadDataMiddleware
+    from deerflow.sandbox.middleware import SandboxMiddleware
+    from deerflow.social.runtime import middlewares_for_lead
+
+    middlewares = [ThreadDataMiddleware(), SandboxMiddleware()]
+    runtime = SimpleNamespace(binding=SimpleNamespace(peer_tools=None, channel_safe_tool_names=frozenset({"write_file", "present_files"}), scope=None))
+    assert {"ThreadDataMiddleware", "SandboxMiddleware"} <= {type(m).__name__ for m in middlewares_for_lead(runtime, middlewares)}
+
+
 from test_social_lead_runtime import repo  # noqa: E402,F401 - actual native SQL fixture
 
 

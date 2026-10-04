@@ -369,10 +369,12 @@ def middlewares_for_lead(runtime, middlewares):
         "ReadBeforeWriteMiddleware",
         "ToolErrorHandlingMiddleware",
     }
-    if runtime.binding.peer_tools is not None:
-        # Internal employee material work uses the same host-owned file/sandbox
+    channel_safe_tool_names = getattr(runtime.binding, "channel_safe_tool_names", frozenset())
+    has_file_capability = bool({"read_file", "write_file", "str_replace", "present_files", "ls", "glob", "bash"} & set(channel_safe_tool_names))
+    if runtime.binding.peer_tools is not None or has_file_capability:
+        # Employee material work uses the same host-owned file/sandbox
         # middleware as the ordinary Lead. The channel-safe catalog still gates
-        # every business tool; public social turns never receive this capability.
+        # every business tool; collaboration is independent from file access.
         safe_names.update({"ThreadDataMiddleware", "SandboxMiddleware"})
     # Unrecognized extensions may contain permission checks. Refuse assembly
     # rather than silently discarding a policy or letting it disclose raw JSON.
