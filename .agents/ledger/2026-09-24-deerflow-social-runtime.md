@@ -42,6 +42,29 @@
 
 因此总台账中 Task 1–10 的“完成”指**原生代码与本地验收完成**，不等于上述 WP1–WP4 的模型效果、真实材料、平台业务和发布验收都已完成。
 
+## 2026-10-05 业务审计后的首条修复
+
+三项目业务审计见 `docs/audits/2026-10-05-three-project-business-audit.md`。本轮只做
+本地、可回归的业务基础修复，没有启用 TikTok 外部写入，也没有改账号或凭据。
+
+嵌套 DeerFlow 当前位于安全分支 `codex/2026-10-05-business-audit`，并保留审计前
+已有的 CreatorAgent、关系持久化和工作台未提交改动。发现的运行阻塞是默认人格目录指向
+不存在的顶层 `config/personas.json`；已将
+`backend/packages/harness/deerflow/creator_agent/personas.py` 的默认路径改为随公会项目
+发运的 `ops/guild-runtime/config/personas.json`，同时保留
+`DEER_FLOW_GUILD_PERSONAS_PATH` 覆盖。 `backend/tests/test_creator_agent_personas.py`
+新增无环境变量的默认目录回归覆盖，并使用发运资产路径。
+
+验证结果：在嵌套 runtime 中清除
+`DEER_FLOW_GUILD_PERSONAS_PATH` 后，CreatorAgent persona、relationship、runtime 与输入
+清洗回归为 **247 passed**；`git diff --check` 通过。由于工作树原本已很脏，本修复未提交，
+避免把用户已有改动混入提交。
+
+营销项目同时新增纯本地 `deerflow.marketing.sales.qualify_sales_handoff`，以显式需求、
+许可、匹配和时间事实返回资格状态与单一步骤；它不发送、不创建线索、不发布。营销聚焦回归
+为 **104 passed**。下一步仍是用一台明确授权的设备/provider 做真实身份、收发和回执验收；
+本地通过不代表 TikTok 现场闭环已完成。
+
 本次材料到代码的本地审计（2026-09-30）：来源 ZIP SHA-256 为 `788924f9d7e3d63327d85351f76088ecd6427141396d42a9752bdd448a930ba1`，与执行性修订记录一致；`python3 scripts/verify_creator_agent_assets.py` 验证 76 个附件文件通过。当前安卓审计分支上指定 Social 测试 **404 passed**；补回冻结 `SOCIAL_KERNEL` 后 Lead ModelRequest 仍只装一份人格。9/29 合成证据确有 `switch`，本轮新 preflight 未完成，见 P6 与业务审计。本次完成的是五份入口材料与原生路径的**本地能力审计**，未进行真实 TikTok/安卓设备或产品发布终验。
 
 ## 2026-09-30 全量审计收口
