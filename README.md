@@ -37,8 +37,11 @@ Identity、Self、Role、Relationship、EffectivePersona 与 TurnContext，然�
 真实 TikTok 读回映射仍需现场验证。配置、权限、资源上限及未知结果恢复见
 [公开建联生产运行说明](docs/verification/creator-agent/public-outreach-production-runbook.md)。
 
-外部社交回合显式装入冻结并校验 SHA-256 的 `SOCIAL_KERNEL.md`，再注入当前关系的一份人格；
-不会因切换到结构化输出而丢失自然交流内核。自身观点/承诺的生产写入、followup 唤醒、
+外部社交回合先校验冻结 `SOCIAL_KERNEL.md` 的完整 SHA-256，再从中提取会话原则，
+去掉开发版本标题和工程实现说明，并注入当前关系的一份人格。通用提示词和安装时的
+SOUL 也已清理开发示例与阶段说明。回复提交及通道发送前会拒绝已知的内部上下文、
+协议字段和开发说明回显，历史待发送消息也经过检查；正常的 AI 身份说明和真实回执状态
+可以表达。这是已知签名检查，仍需真实模型多轮验证。自身观点/承诺的生产写入、followup 唤醒、
 关系管理纠错与真实来信 provider 仍未闭环；见
 [2026-09-30 全业务审计与剩余事项](docs/audits/2026-09-30-business-completion-audit.md)。
 

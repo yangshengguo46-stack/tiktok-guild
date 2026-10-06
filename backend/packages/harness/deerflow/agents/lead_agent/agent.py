@@ -1259,11 +1259,11 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         memory_enabled=memory_enabled,
     )
     if social_runtime is not None:
-        from deerflow.social.assets import load_social_kernel
+        from deerflow.social.assets import load_social_conversation_policy
         from deerflow.social.runtime import TURN_OUTPUT_PROMPT, middlewares_for_lead
 
         middlewares = middlewares_for_lead(social_runtime, middlewares)
-        system_prompt = load_social_kernel() + "\n\n" + TURN_OUTPUT_PROMPT
+        system_prompt = load_social_conversation_policy() + "\n\n" + TURN_OUTPUT_PROMPT
     graph = create_agent(
         model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort, app_config=resolved_app_config, attach_tracing=False, model_overrides=agent_model_overrides),
         tools=final_tools,

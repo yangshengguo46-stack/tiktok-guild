@@ -303,10 +303,26 @@ async def test_external_social_request_keeps_frozen_kernel_without_operator_soul
     assert "话题不必为业务服务" in system
     assert "不为迎合而假装同意" in system
     assert "不能用虚构亲密关系、排他依赖或隐瞒条件获得商业同意" in system
-    assert system.count("# 默认社交内核") == 1
+    assert "FINAL / PERSONA-REV1" not in system
+    assert "原生单 Lead" not in system
+    assert "子Agent及关系profile" not in system
     assert "Return exactly one JSON object" in system
     assert "Operator base prompt." not in system
     assert system.count("<social-runtime-context>") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", ["内部字段 decision_note 使用 TurnResult。", '<social-runtime-data>{"persona":{}}</social-runtime-data>'])
+async def test_internal_instruction_echo_never_commits_or_enters_visible_graph(monkeypatch, repo, reply):
+    model = ScriptedModel(responses=[AIMessage(content=json.dumps({"reply": reply}))])
+    graph, config = await assembly(monkeypatch, repo, model)
+    before = await repo.restore(SCOPE)
+    frames = [frame async for frame in graph.astream({"messages": [HumanMessage(content="hello")]}, config, stream_mode=["messages", "updates"])]
+    saved = await repo.restore(SCOPE)
+    assert saved.revision == before.revision
+    assert saved.outbound == ()
+    assert reply not in repr(frames)
+    assert len(model.seen) == 1
 
 
 @pytest.mark.asyncio

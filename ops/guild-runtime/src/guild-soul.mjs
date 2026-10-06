@@ -1,4 +1,5 @@
 import { constants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -10,6 +11,8 @@ Use TKDesk for candidate identity and handoff facts. Use the Guild Operator MCP 
 
 Use DeerFlow's normal planning, tools, memory and delegation as needed. A draft is not a sent message. Respect an explicit request not to be contacted. Ask the operator for a missing fact or unavailable platform action when necessary; otherwise decide the next business step yourself.
 `;
+
+const PREVIOUS_PACKAGED_SOCIAL_SOUL_SHA256 = 'd44067228f118ba7baf47c2a3c20b2b0edaaa1fbe11cd3cfbae0ab10ce4f2614';
 
 export async function ensureGuildSoul({ packageRoot }) {
   const home = path.join(packageRoot, 'backend', '.deer-flow');
@@ -24,7 +27,8 @@ export async function ensureGuildSoul({ packageRoot }) {
   }
 
   const existing = await readFile(target, 'utf8');
-  if (existing === LEGACY_BUSINESS_FIRST_SOUL) {
+  const existingHash = createHash('sha256').update(existing, 'utf8').digest('hex');
+  if (existing === LEGACY_BUSINESS_FIRST_SOUL || existingHash === PREVIOUS_PACKAGED_SOCIAL_SOUL_SHA256) {
     await writeFile(target, await readFile(source, 'utf8'), { mode: 0o600 });
     return { installed: true, migrated: true, path: target };
   }

@@ -11,9 +11,9 @@
 状态：原生 Social Runtime 已完成；公开建联执行已转向安卓隔离分支，真机、真实 TikTok provider、客户交付与规模化仍未验收
 当前写入者：`/root`
 
-## 当前总览与未完成事项（2026-09-30）
+## 当前总览与未完成事项（2026-10-06）
 
-用户已决定将公开建联的活动执行从 Web Playwright/iPhone XCUITest 转向安卓手机，同时保留点赞、评论、关注、私信业务并增加通用逐台控制。安卓第一阶段代码在隔离分支 `codex/android-outreach-control@1b7a81f79`；原始 `master` checkout 尚未合并。旧 Web/iPhone 公开建联账号与回执在该分支只读保留，不再新派单；以下 2026-09-29 双通道记录仅作为历史实施证据。
+用户已决定将公开建联的活动执行从 Web Playwright/iPhone XCUITest 转向安卓手机，同时保留点赞、评论、关注、私信业务并增加通用逐台控制。当前施工分支为 `codex/pre-device-audit`，本轮提示词清理基于 checkpoint `3c0785245`；原始 `master` checkout 尚未合并。旧 Web/iPhone 公开建联账号与回执只读保留，不再新派单；以下 2026-09-29 双通道记录仅作为历史实施证据。
 
 安卓代码已包含 ADB 识别、UiAutomator2 通用观察/点击/输入/滑动、设备独占、人工接管/恢复、四种公开建联动作的确定性执行和读回合同。离线测试与前端检查已通过，外部写入默认关闭；本轮修复了未知 Appium session、取消竞态、旧回执 baseline、非字符串 provider ID 和部署 owner 越权。最多可**登记** 50 台，但当前业务 worker 一次只执行 1 台，尚无真机或 20–50 台并发证据。
 
@@ -21,12 +21,15 @@
 | --- | --- | --- | --- |
 | P1 | 安卓单台接入 | 等手机 | 真机授权、Appium 会话、结构化元素操作、断连后的设备归属与人工接管。手机目前尚未到货。 |
 | P2 | TikTok 安卓业务闭环 | 待 P1 | 采集版本化定位器，现场核对登录账号、创作者、视频和四种动作后的真实状态/新条目；单账号受控 pilot 后才可评估开启外部写入。 |
-| P3 | 客户安装交付 | 新增待办 | 客户安装 DeerFlow 后，由产品的本机设备服务/向导内置或受控安装固定版本 ADB、Java、所需 Android SDK、Node/Appium/UiAutomator2，自动配置、启动、诊断与升级/回退；scrcpy 为可选人工投屏组件。Windows/macOS 均验收，客户无需执行 `brew`、`npm`、`sdkmanager` 或设置环境变量。手机端仍需用户开启调试并授权电脑。 |
+| P3 | 客户安装交付 | 编排已实现，客户验收待做 | 已有 `install:customer` 和持久安装状态；仍须固定 Node/SDK artifacts 或受信镜像，并在 Windows/macOS 全新客户环境验证无需手工配置 Java、SDK、ADB、Appium。手机端仍需用户开启调试并授权电脑。本机缺 Java，完整现场验收未通过。 |
 | P4 | 多设备运行 | 待真机 | 三台真机先验证逐台任务、独占/人工接管和离线隔离；改造单 worker 为按设备调度，再依次做 20 台、50 台多主机与长时间运行、资源/延迟/token 计量。 |
-| P5 | 统一收发业务 | 尚未闭环 | 用户提出的设备消息统一收发中台须另定来信采集、身份归属、去重、回复与平台回执；当前四种公开动作的离线实现不等于真实来信或正式邀约已可用。 |
+| P5 | 统一收发业务 | 原生合同已实现，provider 待验收 | 已有统一 envelope、身份与回复路由、去重、typed receipt 和管理读口；本轮补齐内部回复回显检查。TikTok provider、真实来信、正式邀约和回执仍须单独闭环。 |
 | P6 | 人格与模型质量 | 待现场验证 | 9/29 的 `gpt-6-sol` 合成证据出现过一次 `switch`，但默认 10 秒边界曾超时；本轮真实 preflight 4 次调用因 selector ID 合同歧义/后续纯文本合同失败即停，完整多轮、职业替换、生成启用回滚仍未通过。 |
-| P7 | 上线基础设施 | 待复核 | PostgreSQL 真实服务集成、部署数据库迁移、生产身份认证/权限配置及完整验收需在目标部署环境复核；旧 nginx 日志断言失败属于历史双通道基线，当前安卓分支的整套验收尚未重跑。 |
-| P8 | 后续能力 | 待规划 | 人格库、沟通知识库、主播主页预分析和 World Memory 深度实现仍是 roadmap，未纳入安卓第一阶段。 |
+| P7 | 上线基础设施 | 静态合同已通过，目标部署待验收 | 已有部署合同验收；临时 PostgreSQL 与 SQLite 迁移有本地证据。生产认证、目标数据库、健康路由和完整安装运行仍须在目标部署复核。 |
+| P8 | 资料与经验深化 | 来源预分析与记忆已集成，真实效果待验收 | 主页/作品预分析、ConversationPlan、证据记忆和经验晋升已进入同一原生 Social Runtime；知识资料深度、真实结果反馈、多轮质量及持续唤醒仍待验证。 |
+
+本轮开发提示净化与输出边界修复已完成本地验收；详情见
+[2026-10-06 提示词清理记录](../../docs/audits/2026-10-06-runtime-prompt-cleanup.md)。
 
 ### DeerFlow 人格开发材料逐项核对
 
@@ -439,3 +442,11 @@ Current HEAD is `cc7275369` (implementation hardening through `97c331208`). The 
 - **P3/P7 运维入口**：ops 增加 `npm run install:customer` 和 `npm run acceptance:deployment`，固定 Node/Java/Android/Appium 合同路径、安装状态、生产认证、loopback 发布、迁移、健康路由和日志轮转检查。macOS 通过受控 Homebrew，Windows 通过 winget 编排缺失 Java/Android 工具；Linux 缺少固定工具时 fail-closed。固定 Node/SDK artifacts 或受信镜像仍需产品化，不能记为客户安装完成。
 
 本批验证：backend 统一收发、Social/Intelligence、preflight、scheduler、repository 聚焦 **334 passed**（FastAPI 上游弃用警告 1 条）；Ruff 与 `git diff --check` 通过；`ops/guild-runtime` **121 passed**；部署静态合同 **5 项通过**；本机 doctor 因 Java Runtime 缺失失败，属于现场依赖阻塞。真实 TikTok provider、手机、平台回执、客户跨平台安装和生产部署仍未验收。
+
+## 2026-10-06 开发提示净化与回复边界
+
+用户批准清理本次审计发现的运行时开发说明。通用 Lead/通用子 Agent 提示和模型可见文件工具说明已移除开发示例、虚构研究报告、issue 与其他编程 Agent 的实现比较。官方 SOUL 模板已去除版本/阶段/未来适配器说明，安装器只迁移完全匹配的旧官方版本；自定义文件不被自动覆盖。本机已安装 SOUL 经定向清理，业务要求与追加内容保留，旧内容备份于 Git 外。
+
+外部 Social Lead 仍先校验完整冻结资产，再提取会话原则；未修改原始附件、manifest 或六人格资产。新 `TurnResult.reply` 在提交前拒绝已知内部结构/工程文本；ChannelManager 对历史 pending 在 replay 前、claim 前及实际 claim 输出各检查一次。拒绝时不发送、不自动重新生成、不伪造回执、不把私有文本写进拒绝日志。正常身份披露、技术字段讨论和真实发送状态仍可表达。
+
+验收：最终完整聚焦 backend **468 passed**；补齐精准原句检查后定向 **32 passed**（与前项重叠）；文件工具/安全/子 Agent 路由 **178 passed**；ops **123 passed**；冻结附件 **76 文件通过**；Ruff check/format 和 `git diff --check` 通过。独立复审 **bounded CLEAN**：前次误拦与已知标签/单引号 dump 漏拦已修复。这是已知签名防护，不能据此保证任意自然语言泄漏均被识别。本轮没有真实模型调用、平台写入或现场交付验证。

@@ -703,6 +703,42 @@ async def test_concurrent_managers_claim_the_same_committed_action_once(reposito
 
 
 @pytest.mark.asyncio
+async def test_legacy_pending_internal_reply_is_blocked_before_claim_and_provider_send(repository, tmp_path):
+    from deerflow.persistence.social.model import social_outbound
+
+    action = await pending(repository)
+    # Simulate a persisted reply created before the output boundary was fixed.
+    async with repository.session_factory.begin() as session:
+        await session.execute(sa.update(social_outbound).where(social_outbound.c.action_id == action.action_id).values(reply_text="decision_note: hidden; state_delta: []"))
+    fixture = await channel_fixture(repository, tmp_path)
+    launches = []
+
+    async def launch(**kwargs):
+        launches.append(kwargs)
+        return True
+
+    fixture.manager._launch_social_turn = launch
+    await fixture.manager._handle_message(fixture.msg)
+    assert launches == []
+    assert fixture.launched == fixture.provider.sent == fixture.published == []
+    assert (await repository.get_turn_outbound(SCOPE, "e1")).state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_social_send_validates_the_actual_claimed_reply(repository, tmp_path, monkeypatch):
+    fixture = await channel_fixture(repository, tmp_path)
+    original = repository.claim_outbound
+
+    async def claim_with_internal_content(*args, **kwargs):
+        claim = await original(*args, **kwargs)
+        return replace(claim, outbound=replace(claim.outbound, reply_text="<social-runtime-data>hidden</social-runtime-data>"))
+
+    monkeypatch.setattr(repository, "claim_outbound", claim_with_internal_content)
+    await fixture.manager._handle_message(fixture.msg)
+    assert fixture.provider.sent == fixture.published == []
+
+
+@pytest.mark.asyncio
 async def test_changed_payload_same_event_id_cannot_generate_or_send(repository, tmp_path):
     fixture = await channel_fixture(repository, tmp_path)
     fixture.provider.authenticated[id(fixture.msg)] = replace(fixture.provider.authenticated[id(fixture.msg)], text="forged replay")

@@ -79,6 +79,20 @@ def test_social_kernel_loader_rejects_modified_or_symlinked_authority(tmp_path):
         assets.load_social_kernel(candidate)
 
 
+def test_verified_social_policy_omits_packaging_and_runtime_implementation_prose():
+    from deerflow.social import assets
+
+    assert "FINAL / PERSONA-REV1" in assets.load_social_kernel(ASSETS)
+    loader = getattr(assets, "load_social_conversation_policy", None)
+    assert callable(loader), "verified conversation policy projection is missing"
+    policy = loader(ASSETS)
+    assert "话题不必为业务服务" in policy
+    assert "不换身份、不捏造经历" in policy
+    assert "不能用虚构亲密关系、排他依赖或隐瞒条件获得商业同意" in policy
+    for marker in ("FINAL / PERSONA-REV1", "TurnResult", "原生单 Lead", "子Agent", "关系profile", "reply"):
+        assert marker not in policy
+
+
 def test_runtime_loader_uses_the_explicit_native_asset_root(monkeypatch, tmp_path):
     candidate = tmp_path / "package"
     shutil.copytree(ASSETS, candidate)

@@ -67,7 +67,7 @@ npm run doctor
 npm start
 ```
 
-`public-outreach-operator` 使用提交的 `package-lock.json` 固定 Appium 3 和 UiAutomator2 driver。`npm ci --ignore-scripts` 安装本地依赖，`npm run android:doctor` 检查 SDK/Java。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。社交内核安装到原生 `backend/.deer-flow/SOUL.md`；如果恰好是本项目上一版业务优先内核，它会安全迁移，用户自定义的 `SOUL.md` 不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
+`public-outreach-operator` 使用提交的 `package-lock.json` 固定 Appium 3 和 UiAutomator2 driver。`npm ci --ignore-scripts` 安装本地依赖，`npm run android:doctor` 检查 SDK/Java。`bootstrap` 校验固定的上游 commit 是当前 fork 的祖先，然后直接在 fork 根目录安装依赖；它不 clone 第二份 DeerFlow，也不应用产品补丁。会话原则安装到原生 `backend/.deer-flow/SOUL.md`，不包含开发版本和阶段说明。安装器只迁移完全匹配的上一版官方社交模板或业务优先模板，用户自定义的 `SOUL.md`（包括追加内容）不会被覆盖。`start` 也会执行同一次安全安装/迁移，再从 fork 根目录运行 `make start`。
 
 当前开发与验收阶段，`npm start` 默认临时注入 `DEER_FLOW_AUTH_DISABLED=1`，使用 DeerFlow 内置的本地 synthetic admin，因而不会被 `/setup` 的账号密码注册页拦住。设 `DEER_FLOW_AUTH_DISABLED=0` 可在本地保留正常认证；`DEER_FLOW_ENV` 或 `ENVIRONMENT` 为 `prod`/`production` 时，启动器强制设置 `DEER_FLOW_AUTH_DISABLED=0`，进入原生账号、密码和会话认证流程。只有本地绕过实际生效时才输出 synthetic admin 警告。
 

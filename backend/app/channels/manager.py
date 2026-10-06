@@ -2211,6 +2211,11 @@ class ChannelManager:
         action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
         if action is not None and action.state != "pending":
             return
+        from deerflow.social.public_reply import validate_public_reply
+
+        # Old pending rows must not launch another run or reach a provider.
+        if action is not None:
+            validate_public_reply(action.reply_text)
         # Even a previously committed pending action needs the native run's
         # successful terminal status (a crash/error may follow graph commit).
         # Gateway's durable idempotency key joins the original run on replay.
@@ -2219,6 +2224,9 @@ class ChannelManager:
         action = await repository.get_turn_outbound(envelope.scope, envelope.source_event_id)
         if action is None or action.state != "pending":
             return
+        # Replayed outbox rows may predate the current model-output contract.
+        # Refuse internal-context echoes before claiming or invoking a provider.
+        validate_public_reply(action.reply_text)
         # A long native run may outlive connection revocation/ownership transfer.
         current_connection = await self._connection_repo.find_connection_by_external_identity(provider=resolved.provider, external_account_id=resolved.external_account_id, workspace_id=resolved.workspace_id)
         if not isinstance(current_connection, dict) or any(current_connection.get(key) != connection.get(key) for key in ("id", "owner_user_id", "provider", "external_account_id", "workspace_id", "status")):
@@ -2233,6 +2241,7 @@ class ChannelManager:
         )
         if not claim.claimed:
             return
+        validate_public_reply(claim.outbound.reply_text)
         outbound = OutboundMessage(
             channel_name=resolved.provider,
             chat_id=resolved.chat_id,

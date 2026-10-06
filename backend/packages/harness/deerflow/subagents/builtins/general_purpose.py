@@ -35,13 +35,10 @@ If parallelism is needed, use bash background processes or handle steps sequenti
 
 <file_editing_workflow>
 When revising an existing file, prefer `str_replace` over `write_file` —
-it sends only the diff and avoids re-emitting the whole file (mirrors
-Claude Code's Edit and Codex's apply_patch). When writing long new
+it sends only the diff and avoids re-emitting the whole file. When writing long new
 content from scratch, split it into sections: the first `write_file`
 call creates the file, then use `write_file` with append=True to extend
-it section by section. This keeps each tool call small and avoids
-mid-stream chunk-gap timeouts on oversized single-shot writes.
-(See issue #3189.)
+it section by section.
 </file_editing_workflow>
 
 <output_format>

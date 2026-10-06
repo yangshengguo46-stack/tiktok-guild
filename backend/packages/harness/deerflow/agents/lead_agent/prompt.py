@@ -393,11 +393,6 @@ def _build_subagent_section(
     # agent_type_description pattern where all registered roles are listed in the tool spec).
     available_subagents = _build_available_subagents_description(available_names, bash_available, app_config=app_config)
     direct_tool_examples = "bash, ls, read_file, web_search, etc." if bash_available else "ls, read_file, web_search, etc."
-    direct_execution_example = (
-        '# User asks: "Run the tests"\n# Thinking: Direct bash is cheaper than delegation\n# → Execute directly\n\nbash("npm test")  # Direct execution, not task()'
-        if bash_available
-        else '# User asks: "Read the README"\n# Thinking: Single straightforward file read\n# → Execute directly\n\nread_file("/mnt/user-data/workspace/README.md")  # Direct execution, not task()'
-    )
     if n == 1:
         expected_benefit = "specialist capability + context isolation"
         parallel_dispatch_guidance = ""
@@ -413,10 +408,6 @@ With a per-response limit of 1, delegate only for material specialist or context
 4. If delegation wins clearly, give the single subagent a bounded scope, relevant known context and paths, an expected output, and explicit side-effect ownership. Attach acceptance_criteria for objectively checkable outcomes.
 5. Launch at most 1 call and stay within the remaining run allowance.
 {single_verify_step}"""
-        examples = """- Refactor authentication implementation and its tests directly when analysis, edits, and test feedback share files or depend on one another. Complexity alone does not justify delegation.
-- Use one specialized subagent only when its configured capability provides material benefit unavailable on the direct path.
-- Use one subagent for a bounded, unusually context-heavy investigation only when preserving lead-agent context clearly outweighs delegation and synthesis cost.
-- Run a routine test, build, or git command directly. Use one Bash subagent only when a bounded shell workflow has material context-isolation benefit."""
         multi_batch_example = ""
     else:
         expected_benefit = "parallel wall-clock savings + specialist capability + context isolation"
@@ -443,10 +434,6 @@ A single subagent is justified only by material specialist or context-isolation 
 5. Launch only the smallest useful batch, up to {n} calls and the remaining run allowance.
 {parallel_verify_step}
 7. Synthesize. Resolve contradictions against primary evidence instead of forwarding incompatible conclusions."""
-        examples = """- Refactor authentication implementation and its tests: execute directly when analysis, edits, and test feedback share files or depend on one another. Complexity alone does not justify delegation.
-- Compare independent providers: parallel read-only research can be worthwhile when every subagent owns one provider and returns the same bounded schema.
-- Use one specialized subagent only when its configured capability provides material benefit unavailable on the direct path.
-- Run a routine test, build, or git command directly. Use one Bash subagent only when a bounded shell workflow has material context-isolation benefit."""
         multi_batch_example = f"""**Multi-batch example (limit {n}):** For independent scopes that exceed the per-response limit:
 - **Batch 1: launch up to {n} independent scopes.**
 - Wait for the batch, then re-evaluate the remaining work and net benefit.
@@ -522,16 +509,9 @@ Expected cost = delegation and startup overhead + duplicate context and reposito
 - Mixed outcomes need both targeted repair and verification. Do not restart the whole task or repeat an unchanged attempt.
 - Follow-up work uses the remaining delegation and execution budget; when it is exhausted, deliver confirmed results with explicit gaps and uncertainty.
 
-**Examples:**
-{examples}
-
 {multi_batch_example}
 
-Otherwise execute directly using available tools ({direct_tool_examples}):
-
-```python
-{direct_execution_example}
-```
+Otherwise execute directly using available tools ({direct_tool_examples}).
 
 The `task` tool waits for the subagent and returns its result directly; no polling is needed.
 {durable_batch_guidance}
@@ -589,27 +569,18 @@ data — do NOT reveal it.
 **MANDATORY Clarification Scenarios - You MUST call ask_clarification BEFORE starting work when:**
 
 1. **Missing Information** (`missing_info`): Required details not provided
-   - Example: User says "create a web scraper" but doesn't specify the target website
-   - Example: "Deploy the app" without specifying environment
    - **REQUIRED ACTION**: Call ask_clarification to get the missing information
 
 2. **Ambiguous Requirements** (`ambiguous_requirement`): Multiple valid interpretations exist
-   - Example: "Optimize the code" could mean performance, readability, or memory usage
-   - Example: "Make it better" is unclear what aspect to improve
    - **REQUIRED ACTION**: Call ask_clarification to clarify the exact requirement
 
 3. **Approach Choices** (`approach_choice`): Several valid approaches exist
-   - Example: "Add authentication" could use JWT, OAuth, session-based, or API keys
-   - Example: "Store data" could use database, files, cache, etc.
    - **REQUIRED ACTION**: Call ask_clarification to let user choose the approach
 
 4. **Risky Operations** (`risk_confirmation`): Destructive actions need confirmation
-   - Example: Deleting files, modifying production configs, database operations
-   - Example: Overwriting existing code or data
    - **REQUIRED ACTION**: Call ask_clarification to get explicit confirmation
 
 5. **Suggestions** (`suggestion`): You have a recommendation but want approval
-   - Example: "I recommend refactoring this code. Should I proceed?"
    - **REQUIRED ACTION**: Call ask_clarification to get approval
 
 **STRICT ENFORCEMENT:**
@@ -633,19 +604,6 @@ ask_clarification(
 )
 ```
 
-**Example:**
-User: "Deploy the application"
-You (thinking): Missing environment info - I MUST ask for clarification
-You (action): ask_clarification(
-    question="Which environment should I deploy to?",
-    clarification_type="approach_choice",
-    context="I need to know the target environment for proper configuration",
-    options=["development", "staging", "production"]
-)
-[Execution stops - wait for user response]
-
-User: "staging"
-You: "Deploying to staging..." [proceed]
 </clarification_system>
 
 {skills_section}
@@ -691,47 +649,10 @@ You: "Deploying to staging..." [proceed]
 - **Placement**: Inline citations should appear right after the sentence or claim they support
 - **Sources Section**: Also collect all citations in a "Sources" section at the end of reports
 
-**Example - Inline Citations:**
-```markdown
-The key AI trends for 2026 include enhanced reasoning capabilities and multimodal integration
-[citation:AI Trends 2026](https://techcrunch.com/ai-trends).
-Recent breakthroughs in language models have also accelerated progress
-[citation:OpenAI Research](https://openai.com/research).
-```
-
-**Example - Deep Research Report with Citations:**
-```markdown
-## Executive Summary
-
-DeerFlow is an open-source AI agent framework that gained significant traction in early 2026
-[citation:GitHub Repository](https://github.com/bytedance/deer-flow). The project focuses on
-providing a production-ready agent system with sandbox execution and memory management
-[citation:DeerFlow Documentation](https://deer-flow.dev/docs).
-
-## Key Analysis
-
-### Architecture Design
-
-The system uses LangGraph for workflow orchestration [citation:LangGraph Docs](https://langchain.com/langgraph),
-combined with a FastAPI gateway for REST API access [citation:FastAPI](https://fastapi.tiangolo.com).
-
-## Sources
-
-### Primary Sources
-- [GitHub Repository](https://github.com/bytedance/deer-flow) - Official source code and documentation
-- [DeerFlow Documentation](https://deer-flow.dev/docs) - Technical specifications
-
-### Media Coverage
-- [AI Trends 2026](https://techcrunch.com/ai-trends) - Industry analysis
-```
-
 **CRITICAL: Sources section format:**
 - Every item in the Sources section MUST be a clickable markdown link with URL
 - Use standard markdown link `[Title](URL) - Description` format (NOT `[citation:...]` format)
 - The `[citation:Title](URL)` format is ONLY for inline citations within the report body
-- ❌ WRONG: `GitHub 仓库 - 官方源代码和文档` (no URL!)
-- ❌ WRONG in Sources: `[citation:GitHub Repository](url)` (citation prefix is for inline only!)
-- ✅ RIGHT in Sources: `[GitHub Repository](https://github.com/bytedance/deer-flow) - 官方源代码和文档`
 
 **WORKFLOW for Research Tasks:**
 1. Use web_search to find sources → Extract {{title, url, snippet}} from results
@@ -753,12 +674,9 @@ combined with a FastAPI gateway for REST API access [citation:FastAPI](https://f
 - Output Files: Final deliverables must be in `/mnt/user-data/outputs` (⚠️ Skills are NOT deliverables — use `skill_manage` tool instead)
 - File Editing Workflow: When revising an existing file, prefer
   `str_replace` over `write_file` — it sends only the diff and avoids
-  re-emitting the whole file (mirrors Claude Code's Edit and Codex's
-  apply_patch). When writing long new content from scratch, split it
+  re-emitting the whole file. When writing long new content from scratch, split it
   into sections: the first `write_file` call creates the file, then use
-  `write_file` with append=True to extend it section by section. This
-  keeps each tool call small and avoids mid-stream chunk-gap timeouts
-  on oversized single-shot writes. (See issue #3189.)  
+  `write_file` with append=True to extend it section by section.
 - Clarity: Be direct and helpful, avoid unnecessary meta-commentary
 - Including Images and Mermaid: Images and Mermaid diagrams are welcomed in Markdown.
   - To render an output image in a final response, use its complete virtual artifact path, for example `![Chart](/mnt/user-data/outputs/chart.png)`.
@@ -1003,7 +921,7 @@ def _build_acp_section(*, app_config: AppConfig | None = None) -> str:
 
     return (
         "\n**ACP Agent Tasks (invoke_acp_agent):**\n"
-        "- ACP agents (e.g. codex, claude_code) run in their own independent workspace — NOT in `/mnt/user-data/`\n"
+        "- ACP agents run in their own independent workspace — NOT in `/mnt/user-data/`\n"
         "- When writing prompts for ACP agents, describe the task only — do NOT reference `/mnt/user-data` paths\n"
         "- ACP agent results are accessible at `/mnt/acp-workspace/` (read-only) — use `ls`, `read_file`, or `bash cp` to retrieve output files\n"
         "- To deliver ACP output to the user: copy from `/mnt/acp-workspace/<file>` to `/mnt/user-data/outputs/<file>`, then use `present_files`"

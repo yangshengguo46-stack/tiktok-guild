@@ -59,10 +59,39 @@ test('preserves a genuinely customized native Lead SOUL', async (t) => {
   assert.equal(await readFile(target, 'utf8'), 'operator customization\n');
 });
 
-test('packaged SOUL uses the social kernel and cannot restore the obsolete business-first opening', async () => {
+test('migrates the exact previous packaged social SOUL to the current kernel', async (t) => {
+  const forkRoot = await soulFixture();
+  t.after(() => rm(forkRoot, { recursive: true, force: true }));
+  const target = path.join(forkRoot, 'backend', '.deer-flow', 'SOUL.md');
+  await mkdir(path.dirname(target), { recursive: true });
+  const previous = await readFile(new URL('./fixtures/guild-soul-social-2026-10-01.md', import.meta.url), 'utf8');
+  await writeFile(target, previous);
+  const result = await ensureGuildSoul({ packageRoot: forkRoot });
+  assert.deepEqual(result, { installed: true, migrated: true, path: target });
+  assert.equal(await readFile(target, 'utf8'), 'new social kernel\n');
+});
+
+test('preserves operator edits appended to a previous packaged social SOUL', async (t) => {
+  const forkRoot = await soulFixture();
+  t.after(() => rm(forkRoot, { recursive: true, force: true }));
+  const target = path.join(forkRoot, 'backend', '.deer-flow', 'SOUL.md');
+  await mkdir(path.dirname(target), { recursive: true });
+  const previous = await readFile(new URL('./fixtures/guild-soul-social-2026-10-01.md', import.meta.url), 'utf8');
+  const customized = `${previous}\noperator customization\n`;
+  await writeFile(target, customized);
+  const result = await ensureGuildSoul({ packageRoot: forkRoot });
+  assert.deepEqual(result, { installed: false, migrated: false, path: target });
+  assert.equal(await readFile(target, 'utf8'), customized);
+});
+
+test('installs a stable conversation kernel without development stage instructions', async (t) => {
+  const forkRoot = await soulFixture();
+  t.after(() => rm(forkRoot, { recursive: true, force: true }));
   const packaged = await readFile(new URL('../config/guild-soul.md', import.meta.url), 'utf8');
-  assert.match(packaged, /默认社交内核/u);
-  assert.match(packaged, /当前 DeerFlow 普通 Chat 中直接输出最终回复/u);
-  assert.doesNotMatch(packaged, /Help the operator recruit and support suitable creators/u);
-  assert.doesNotMatch(packaged, /输出 TurnResult/u);
+  await writeFile(path.join(forkRoot, 'ops', 'guild-runtime', 'config', 'guild-soul.md'), packaged);
+  const { path: target } = await ensureGuildSoul({ packageRoot: forkRoot });
+  const installed = await readFile(target, 'utf8');
+  assert.match(installed, /会话原则/u);
+  assert.doesNotMatch(installed, /默认社交内核|FINAL|PERSONA-REV1|普通 Chat|未来接入|当前尚未验证|本项目事实边界/u);
+  assert.doesNotMatch(installed, /Help the operator recruit and support suitable creators|输出 TurnResult/u);
 });

@@ -92,10 +92,19 @@ user-facing behavior and the relevant `AGENTS.md` for development changes.
 
 The native external-social Lead loads the approved `SOCIAL_KERNEL.md` through
 `deerflow.social.assets.load_social_kernel`, checking its fixed SHA-256 before
-combining it with the private TurnResult contract. Keep management Chat's
+`load_social_conversation_policy` projects the conversation principles, omits
+the packaging heading/runtime implementation paragraph and rewrites the style
+paragraph without host/profile terminology. The frozen attachment is unchanged.
+The projected policy is combined with the private TurnResult contract. Keep management Chat's
 ordinary prompt separate; do not substitute mutable local SOUL content or six
 persona instructions into an external turn. `tests/test_social_assets.py` and
 `tests/test_social_lead_runtime.py` pin the artifact and actual ModelRequest.
+`social.public_reply.validate_public_reply` rejects known internal context or
+protocol echoes before turn commit and at ChannelManager's replay/claim/send
+boundaries. It is a bounded signature guard, not a semantic leak classifier;
+ordinary AI disclosure, technical conversation and truthful delivery status
+remain allowed. Rejected output does not trigger a replacement generation or
+provider send, and no private reply text is included in the refusal log.
 
 `tests/test_social_postgres.py` is opt-in with `TEST_POSTGRES_URI`, matching the
 existing MCP/scheduler integration tests. It creates disposable schemas via

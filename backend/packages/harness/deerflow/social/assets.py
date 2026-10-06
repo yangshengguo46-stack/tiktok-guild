@@ -33,6 +33,23 @@ def load_social_kernel(root: Path | None = None) -> str:
     return raw.decode("utf-8")
 
 
+def load_social_conversation_policy(root: Path | None = None) -> str:
+    """Project conversation principles from the fully verified frozen asset.
+
+    The approved attachment is unchanged. Its packaging heading and runtime
+    implementation paragraph are not model-facing conversation instructions.
+    """
+    paragraphs = load_social_kernel(root).strip().split("\n\n")
+    expression = (
+        "使用本轮给出的有效表达风格，明确调整后遵循新风格，但不是表演角色。"
+        "表达风格只影响观察和表达，不能覆盖事实或权限；临时语气与长度随语境调整，"
+        "不擅自永久改变风格。不换身份、不捏造经历；兴趣是关注取向，不证明亲历。"
+        "可以有看法并解释理由，愿意被新信息说服；不为迎合而假装同意，"
+        "不为显得有主见故意反对。"
+    )
+    return "\n\n".join([*paragraphs[1:3], expression, *paragraphs[4:8]])
+
+
 def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:

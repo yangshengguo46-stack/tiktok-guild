@@ -2622,31 +2622,24 @@ def write_file_tool(
 ) -> str:
     """Write text content to a file. By default this overwrites the target file; set append=True to add content to the end without replacing existing content.
 
-    READ-BEFORE-WRITE (issue #3857): if the target file already exists (including
+    READ-BEFORE-WRITE: if the target file already exists (including
     append=True), you must have read its CURRENT version with read_file first.
     Any write invalidates earlier reads, so re-read between consecutive
     modifications — a ranged read of the relevant section is enough. Writes
     that fail this check are rejected with an error.
 
-    SIZE POLICY (issue #3189):
+    SIZE POLICY:
     A single non-append write_file call must not exceed 80 KB of UTF-8 content.
-    Oversized single-shot writes correlate with LLM streaming chunk-gap
-    timeouts because the tool-call JSON payload — which the model must emit as
-    one continuous stream — grows past the safe window. For larger documents,
+    For larger documents,
     use ONE of these strategies (write_file rejects oversized payloads with an
     actionable error):
 
       1. INCREMENTAL EDIT (preferred for revisions): after the initial write,
-         use `str_replace` to surgically update sections. This is the same
-         pattern Claude Code's Write+Edit and OpenAI Codex's apply_patch use,
-         and keeps each tool call's payload small.
+         use `str_replace` to update sections and keep each call small.
       2. APPEND-IN-CHUNKS (for new long-form content): split the document into
          sections, each well under 80 KB. First call uses append=False to
          create the file; subsequent calls use append=True. The 80 KB cap does
          NOT apply to append=True calls.
-
-    Operators can override the cap via env var `DEERFLOW_WRITE_FILE_MAX_BYTES`
-    (0 disables the guard entirely). Raising it risks streaming timeouts.
 
     Args:
         path: The **absolute** path to the file to write to.
@@ -2664,8 +2657,7 @@ def write_file_tool(
                     f"{max_bytes}-byte single-call limit. Split the content into smaller "
                     "pieces: either (a) write the first section now, then use `str_replace` "
                     "for further edits, or (b) call write_file again with append=True "
-                    "carrying the next section. See SIZE POLICY in the tool docstring "
-                    "or issue #3189 for the rationale."
+                    "carrying the next section."
                 )
     try:
         requested_path = path
@@ -2723,7 +2715,7 @@ def str_replace_tool(
     """Replace a substring in a file with another substring.
     If `replace_all` is False (default), the substring to replace must appear **exactly once** in the file.
 
-    READ-BEFORE-WRITE (issue #3857): you must have read the file's CURRENT
+    READ-BEFORE-WRITE: you must have read the file's CURRENT
     version with read_file first; any write invalidates earlier reads.
 
     Args:

@@ -11,6 +11,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
+from deerflow.social.public_reply import validate_public_reply
+
 
 def bounded_text(value: str, name: str, limit: int, *, allow_empty: bool = False) -> None:
     if not isinstance(value, str) or len(value) > limit or (not allow_empty and not value.strip()):
@@ -155,6 +157,7 @@ class TurnResult:
     def __post_init__(self) -> None:
         if self.reply is not None:
             bounded_text(self.reply, "reply", 4096)
+            validate_public_reply(self.reply)
         if not isinstance(self.state_delta, tuple) or len(self.state_delta) > 16 or any(not isinstance(patch, ClaimPatch) for patch in self.state_delta):
             raise ValueError("state_delta must contain at most 16 claim patches")
         claim_ids = [patch.claim_id for patch in self.state_delta]

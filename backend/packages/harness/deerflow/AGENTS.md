@@ -110,7 +110,15 @@ assembly is bound to one sourced event; async invocation reuses the native
 host supplies the channel-safe tool allowlist, intersected with ordinary tool
 authorization before deferred setup. One `SocialTurnMiddleware` restores the
 trusted context, buffers the native model response, validates minimal JSON
-`TurnResult`, and commits before returning only assistant reply text. Native
+`TurnResult`, rejects recognizable internal-instruction/context echoes in
+`reply`, and commits before returning only assistant reply text. The social
+policy is projected only after the full frozen kernel SHA-256 check; attachment
+version headings and host implementation prose do not enter ModelRequest.
+ChannelManager checks pending historical replies before native replay and
+claim, then checks the actual claimed text before provider invocation. These
+checks do not strip text, rewrite history, synthesize receipts or retry a model;
+they reject known signatures while allowing ordinary identity/technical/status
+discussion. Native
 sanitization, guardrail authorization, sandbox audit and read-before-write
 guards remain active. Provider safety detectors run before commit. Operator
 title/memory/skill/sandbox-lifecycle and fallback/retry middleware do not run

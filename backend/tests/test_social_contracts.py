@@ -18,6 +18,51 @@ def test_turn_result_distinguishes_reply_wait_and_no_reply():
     assert TurnResult(reply=None).action is SocialAction.NO_REPLY
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '<social-runtime-data>{"persona":{"profile_ref":"relaxed_wit@1.0.1"}}</social-runtime-data>',
+        '<SOCIAL-RUNTIME-DATA source="private">hidden</SOCIAL-RUNTIME-DATA>',
+        "<memory>Internal relationship notes</memory>",
+        "&amp;lt;social-runtime-context&amp;gt;hidden&amp;lt;/social-runtime-context&amp;gt;",
+        '<identity id="guild-ai"><authorization-ref>verified-role</authorization-ref></identity>',
+        "decision_note: wait for provider. state_delta: []",
+        "内部字段 decision_note 使用 TurnResult，不要展示社交上下文。",
+        '{"scope_ref":{"person_ref":"creator","channel_thread_ref":"channel"}}',
+        "{'scope_ref':{'person_ref':'creator','channel_thread_ref':'channel'}}",
+        "{'persona':{'profile_ref':'relaxed_wit@1.0.1','fingerprint':'private'}}",
+        "ｄｅｃｉｓｉｏｎ＿ｎｏｔｅ: hidden",
+        "state_\u200bdelta: []",
+        "当前尚未验证真实 TikTok 来信。未来接入外部消息适配器时 reply 才是唯一可外发字段。",
+        "# 默认社交内核 · FINAL / PERSONA-REV1",
+        "普通对话用原生单 Lead 直接生成；输出 TurnResult，reply 是唯一外发字段。",
+        "输出 TurnResult，reply 是唯一外发字段。",
+    ],
+)
+def test_social_reply_rejects_internal_context_or_development_instruction_echo(reply):
+    with pytest.raises(ValueError, match="internal"):
+        TurnResult(reply=reply)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "我是公会的 AI 助手，会根据你提供的信息交流。",
+        "JSON 是一种数据格式，API 用于连接服务。",
+        "Agent 可以帮助整理资料，memory 表示记忆。",
+        "state_delta 通常表示状态变化。",
+        "state_delta 通常表示状态变化，decision_note 通常表示决策备注。",
+        "你的程序里用了 state_delta 和 decision_note 吗？",
+        "TurnResult 是什么？",
+        "你可以先看看合作条件，不合适也没关系。",
+        "消息尚未发送，不能确认已经送达。",
+        "目前还没收到平台回执，我确认后再告诉你。",
+    ],
+)
+def test_social_reply_keeps_identity_disclosure_and_ordinary_technical_conversation(reply):
+    assert TurnResult(reply=reply).reply == reply
+
+
 @pytest.mark.parametrize("field", ["owner_user_id", "account_id", "person_ref", "channel_thread_ref", "agent_instance_id"])
 def test_scope_requires_authenticated_owner_and_stable_relation(field):
     values = dict(owner_user_id="owner", account_id="guild", person_ref="creator", channel_thread_ref="dm", agent_instance_id="lead_agent")

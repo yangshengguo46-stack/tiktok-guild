@@ -11,6 +11,12 @@
 
 恢复会话先核对当前分支 `git status`/`git log`、主机与设备状态，再按总台账 P1–P8 继续。旧双通道记录仅为历史本地实施证据，不再启动 Web/iPhone 公开建联 pilot；已完成的 Social Runtime Task 1–10 不重复施工。全量业务审计与本轮证据见 `docs/audits/2026-09-30-business-completion-audit.md`。普通单代理任务不自动启动 Claude 协作。
 
+### 2026-10-06 提示词净化收口
+
+用户授权批次 `runtime-prompt-cleanup-20261006`，基于 `3c0785245`，使用 Codex 子 Agent 分别清理通用提示、官方 SOUL 并独立复审；未启动 Claude。根负责社交内核的校验后投影、回复防护、当前已安装 SOUL 的定向迁移和最终验收。
+
+交付与边界见 `docs/audits/2026-10-06-runtime-prompt-cleanup.md` 和唯一总台账最新条目。backend 聚焦 468、最终定向 32（重叠）、工具/权限/路由 178、ops 123 通过；附件 76 文件校验、Ruff 与 diff 检查通过。独立复审 bounded CLEAN，防护仅覆盖已知内部结构/工程文本签名。没有付费模型、手机或 TikTok 写入。本轮未发现属于本项目的运行服务，未启动或重启服务；修改将在下一次启动读取。
+
 ### 2026-09-30 审计收口
 
 - 运维修复：`ops/guild-runtime` tests **111 passed**，静态 doctor **25/25**，静态 acceptance `ok:true`；backend 运维聚焦 **47 passed**。本机三服务默认 loopback，生产环境不注入 auth bypass，日志接统一轮转器。
