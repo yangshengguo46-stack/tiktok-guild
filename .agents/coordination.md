@@ -24,6 +24,8 @@
 TKDesk、公会运营助手、经纪人插件源码快照与全部 15 份 skill，不更换活动插件安装目录。
 恢复时核对 GitHub 的 visibility、默认分支和远端 HEAD；发布范围与检查见
 `docs/audits/2026-10-20-publication-preflight.md`。本次源码公开不升级手机/provider/客户部署验收。
+已实际核验仓库 `public`、匿名网页/API HTTP 200、远端 3,398 文件与全部 15 份 skill 齐全；
+首次源码发布提交为 `5c8cdf85214457adb37ccb61c18cc10b1a8490b0`，后续文档提交保留该事实。
 
 ### 2026-09-30 审计收口
 
