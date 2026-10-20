@@ -31,6 +31,10 @@
 本轮开发提示净化与输出边界修复已完成本地验收；详情见
 [2026-10-06 提示词清理记录](../../docs/audits/2026-10-06-runtime-prompt-cleanup.md)。
 
+2026-10-20 用户授权 GitHub 公开发布。本批整理主项目与三插件的完整源码和 15 份 skill，
+保留已有代码历史，不携带真实登录态、API 密钥或运行数据库。
+见 [公开发布检查](../../docs/audits/2026-10-20-publication-preflight.md)。
+
 ### DeerFlow 人格开发材料逐项核对
 
 附件的 `CODING_AGENT_PROMPT.md` 指定先读四份核心文件：`NORTH_STAR.md`、`docs/FINAL_SPEC.md`、`docs/PERSONALITY_SYSTEM.md`、`docs/MIGRATION_FROM_FINAL.md`。连同开工指令是五份入口材料；另有 `2026-09-24-deerflow-auto-persona-design.md` 作为用户后续修订，覆盖附件中“日常由运营者手动换装”的主流程，改为 AI 基于有来源证据自动选择。`2026-09-24-deerflow-social-agent-native-runtime.md` 将主体施工拆成 Task 1–10，不能只数文件推断已经验收。
@@ -450,3 +454,20 @@ Current HEAD is `cc7275369` (implementation hardening through `97c331208`). The 
 外部 Social Lead 仍先校验完整冻结资产，再提取会话原则；未修改原始附件、manifest 或六人格资产。新 `TurnResult.reply` 在提交前拒绝已知内部结构/工程文本；ChannelManager 对历史 pending 在 replay 前、claim 前及实际 claim 输出各检查一次。拒绝时不发送、不自动重新生成、不伪造回执、不把私有文本写进拒绝日志。正常身份披露、技术字段讨论和真实发送状态仍可表达。
 
 验收：最终完整聚焦 backend **468 passed**；补齐精准原句检查后定向 **32 passed**（与前项重叠）；文件工具/安全/子 Agent 路由 **178 passed**；ops **123 passed**；冻结附件 **76 文件通过**；Ruff check/format 和 `git diff --check` 通过。独立复审 **bounded CLEAN**：前次误拦与已知标签/单引号 dump 漏拦已修复。这是已知签名防护，不能据此保证任意自然语言泄漏均被识别。本轮没有真实模型调用、平台写入或现场交付验证。
+
+## 2026-10-20 完整源码与插件公开发布
+
+用户明确要求上传并公开全部项目内容，包含爬虫插件和公会运营助手 skill。
+主仓库沿用 `yangshengguo46-stack/tiktok-guild` 和 `codex/pre-device-audit` 默认分支。
+增加 `plugins/tkdesk-agent`（0.9.0，110 文件/3 skills）、
+`plugins/tiktok-live-guild-operator`（0.15.0，62 文件/11 skills）和
+`plugins/tiktok-live-broker-operator`（0.1.0，31 文件/1 skill），含实现、配置模板、
+锁文件、测试和参考资料，原有许可声明不变。排除实际 node_modules、浏览器 profile、
+Core 授权文件、API 密钥、数据库和日志；不覆盖正在使用的本机插件实例。
+
+发布前新环境 `npm ci --ignore-scripts` 三包均通过；TKDesk 491、公会运营助手 109、
+经纪人 58 项离线测试通过（共 658）；冻结附件 76 文件校验通过。
+本地所有 Git refs 的 Gitleaks 扫描报告 15 处命中，逐项复核为上游测试/文档假值与
+公开 OpenAPI SHA-256 摘要；确切待发布树另有 15 处测试/文档假值命中，含插件的
+两个合成幂等 key。没有把扫描 exit 1 表述为零命中，也未通过宽泛 allowlist 隐藏命中。
+详情见发布检查记录。源码公开不等于真实 TikTok、手机或生产交付验收。

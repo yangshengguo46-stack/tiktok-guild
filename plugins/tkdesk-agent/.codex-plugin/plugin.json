@@ -1,0 +1,37 @@
+{
+  "name": "tkdesk-agent",
+  "version": "0.9.0+codex.20260928035305",
+  "description": "Run country-routed TikTok LIVE discovery and qualification as a headless agent plugin.",
+  "author": {
+    "name": "Local developer"
+  },
+  "license": "Proprietary",
+  "keywords": [
+    "tiktok",
+    "live",
+    "creator-discovery",
+    "mcp",
+    "browser-automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TKDesk 主播名单采集",
+    "shortDescription": "按国家线路采集、分类并交接主播名单",
+    "longDescription": "按原版固定流程并行运行目标国 PC-Web LIVE Feed 与 MobileProcessor 的 Top、条件 History、HotList、RankRecord 整榜发现，按 DisplayID 合并后进入 DataProcessor、采集子后台资格分类及 rank_type=16、region_type=1、gap=0/-1 递归扩散；半自动模式支持把用户在官方子后台手工查询的 1–30 条结果原子导入且不消耗自动查询预算。提供持久去重、滚动限额、断点续跑、审计与数字员工交接。本机 Core 密钥由 macOS 钥匙串自行生成，固定请求 scope 仅在插件内部编译且不经 MCP 暴露；用户自有 Core 与明确启用的原版发布配置分别标记来源，原版配置只在私有 loader 内解密并用于固定只读榜单，不接管公会总后台，也不发送邀约或消息。 启动时通过现有官方邀请查询界面激活人工安全验证，并将专用 TikTok 发现页面切至 LIVE 后暂停播放及延迟复查；不新增前端。 当前部署不用 TikHub 采榜单；可关闭的公开主页与近期作品研究支持语言和运营判断，默认缓存读取，显式授权付费时受请求预算约束，没有 TikHub 仍可运行原生采集和核验。",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "检查采集能力和登录状态，再从 TikTok LIVE 找一批适合公会招募的主播。",
+      "打开 TikTok 主播采集子后台并检查登录状态。",
+      "把指定采集任务的候选名单整理成待审核的数字员工交接批次。"
+    ],
+    "brandColor": "#72F6BD",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  },
+  "mcpServers": "./.mcp.json"
+}

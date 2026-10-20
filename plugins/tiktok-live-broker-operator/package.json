@@ -1,0 +1,16 @@
+{
+  "name": "tiktok-live-broker-operator-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent TikTok LIVE broker messaging MCP with a dedicated authenticated profile.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}

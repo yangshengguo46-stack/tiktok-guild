@@ -18,6 +18,17 @@ https://github.com/user-attachments/assets/a8bcadc4-e040-4cf2-8fda-dd768b999c18
 
 ## TikTok 公会 Social Runtime
 
+本项目的插件源码与 skill 一并收录在本仓库，见 [插件总入口](plugins/README.md)：
+
+| 组件 | 源码与说明 | Skills |
+| --- | --- | --- |
+| TKDesk 主播采集爬虫 | [tkdesk-agent](plugins/tkdesk-agent/README.md) | 3 份，含发现、采集后台初始化和主操作 skill |
+| 公会运营助手 | [tiktok-live-guild-operator](plugins/tiktok-live-guild-operator/README.md) | 11 份，覆盖经营审计、主播、招募、活动、营收、治理和入驻 |
+| 独立经纪人消息插件 | [tiktok-live-broker-operator](plugins/tiktok-live-broker-operator/README.md) | 1 份，使用独立经纪人身份 |
+
+这些目录包含插件声明、MCP 配置、源码、锁文件、测试和全部 skill 参考资料。
+本机密钥、TikHub 凭据、浏览器登录态、真实数据库和日志不随源码发布；使用者需配置自己的环境并登录。
+
 本 fork 已将公会社交闭环收入 DeerFlow 本体：有来源的外部事件通过原生
 Gateway/Channel 进入默认 Lead，在同一 checkpoint、权限和工具授权路径内恢复
 Identity、Self、Role、Relationship、EffectivePersona 与 TurnContext，然后产生

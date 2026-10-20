@@ -1,0 +1,13 @@
+interface:
+  display_name: "TKDesk 主播名单采集"
+  short_description: "运行持久采集任务并交接主播候选名单"
+  brand_color: "#72F6BD"
+  default_prompt: "使用 $tkdesk-agent 检查登录状态并运行一批主播发现任务。"
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "tkdesk"
+      description: "本机主播发现任务、隔离登录会话、持久去重与下游交接工具"
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true

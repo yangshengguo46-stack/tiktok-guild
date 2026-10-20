@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "tkdesk": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "set -eu; if [ -n \"${TKDESK_AGENT_SOURCE_ROOT:-}\" ] && [ -x \"$TKDESK_AGENT_SOURCE_ROOT/scripts/launch_mcp\" ]; then exec \"$TKDESK_AGENT_SOURCE_ROOT/scripts/launch_mcp\"; fi; if [ -n \"${HOME:-}\" ] && [ -x \"$HOME/plugins/tkdesk-agent/scripts/launch_mcp\" ]; then exec \"$HOME/plugins/tkdesk-agent/scripts/launch_mcp\"; fi; latest_dir=$(ls -td \"${HOME:-/nonexistent}\"/.codex/plugins/cache/*/tkdesk-agent/* 2>/dev/null | head -n 1 || true); if [ -n \"$latest_dir\" ] && [ -x \"$latest_dir/scripts/launch_mcp\" ]; then exec \"$latest_dir/scripts/launch_mcp\"; fi; echo \"TKDesk Agent launcher not found. Reinstall tkdesk-agent from the configured local marketplace.\" >&2; exit 1"
+      ],
+      "cwd": "/",
+      "enabled": true,
+      "env_vars": [
+        "HOME",
+        "LOCALAPPDATA",
+        "XDG_DATA_HOME",
+        "PATH",
+        "TKDESK_AGENT_DATA_DIR",
+        "TKDESK_AGENT_BROWSER_CHANNEL",
+        "TKDESK_NODE_PATH",
+        "TKDESK_AGENT_SOURCE_ROOT"
+      ],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 180
+    }
+  }
+}

@@ -28,6 +28,8 @@ backend/scripts/benchmark/*.jsonl
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Configuration files
 config.yaml
@@ -53,8 +55,18 @@ debug.log
 
 # pnpm
 .pnpm-store
+node_modules/
 ops/guild-runtime/public-outreach-operator/node_modules/
 sandbox_image_cache.tar
+
+# Plugin runtime state must not be published with plugin source.
+plugins/**/browser-profile/
+plugins/**/profiles/
+plugins/**/.runtime/
+plugins/**/*.sqlite
+plugins/**/*.sqlite-shm
+plugins/**/*.sqlite-wal
+plugins/**/storage-state*.json
 
 # ignore the legacy `web` folder
 web/

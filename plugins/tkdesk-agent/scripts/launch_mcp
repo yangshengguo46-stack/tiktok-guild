@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+SELF_PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# Personal-marketplace caches are versioned and may be pruned while an older
+# Codex task is still alive. Prefer the stable source checkout so both the MCP
+# process and any daemon it starts keep using a path that survives cachebusters.
+# Packaged/self-contained installs fall back to the directory containing this
+# launcher.
+PLUGIN_ROOT="$SELF_PLUGIN_ROOT"
+if [ -n "${TKDESK_AGENT_SOURCE_ROOT:-}" ] \
+  && [ -f "$TKDESK_AGENT_SOURCE_ROOT/mcp/server.js" ] \
+  && [ -f "$TKDESK_AGENT_SOURCE_ROOT/.codex-plugin/plugin.json" ]; then
+  PLUGIN_ROOT=$(CDPATH= cd -- "$TKDESK_AGENT_SOURCE_ROOT" && pwd)
+elif [ -n "${HOME:-}" ] \
+  && [ -f "$HOME/plugins/tkdesk-agent/mcp/server.js" ] \
+  && [ -f "$HOME/plugins/tkdesk-agent/.codex-plugin/plugin.json" ]; then
+  PLUGIN_ROOT=$(CDPATH= cd -- "$HOME/plugins/tkdesk-agent" && pwd)
+fi
+
+if [ -n "${TKDESK_NODE_PATH:-}" ] && [ -x "$TKDESK_NODE_PATH" ]; then
+  NODE_RUNTIME="$TKDESK_NODE_PATH"
+elif command -v node >/dev/null 2>&1; then
+  NODE_RUNTIME=$(command -v node)
+else
+  echo "TKDesk Agent requires Node.js 22.13 or newer." >&2
+  exit 1
+fi
+
+"$NODE_RUNTIME" -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 13)) process.exit(1)' || {
+  echo "TKDesk Agent requires Node.js 22.13 or newer; found $($NODE_RUNTIME --version)." >&2
+  exit 1
+}
+
+exec "$NODE_RUNTIME" "$PLUGIN_ROOT/mcp/server.js"

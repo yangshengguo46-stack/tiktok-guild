@@ -1,0 +1,27 @@
+{
+  "name": "tiktok-live-broker-operator",
+  "version": "0.1.0+codex.20260928002833",
+  "description": "Independent TikTok LIVE broker messaging plugin with its own process, profile, and broker-scoped tools.",
+  "author": {
+    "name": "yangshengguo46-stack"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TikTok LIVE 经纪人工作台",
+    "shortDescription": "使用独立的经纪人 profile 搜索主播并发送即时消息。",
+    "longDescription": "经纪人专用 MCP 工作插件，使用独立进程、浏览器 profile 和 broker_* 工具名；候选事实来自 TKDesk，发送流程绑定精确 creator_id、平台回执与会话回读。",
+    "developerName": "yangshengguo46-stack",
+    "category": "Productivity",
+    "capabilities": [
+      "Browser control",
+      "Broker-scoped messaging",
+      "Read-back verification"
+    ],
+    "defaultPrompt": [
+      "用名单里的主播 ID 搜索目标并准备经纪人消息。",
+      "检查经纪人消息发送 profile 和身份标识。"
+    ],
+    "brandColor": "#25F4EE"
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,29 @@
+{
+  "name": "tiktok-live-guild-operator",
+  "version": "0.15.0+codex.20260928002833",
+  "description": "Read and operate an authenticated TikTok LIVE guild through one direct live MCP; ordinary backstage actions run under the agent operation policy and creator removal remains approval-gated.",
+  "author": {
+    "name": "yangshengguo46-stack"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TikTok LIVE 公会运营助手",
+    "shortDescription": "读取并操作 TikTok LIVE 公会后台",
+    "longDescription": "通过一个直接 MCP 读取并操作已登录的 TikTok LIVE Backstage，提供九个业务域和十一个 Skills；普通后台写入自动执行，必须绑定准确身份与目标，并通过平台回执与读回验证；移除主播仍需明确授权。",
+    "developerName": "yangshengguo46-stack",
+    "category": "Productivity",
+    "capabilities": [
+      "Browser control",
+      "Read",
+      "Agent-operated writes",
+      "Approval-gated creator removal"
+    ],
+    "defaultPrompt": [
+      "看看公会现在经营得怎么样，缺失数据单独标出来。",
+      "分析这个主播近期的直播、流水和风险。",
+      "结合当前数据制定未来三个月的公会经营计划。"
+    ],
+    "brandColor": "#FF2D55"
+  },
+  "mcpServers": "./.mcp.json"
+}

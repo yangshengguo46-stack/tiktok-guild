@@ -99,11 +99,18 @@ deer-flow/
 │                                    # Managed integration skill packs are global at .deer-flow/integrations/skills/{provider}/
 │                                    # Integration credentials and enabled state remain per-user
 ├── contracts/                      # Cross-component JSON contracts (e.g. subagent status, skill review)
+├── plugins/                        # Source snapshots: TKDesk discovery, guild operator and broker operator, including skills
 ├── examples/deerflow-extension-example/ # Standalone package demonstrating all extension contribution kinds
 ├── scripts/                        # Root orchestration scripts invoked by the Makefile (check, configure, doctor, support_bundle, serve, nginx, docker, deploy, setup_wizard)
 ├── tests/                          # Root-level tests (currently tests/skills/ — public skill tests)
 └── docs/                           # Cross-cutting docs, plans, and design notes
 ```
+
+`plugins/` contains publishable source snapshots of the three independently
+owned MCP plugins, including their skill packages. Follow each plugin's README,
+package lock and local tests. Never copy installed `node_modules`, browser
+profiles, credentials, runtime databases or logs into these source snapshots.
+Publishing this source does not certify real TikTok actions or receipts.
 
 Third-party extensions are loaded from a top-level `plugins:` list in `config.yaml`
 (operator-controlled on purpose — that list causes code to be imported, so it is deliberately

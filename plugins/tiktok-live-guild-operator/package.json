@@ -1,0 +1,21 @@
+{
+  "name": "tiktok-live-guild-operator-plugin",
+  "version": "0.15.0",
+  "private": true,
+  "type": "module",
+  "description": "TikTok LIVE guild operator for authenticated reads and agent-operated backstage actions; creator removal remains approval-gated.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:protocol": "node --test test/protocol.test.mjs",
+    "test:acceptance": "node --test test/acceptance.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "dependencies": {
+    "playwright": "1.59.1"
+  },
+  "bundleDependencies": [
+    "playwright"
+  ]
+}

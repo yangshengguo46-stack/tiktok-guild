@@ -17,6 +17,14 @@
 
 交付与边界见 `docs/audits/2026-10-06-runtime-prompt-cleanup.md` 和唯一总台账最新条目。backend 聚焦 468、最终定向 32（重叠）、工具/权限/路由 178、ops 123 通过；附件 76 文件校验、Ruff 与 diff 检查通过。独立复审 bounded CLEAN，防护仅覆盖已知内部结构/工程文本签名。没有付费模型、手机或 TikTok 写入。本轮未发现属于本项目的运行服务，未启动或重启服务；修改将在下一次启动读取。
 
+### 2026-10-20 GitHub 公开发布
+
+用户明确授权把完整项目上传自己的 GitHub 并公开，包含爬虫插件和公会运营助手 skill。
+本批在既有 `yangshengguo46-stack/tiktok-guild` 发布主项目及 `plugins/` 下的
+TKDesk、公会运营助手、经纪人插件源码快照与全部 15 份 skill，不更换活动插件安装目录。
+恢复时核对 GitHub 的 visibility、默认分支和远端 HEAD；发布范围与检查见
+`docs/audits/2026-10-20-publication-preflight.md`。本次源码公开不升级手机/provider/客户部署验收。
+
 ### 2026-09-30 审计收口
 
 - 运维修复：`ops/guild-runtime` tests **111 passed**，静态 doctor **25/25**，静态 acceptance `ok:true`；backend 运维聚焦 **47 passed**。本机三服务默认 loopback，生产环境不注入 auth bypass，日志接统一轮转器。

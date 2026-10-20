@@ -1,0 +1,22 @@
+{
+  "name": "tkdesk-agent-mcp",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node mcp/server.js",
+    "daemon": "node daemon/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "playwright": "1.59.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0"
+  }
+}

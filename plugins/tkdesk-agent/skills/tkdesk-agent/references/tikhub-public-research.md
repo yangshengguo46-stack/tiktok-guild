@@ -1,0 +1,13 @@
+# Optional TikHub public research
+
+TKDesk owns this optional observation cache. DeerFlow Lead uses `creator_research_status` and `research_candidate`; there is no extra agent, browser, ranking source or official-backstage dependency.
+
+The provider config is the existing owner-only `providers/tikhub.json` under the TKDesk data directory. Credentials never belong in MCP arguments. Add `research: {"enabled": true, "dailyRequestLimit": 10, "cacheTtlSeconds": 86400}` to enable research. Set `research.enabled:false` to disable paid queries while cached evidence remains readable. This deployment sets `ranking.enabled:false`. With no config or key, discovery/qualification/communication retain their own native owners.
+
+`research_candidate` accepts one existing `candidateId`, `includePosts` (default false), `allowPaid` (default false), a user-grounded `reason` and, for paid calls, a unique stable `requestId`. Never change requestId just to retry a timeout/error. Identical ids replay local results; different payloads conflict. Attempts are charged against a UTC daily call-count limit before dispatch, including uncertain failures; prices and actual billable totals are not inferred. Calls have fixed endpoint, no redirects, body-size/total-time bounds and no automatic retry.
+
+The only current endpoints are [public profile](https://docs.tikhub.io/186826106e0) and [recent posts V3](https://docs.tikhub.io/362985064e0). A lookup uses at most two GETs; posts are the first latest page, capped at 10, never full history. Identity is checked against the collected handle and known immutable id. Observations retain source, endpoint, local fetch time, provider request id and explicit metric units. Cache, request idempotence and budget live in TKDesk's existing SQLite DB; they do not change candidate discovery projection or official eligibility.
+
+Assess language from bio/caption text and direct conversation; uncertainty remains unknown. Topics and recent posting/engagement can inform conversation and operational suggestions, but are samples, not LIVE schedule, income, qualification or delivery evidence. Optional failure returns usable core state and a bounded reason. Error/unknown attempts are fenced through the configured cache TTL; an interrupted operation remains unresolved until reviewed, never silently retried. Diagnostic history retains 90 days. Daily budget resets at 00:00 UTC.
+
+Future optional research can evaluate comments, public LIVE metadata or post trends only after endpoint-specific evidence and a separate budget review. Creator-authorized cookie APIs, writes and ranking endpoints are outside this feature.
